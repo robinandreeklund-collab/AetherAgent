@@ -33,10 +33,20 @@ struct TestResult {
 
 impl TestResult {
     fn pass(name: &'static str, message: impl Into<String>, duration_ms: u64) -> Self {
-        Self { name, passed: true, message: message.into(), duration_ms }
+        Self {
+            name,
+            passed: true,
+            message: message.into(),
+            duration_ms,
+        }
     }
     fn fail(name: &'static str, message: impl Into<String>, duration_ms: u64) -> Self {
-        Self { name, passed: false, message: message.into(), duration_ms }
+        Self {
+            name,
+            passed: false,
+            message: message.into(),
+            duration_ms,
+        }
     }
 }
 
@@ -47,10 +57,7 @@ fn parse_json(s: &str) -> serde_json::Value {
 }
 
 fn get_nodes(v: &serde_json::Value) -> Vec<serde_json::Value> {
-    v["nodes"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default()
+    v["nodes"].as_array().cloned().unwrap_or_default()
 }
 
 fn node_labels(v: &serde_json::Value) -> Vec<String> {
@@ -86,7 +93,11 @@ fn ndcg_at_k(rels: &[f32], k: usize) -> f32 {
         .enumerate()
         .map(|(i, &r)| r / (i as f32 + 2.0).log2())
         .sum();
-    if idcg > 0.0 { dcg / idcg } else { 0.0 }
+    if idcg > 0.0 {
+        dcg / idcg
+    } else {
+        0.0
+    }
 }
 
 fn causal_count(v: &serde_json::Value) -> usize {
@@ -403,7 +414,11 @@ fn test_news_basic_retrieval() -> TestResult {
 
     let labels = node_labels(&v);
     if labels.is_empty() {
-        return TestResult::fail("news_basic_retrieval", "Inga noder returnerades", t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "news_basic_retrieval",
+            "Inga noder returnerades",
+            t.elapsed().as_millis() as u64,
+        );
     }
 
     // Rank-1 ska inte vara ren boilerplate (nav-länk utan innehåll).
@@ -431,7 +446,10 @@ fn test_news_basic_retrieval() -> TestResult {
     if top1_is_pure_boilerplate {
         return TestResult::fail(
             "news_basic_retrieval",
-            format!("Ren boilerplate på rank-1: {:?}", &top1_label[..top1_label.len().min(80)]),
+            format!(
+                "Ren boilerplate på rank-1: {:?}",
+                &top1_label[..top1_label.len().min(80)]
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -444,7 +462,10 @@ fn test_news_basic_retrieval() -> TestResult {
     if !has_content {
         return TestResult::fail(
             "news_basic_retrieval",
-            format!("Inget relevant innehåll i resultat. Labels: {:?}", &labels[..labels.len().min(5)]),
+            format!(
+                "Inget relevant innehåll i resultat. Labels: {:?}",
+                &labels[..labels.len().min(5)]
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -467,23 +488,38 @@ fn test_ecommerce_price_retrieval() -> TestResult {
 
     let labels = node_labels(&v);
     if labels.is_empty() {
-        return TestResult::fail("ecommerce_price_retrieval", "Inga noder", t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "ecommerce_price_retrieval",
+            "Inga noder",
+            t.elapsed().as_millis() as u64,
+        );
     }
 
-    let has_price = labels.iter().any(|l| l.contains('$') || l.contains("1,299") || l.contains("2,099"));
-    let has_product = labels_contain(&labels, "ultrabook") || labels_contain(&labels, "gaminglaptop");
+    let has_price = labels
+        .iter()
+        .any(|l| l.contains('$') || l.contains("1,299") || l.contains("2,099"));
+    let has_product =
+        labels_contain(&labels, "ultrabook") || labels_contain(&labels, "gaminglaptop");
 
     if !has_price {
         return TestResult::fail(
             "ecommerce_price_retrieval",
-            format!("Inget pris hittades i resultat. Labels: {:?}", &labels[..labels.len().min(8)]),
+            format!(
+                "Inget pris hittades i resultat. Labels: {:?}",
+                &labels[..labels.len().min(8)]
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
 
     TestResult::pass(
         "ecommerce_price_retrieval",
-        format!("OK. Pris: {}, Produkt: {}. {} noder totalt.", has_price, has_product, labels.len()),
+        format!(
+            "OK. Pris: {}, Produkt: {}. {} noder totalt.",
+            has_price,
+            has_product,
+            labels.len()
+        ),
         t.elapsed().as_millis() as u64,
     )
 }
@@ -499,24 +535,38 @@ fn test_wikipedia_fact_retrieval() -> TestResult {
 
     let labels = node_labels(&v);
     if labels.is_empty() {
-        return TestResult::fail("wikipedia_fact_retrieval", "Inga noder", t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "wikipedia_fact_retrieval",
+            "Inga noder",
+            t.elapsed().as_millis() as u64,
+        );
     }
 
-    let has_equation = labels.iter().any(|l| l.contains("co") || l.contains("6co") || l.contains("glucose") || l.contains("chemical"));
-    let has_efficiency = labels_contain(&labels, "efficiency") || labels.iter().any(|l| l.contains("11%") || l.contains("6%"));
+    let has_equation = labels.iter().any(|l| {
+        l.contains("co") || l.contains("6co") || l.contains("glucose") || l.contains("chemical")
+    });
+    let has_efficiency = labels_contain(&labels, "efficiency")
+        || labels.iter().any(|l| l.contains("11%") || l.contains("6%"));
 
     // Nav/footer-boilerplate ska inte dominera
     let top3: Vec<_> = get_nodes(&v).into_iter().take(3).collect();
     let nav_in_top3 = top3.iter().any(|n| {
         let label = n["label"].as_str().unwrap_or("").to_lowercase();
-        label.contains("donate") || label.contains("log in") || label.contains("privacy") || label.contains("cookie")
+        label.contains("donate")
+            || label.contains("log in")
+            || label.contains("privacy")
+            || label.contains("cookie")
     });
 
     if nav_in_top3 {
         return TestResult::fail(
             "wikipedia_fact_retrieval",
-            format!("Nav-boilerplate i top-3: {:?}",
-                top3.iter().map(|n| n["label"].as_str().unwrap_or("?")).collect::<Vec<_>>()),
+            format!(
+                "Nav-boilerplate i top-3: {:?}",
+                top3.iter()
+                    .map(|n| n["label"].as_str().unwrap_or("?"))
+                    .collect::<Vec<_>>()
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -524,14 +574,22 @@ fn test_wikipedia_fact_retrieval() -> TestResult {
     if !has_equation && !has_efficiency {
         return TestResult::fail(
             "wikipedia_fact_retrieval",
-            format!("Ingen faktainnehåll. Labels: {:?}", &labels[..labels.len().min(5)]),
+            format!(
+                "Ingen faktainnehåll. Labels: {:?}",
+                &labels[..labels.len().min(5)]
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
 
     TestResult::pass(
         "wikipedia_fact_retrieval",
-        format!("OK. Ekvation: {}, Effektivitet: {}. {} noder.", has_equation, has_efficiency, labels.len()),
+        format!(
+            "OK. Ekvation: {}, Effektivitet: {}. {} noder.",
+            has_equation,
+            has_efficiency,
+            labels.len()
+        ),
         t.elapsed().as_millis() as u64,
     )
 }
@@ -552,7 +610,10 @@ fn test_spa_detection() -> TestResult {
     if !spa_detected && node_count > 3 {
         return TestResult::fail(
             "spa_detection",
-            format!("SPA ej detekterat. {} noder returnerade, spa_detected=false", node_count),
+            format!(
+                "SPA ej detekterat. {} noder returnerade, spa_detected=false",
+                node_count
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -575,11 +636,20 @@ fn test_swedish_rate_retrieval() -> TestResult {
 
     let labels = node_labels(&v);
     if labels.is_empty() {
-        return TestResult::fail("swedish_rate_retrieval", "Inga noder", t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "swedish_rate_retrieval",
+            "Inga noder",
+            t.elapsed().as_millis() as u64,
+        );
     }
 
-    let has_rate = labels.iter().any(|l| l.contains("2,25") || l.contains("styrränta") || l.contains("2.25"));
-    let has_kpif = labels_contain(&labels, "kpif") || labels.iter().any(|l| l.contains("1,4") || l.contains("inflation"));
+    let has_rate = labels
+        .iter()
+        .any(|l| l.contains("2,25") || l.contains("styrränta") || l.contains("2.25"));
+    let has_kpif = labels_contain(&labels, "kpif")
+        || labels
+            .iter()
+            .any(|l| l.contains("1,4") || l.contains("inflation"));
 
     // Rank-1 ska innehålla räntevärdet (inte en kort nav-länk).
     // Notera: "Penningpolitik" (nav-länk) rankar högt pga exakt term-match i goal.
@@ -588,7 +658,10 @@ fn test_swedish_rate_retrieval() -> TestResult {
     if !has_rate {
         return TestResult::fail(
             "swedish_rate_retrieval",
-            format!("Styrräntan hittades inte i top-10. Labels: {:?}", &labels[..labels.len().min(6)]),
+            format!(
+                "Styrräntan hittades inte i top-10. Labels: {:?}",
+                &labels[..labels.len().min(6)]
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -608,7 +681,11 @@ fn test_swedish_rate_retrieval() -> TestResult {
         );
     }
 
-    let note = if labels.iter().take(5).any(|l| l == "penningpolitik" || l == "personuppgiftspolicy") {
+    let note = if labels
+        .iter()
+        .take(5)
+        .any(|l| l == "penningpolitik" || l == "personuppgiftspolicy")
+    {
         " (OBS: nav-länkar rankar i top-5 pga term-match — känd rankningsegenskap)"
     } else {
         ""
@@ -616,7 +693,13 @@ fn test_swedish_rate_retrieval() -> TestResult {
 
     TestResult::pass(
         "swedish_rate_retrieval",
-        format!("OK. Ränta: {}, KPIF: {}. {} noder.{}", has_rate, has_kpif, labels.len(), note),
+        format!(
+            "OK. Ränta: {}, KPIF: {}. {} noder.{}",
+            has_rate,
+            has_kpif,
+            labels.len(),
+            note
+        ),
         t.elapsed().as_millis() as u64,
     )
 }
@@ -627,7 +710,13 @@ fn test_feedback_learning_loop() -> TestResult {
     let t = Instant::now();
     let html = news_html();
     let url = "https://test.crfr.local/news-learning";
-    let keywords = ["climate", "prime minister", "alzheimer", "ai chip", "stock market"];
+    let keywords = [
+        "climate",
+        "prime minister",
+        "alzheimer",
+        "ai chip",
+        "stock market",
+    ];
 
     let goals = [
         "breaking climate news emergency summit today",
@@ -637,9 +726,9 @@ fn test_feedback_learning_loop() -> TestResult {
         "new alzheimer drug clinical trial results",
         "AI chip technology announcement performance",
         "tech company artificial intelligence hardware chip",
-        "climate emergency summit global warming policy",   // test Q
-        "stock markets economic data financial news today",  // test Q
-        "alzheimer research medical breakthrough drug",      // test Q
+        "climate emergency summit global warming policy", // test Q
+        "stock markets economic data financial news today", // test Q
+        "alzheimer research medical breakthrough drug",   // test Q
     ];
 
     let mut baseline_ndcg = 0.0f32;
@@ -653,10 +742,17 @@ fn test_feedback_learning_loop() -> TestResult {
         let nodes = get_nodes(&v);
 
         // Binär relevans: innehåller noden minst ett keyword?
-        let rels: Vec<f32> = nodes.iter().map(|n| {
-            let label = n["label"].as_str().unwrap_or("").to_lowercase();
-            if keywords.iter().any(|kw| label.contains(kw)) { 1.0 } else { 0.0 }
-        }).collect();
+        let rels: Vec<f32> = nodes
+            .iter()
+            .map(|n| {
+                let label = n["label"].as_str().unwrap_or("").to_lowercase();
+                if keywords.iter().any(|kw| label.contains(kw)) {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
+            .collect();
 
         let ndcg = ndcg_at_k(&rels, 5);
         let causal = causal_count(&v);
@@ -670,7 +766,8 @@ fn test_feedback_learning_loop() -> TestResult {
 
         // Under training (Q1-Q7): ge feedback på relevanta noder
         if i < 7 {
-            let relevant_ids: Vec<u64> = nodes.iter()
+            let relevant_ids: Vec<u64> = nodes
+                .iter()
                 .filter(|n| {
                     let label = n["label"].as_str().unwrap_or("").to_lowercase();
                     keywords.iter().any(|kw| label.contains(kw))
@@ -690,7 +787,10 @@ fn test_feedback_learning_loop() -> TestResult {
     let test_avg = test_ndcg / 3.0;
     let final_causal = *causal_per_iter.last().unwrap_or(&0);
     let _final_boost = *causal_boost_per_iter.last().unwrap_or(&0.0);
-    let max_boost_seen = causal_boost_per_iter.iter().cloned().fold(0.0_f64, f64::max);
+    let max_boost_seen = causal_boost_per_iter
+        .iter()
+        .cloned()
+        .fold(0.0_f64, f64::max);
 
     // Causal boost ska ha vuxit över iterationer
     let boost_grew = max_boost_seen > 0.01;
@@ -713,7 +813,10 @@ fn test_feedback_learning_loop() -> TestResult {
 
     TestResult::pass(
         "feedback_learning_loop",
-        format!("OK. {}. boost_grew={}, has_causal={}", msg, boost_grew, has_causal),
+        format!(
+            "OK. {}. boost_grew={}, has_causal={}",
+            msg, boost_grew, has_causal
+        ),
         t.elapsed().as_millis() as u64,
     )
 }
@@ -741,7 +844,8 @@ fn test_suppression_learning() -> TestResult {
         let nodes = get_nodes(&v);
 
         // Feedback: markera innehållsnoder som lyckade, INTE boilerplate
-        let content_ids: Vec<u64> = nodes.iter()
+        let content_ids: Vec<u64> = nodes
+            .iter()
             .filter(|n| {
                 let label = n["label"].as_str().unwrap_or("").to_lowercase();
                 keywords.iter().any(|kw| label.contains(kw))
@@ -759,36 +863,52 @@ fn test_suppression_learning() -> TestResult {
     let v = parse_json(&raw);
     let top5: Vec<_> = get_nodes(&v).into_iter().take(5).collect();
 
-    let boilerplate_in_top5 = top5.iter().filter(|n| {
-        let label = n["label"].as_str().unwrap_or("").to_lowercase();
-        // BigMedia-boilerplate
-        (label.contains("bigmedia") && label.len() < 60)
-            || label.contains("sign in")
-            || label.contains("subscribe")
-            || label.contains("all rights reserved")
-            || label.contains("privacy policy")
-            || label.contains("cookie")
-            || label.contains("advertise")
-    }).count();
+    let boilerplate_in_top5 = top5
+        .iter()
+        .filter(|n| {
+            let label = n["label"].as_str().unwrap_or("").to_lowercase();
+            // BigMedia-boilerplate
+            (label.contains("bigmedia") && label.len() < 60)
+                || label.contains("sign in")
+                || label.contains("subscribe")
+                || label.contains("all rights reserved")
+                || label.contains("privacy policy")
+                || label.contains("cookie")
+                || label.contains("advertise")
+        })
+        .count();
 
-    let content_in_top5 = top5.iter().filter(|n| {
-        let label = n["label"].as_str().unwrap_or("").to_lowercase();
-        keywords.iter().any(|kw| label.contains(kw))
-    }).count();
+    let content_in_top5 = top5
+        .iter()
+        .filter(|n| {
+            let label = n["label"].as_str().unwrap_or("").to_lowercase();
+            keywords.iter().any(|kw| label.contains(kw))
+        })
+        .count();
 
     let msg = format!(
         "Boilerplate i top-5: {}/5, Innehåll i top-5: {}/5. Top: {:?}",
         boilerplate_in_top5,
         content_in_top5,
-        top5.iter().map(|n| n["label"].as_str().unwrap_or("?")).collect::<Vec<_>>()
+        top5.iter()
+            .map(|n| n["label"].as_str().unwrap_or("?"))
+            .collect::<Vec<_>>()
     );
 
     // Tolerant: vi räknar som lyckat om innehåll >= boilerplate
     if content_in_top5 == 0 && boilerplate_in_top5 >= 3 {
-        return TestResult::fail("suppression_learning", format!("Suppression verkar inte fungera. {}", msg), t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "suppression_learning",
+            format!("Suppression verkar inte fungera. {}", msg),
+            t.elapsed().as_millis() as u64,
+        );
     }
 
-    TestResult::pass("suppression_learning", format!("OK. {}", msg), t.elapsed().as_millis() as u64)
+    TestResult::pass(
+        "suppression_learning",
+        format!("OK. {}", msg),
+        t.elapsed().as_millis() as u64,
+    )
 }
 
 /// Testar att goal-clustering håller separata weights per goal-typ
@@ -799,10 +919,12 @@ fn test_goal_clustering_isolation() -> TestResult {
 
     // Träna på pris-queries
     for _ in 0..3 {
-        let raw = aether_agent::parse_crfr(html, "price laptop cost pris $", url, 10, false, "json");
+        let raw =
+            aether_agent::parse_crfr(html, "price laptop cost pris $", url, 10, false, "json");
         let v = parse_json(&raw);
         let nodes = get_nodes(&v);
-        let price_ids: Vec<u64> = nodes.iter()
+        let price_ids: Vec<u64> = nodes
+            .iter()
             .filter(|n| {
                 let l = n["label"].as_str().unwrap_or("").to_lowercase();
                 l.contains('$') || l.contains("1,299") || l.contains("price")
@@ -815,7 +937,14 @@ fn test_goal_clustering_isolation() -> TestResult {
     }
 
     // Nu fråga om en helt annan goal — "add to cart" knapp
-    let raw2 = aether_agent::parse_crfr(html, "add to cart button buy purchase", url, 10, false, "json");
+    let raw2 = aether_agent::parse_crfr(
+        html,
+        "add to cart button buy purchase",
+        url,
+        10,
+        false,
+        "json",
+    );
     let v2 = parse_json(&raw2);
     let labels2 = node_labels(&v2);
 
@@ -824,19 +953,32 @@ fn test_goal_clustering_isolation() -> TestResult {
 
     // Priser ska kunna finnas MEN ska inte totalt dominera för knapp-query
     let price_count = labels2.iter().filter(|l| l.contains('$')).count();
-    let button_count = labels2.iter().filter(|l| l.contains("add to cart") || l.contains("cart")).count();
+    let button_count = labels2
+        .iter()
+        .filter(|l| l.contains("add to cart") || l.contains("cart"))
+        .count();
 
     let msg = format!(
         "Knapp-query: has_button={}, buttons={}, prices={}. Labels: {:?}",
-        has_button, button_count, price_count,
+        has_button,
+        button_count,
+        price_count,
         &labels2[..labels2.len().min(5)]
     );
 
     if !has_button {
-        return TestResult::fail("goal_clustering_isolation", format!("Knapp-query returnerade inga knappar. {}", msg), t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "goal_clustering_isolation",
+            format!("Knapp-query returnerade inga knappar. {}", msg),
+            t.elapsed().as_millis() as u64,
+        );
     }
 
-    TestResult::pass("goal_clustering_isolation", format!("OK. {}", msg), t.elapsed().as_millis() as u64)
+    TestResult::pass(
+        "goal_clustering_isolation",
+        format!("OK. {}", msg),
+        t.elapsed().as_millis() as u64,
+    )
 }
 
 /// Testar implicit feedback (via response text)
@@ -872,12 +1014,20 @@ fn test_implicit_feedback() -> TestResult {
 
     // Det viktiga: feedback ska ha körts utan fel
     if status == "error" || status == "no_field" {
-        return TestResult::fail("implicit_feedback", format!("Feedback misslyckades: {}", msg), t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "implicit_feedback",
+            format!("Feedback misslyckades: {}", msg),
+            t.elapsed().as_millis() as u64,
+        );
     }
 
     // Om marked > 0, ska causal boost ha vuxit
     let _node_count_before = node_count_before; // suppress warning
-    TestResult::pass("implicit_feedback", format!("OK. {}", msg), t.elapsed().as_millis() as u64)
+    TestResult::pass(
+        "implicit_feedback",
+        format!("OK. {}", msg),
+        t.elapsed().as_millis() as u64,
+    )
 }
 
 /// Testar multi-goal API
@@ -899,13 +1049,20 @@ fn test_multi_goal() -> TestResult {
     let error = v["error"].as_str();
 
     if let Some(err) = error {
-        return TestResult::fail("multi_goal", format!("Multi-goal fel: {}", err), t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "multi_goal",
+            format!("Multi-goal fel: {}", err),
+            t.elapsed().as_millis() as u64,
+        );
     }
 
     if !has_results {
         return TestResult::fail(
             "multi_goal",
-            format!("Inga resultat från multi-goal. Response: {}", &raw[..raw.len().min(200)]),
+            format!(
+                "Inga resultat från multi-goal. Response: {}",
+                &raw[..raw.len().min(200)]
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -925,14 +1082,21 @@ fn test_domain_transfer() -> TestResult {
     let url1 = "https://news.crfr.local/page1";
     let url2 = "https://news.crfr.local/page2"; // samma domän!
     let goal = "breaking news headlines today";
-    let keywords = ["climate", "ai chip", "alzheimer", "petabit", "internet speed"];
+    let keywords = [
+        "climate",
+        "ai chip",
+        "alzheimer",
+        "petabit",
+        "internet speed",
+    ];
 
     // Träna url1
     for _ in 0..3 {
         let raw = aether_agent::parse_crfr(html1, goal, url1, 10, false, "json");
         let v = parse_json(&raw);
         let nodes = get_nodes(&v);
-        let relevant_ids: Vec<u64> = nodes.iter()
+        let relevant_ids: Vec<u64> = nodes
+            .iter()
             .filter(|n| {
                 let l = n["label"].as_str().unwrap_or("").to_lowercase();
                 keywords.iter().any(|kw| l.contains(kw))
@@ -952,7 +1116,11 @@ fn test_domain_transfer() -> TestResult {
     let transfer_err = transfer_v["error"].as_str();
 
     if let Some(err) = transfer_err {
-        return TestResult::fail("domain_transfer", format!("Transfer fel: {}", err), t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "domain_transfer",
+            format!("Transfer fel: {}", err),
+            t.elapsed().as_millis() as u64,
+        );
     }
 
     // Kör url2 — ska ha priors från url1s domain
@@ -967,17 +1135,32 @@ fn test_domain_transfer() -> TestResult {
         &labels2[..labels2.len().min(3)]
     );
 
-    TestResult::pass("domain_transfer", format!("OK. {}", msg), t.elapsed().as_millis() as u64)
+    TestResult::pass(
+        "domain_transfer",
+        format!("OK. {}", msg),
+        t.elapsed().as_millis() as u64,
+    )
 }
 
 /// Edge cases: tom HTML
 fn test_edge_empty_html() -> TestResult {
     let t = Instant::now();
-    let raw = aether_agent::parse_crfr("", "anything", "https://test.crfr.local/empty", 10, false, "json");
+    let raw = aether_agent::parse_crfr(
+        "",
+        "anything",
+        "https://test.crfr.local/empty",
+        10,
+        false,
+        "json",
+    );
     let v = parse_json(&raw);
 
     if v.is_null() {
-        return TestResult::fail("edge_empty_html", "Returnerade null istället för tom struktur", t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "edge_empty_html",
+            "Returnerade null istället för tom struktur",
+            t.elapsed().as_millis() as u64,
+        );
     }
 
     let nodes = get_nodes(&v);
@@ -992,7 +1175,10 @@ fn test_edge_empty_html() -> TestResult {
 fn test_edge_giant_text_node() -> TestResult {
     let t = Instant::now();
     let giant_text = "word ".repeat(10_000); // 50 000 chars
-    let html = format!("<html><body><p>{}</p><h1>The actual answer is here</h1></body></html>", giant_text);
+    let html = format!(
+        "<html><body><p>{}</p><h1>The actual answer is here</h1></body></html>",
+        giant_text
+    );
     let goal = "actual answer here";
     let url = "https://test.crfr.local/giant";
 
@@ -1029,11 +1215,17 @@ fn test_edge_unicode() -> TestResult {
     let v = parse_json(&raw);
 
     if v.is_null() {
-        return TestResult::fail("edge_unicode", "Krasch vid unicode HTML", t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "edge_unicode",
+            "Krasch vid unicode HTML",
+            t.elapsed().as_millis() as u64,
+        );
     }
 
     let labels = node_labels(&v);
-    let has_rate = labels.iter().any(|l| l.contains("3,50") || l.contains("3.50") || l.contains("taux") || l.contains("intér"));
+    let has_rate = labels.iter().any(|l| {
+        l.contains("3,50") || l.contains("3.50") || l.contains("taux") || l.contains("intér")
+    });
 
     TestResult::pass(
         "edge_unicode",
@@ -1059,7 +1251,11 @@ fn test_edge_invalid_feedback_ids() -> TestResult {
 
     // Ska inte krascha — returnera giltig JSON
     if fb.is_null() {
-        return TestResult::fail("edge_invalid_feedback_ids", "Krasch vid ogiltiga node-IDs", t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "edge_invalid_feedback_ids",
+            "Krasch vid ogiltiga node-IDs",
+            t.elapsed().as_millis() as u64,
+        );
     }
 
     let status = fb["status"].as_str().unwrap_or("?");
@@ -1080,7 +1276,11 @@ fn test_edge_feedback_no_field() -> TestResult {
     let fb = parse_json(&fb_raw);
 
     if fb.is_null() {
-        return TestResult::fail("edge_feedback_no_field", "Krasch: null vid feedback utan fält", t.elapsed().as_millis() as u64);
+        return TestResult::fail(
+            "edge_feedback_no_field",
+            "Krasch: null vid feedback utan fält",
+            t.elapsed().as_millis() as u64,
+        );
     }
 
     let status = fb["status"].as_str().unwrap_or("?");
@@ -1114,7 +1314,10 @@ fn test_cache_js_variant_separation() -> TestResult {
     if js_eval == no_js_eval && js_eval {
         return TestResult::fail(
             "cache_js_variant_separation",
-            format!("Båda varianter har js_eval={} — cache-separering kanske saknas", js_eval),
+            format!(
+                "Båda varianter har js_eval={} — cache-separering kanske saknas",
+                js_eval
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -1132,7 +1335,10 @@ fn test_cache_js_variant_separation() -> TestResult {
 
     TestResult::pass(
         "cache_js_variant_separation",
-        format!("OK. js_eval_flag={}, no_js_flag=false, no_boost_after_js_feedback={:.4}", js_eval, boost_no),
+        format!(
+            "OK. js_eval_flag={}, no_js_flag=false, no_boost_after_js_feedback={:.4}",
+            js_eval, boost_no
+        ),
         t.elapsed().as_millis() as u64,
     )
 }
@@ -1163,7 +1369,10 @@ fn test_save_load_roundtrip() -> TestResult {
     if save_check.is_null() || save_check["error"].is_string() {
         return TestResult::fail(
             "save_load_roundtrip",
-            format!("crfr_save returnerade fel. Svar: {}", &save_raw[..save_raw.len().min(200)]),
+            format!(
+                "crfr_save returnerade fel. Svar: {}",
+                &save_raw[..save_raw.len().min(200)]
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -1176,7 +1385,11 @@ fn test_save_load_roundtrip() -> TestResult {
     if load_status != "ok" && load_status != "loaded" {
         return TestResult::fail(
             "save_load_roundtrip",
-            format!("crfr_load misslyckades. Status={}, Svar={}", load_status, &load_raw[..load_raw.len().min(200)]),
+            format!(
+                "crfr_load misslyckades. Status={}, Svar={}",
+                load_status,
+                &load_raw[..load_raw.len().min(200)]
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
@@ -1204,7 +1417,8 @@ fn test_causal_boost_accumulation() -> TestResult {
         let v = parse_json(&raw);
         let nodes = get_nodes(&v);
 
-        let relevant_ids: Vec<u64> = nodes.iter()
+        let relevant_ids: Vec<u64> = nodes
+            .iter()
             .filter(|n| {
                 let l = n["label"].as_str().unwrap_or("").to_lowercase();
                 keywords.iter().any(|kw| l.contains(kw))
@@ -1254,7 +1468,8 @@ fn test_miss_count_not_inflated() -> TestResult {
     let nodes1 = get_nodes(&v1);
 
     // Ge feedback enbart på alzheimer-noden
-    let alz_ids: Vec<u64> = nodes1.iter()
+    let alz_ids: Vec<u64> = nodes1
+        .iter()
         .filter(|n| {
             let l = n["label"].as_str().unwrap_or("").to_lowercase();
             l.contains("alzheimer") || l.contains("drug")
@@ -1289,12 +1504,19 @@ fn test_miss_count_not_inflated() -> TestResult {
     if !climate_in_results && !nodes2.is_empty() {
         return TestResult::fail(
             "miss_count_not_inflated",
-            format!("MÖJLIG BUGG: Climate-noder borta efter alzheimer-feedback. {}", msg),
+            format!(
+                "MÖJLIG BUGG: Climate-noder borta efter alzheimer-feedback. {}",
+                msg
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
 
-    TestResult::pass("miss_count_not_inflated", format!("OK. {}", msg), t.elapsed().as_millis() as u64)
+    TestResult::pass(
+        "miss_count_not_inflated",
+        format!("OK. {}", msg),
+        t.elapsed().as_millis() as u64,
+    )
 }
 
 /// Prestandatest — 1000-nods DOM ska parsas under 500ms (release) / 2000ms (debug)
@@ -1315,7 +1537,14 @@ fn test_performance_large_dom() -> TestResult {
                <p>Article {} discusses important information about subject matter {} in detail.</p>
                <span class="price">${}.00</span>
                <button>Read more {}</button></article>"#,
-            i, i % 10, i % 5, i % 24, i, i, (i * 10 + 99), i
+            i,
+            i % 10,
+            i % 5,
+            i % 24,
+            i,
+            i,
+            (i * 10 + 99),
+            i
         ));
     }
     html.push_str("</main>\n</body></html>");
@@ -1337,20 +1566,34 @@ fn test_performance_large_dom() -> TestResult {
     if parse_ms > limit_ms {
         return TestResult::fail(
             "performance_large_dom",
-            format!("För långsam! {}ms > {}ms ({} build). {} noder.",
-                parse_ms, limit_ms,
-                if cfg!(debug_assertions) { "debug" } else { "release" },
-                node_count),
+            format!(
+                "För långsam! {}ms > {}ms ({} build). {} noder.",
+                parse_ms,
+                limit_ms,
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                },
+                node_count
+            ),
             t.elapsed().as_millis() as u64,
         );
     }
 
     TestResult::pass(
         "performance_large_dom",
-        format!("OK. {}ms (<{}ms, {} build). {} noder returnerade.",
-            parse_ms, limit_ms,
-            if cfg!(debug_assertions) { "debug" } else { "release" },
-            node_count),
+        format!(
+            "OK. {}ms (<{}ms, {} build). {} noder returnerade.",
+            parse_ms,
+            limit_ms,
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            },
+            node_count
+        ),
         t.elapsed().as_millis() as u64,
     )
 }
@@ -1366,32 +1609,47 @@ fn main() {
     type TestFn = fn() -> TestResult;
     let tests: Vec<(&str, TestFn)> = vec![
         // Grundläggande retrieval
-        ("Nyhetssida — basic retrieval",            test_news_basic_retrieval),
-        ("E-handel — pris-retrieval",               test_ecommerce_price_retrieval),
-        ("Wikipedia — faktaretrieval",              test_wikipedia_fact_retrieval),
-        ("SPA-detection",                           test_spa_detection),
-        ("Svenska — styrränta",                     test_swedish_rate_retrieval),
+        ("Nyhetssida — basic retrieval", test_news_basic_retrieval),
+        ("E-handel — pris-retrieval", test_ecommerce_price_retrieval),
+        ("Wikipedia — faktaretrieval", test_wikipedia_fact_retrieval),
+        ("SPA-detection", test_spa_detection),
+        ("Svenska — styrränta", test_swedish_rate_retrieval),
         // Lärande och feedback
-        ("Feedback-loop (10 iters, nDCG@5)",        test_feedback_learning_loop),
-        ("Suppression learning",                    test_suppression_learning),
-        ("Goal-clustering isolation",               test_goal_clustering_isolation),
-        ("Implicit feedback (via response text)",   test_implicit_feedback),
-        ("Multi-goal API",                          test_multi_goal),
-        ("Domain transfer",                         test_domain_transfer),
-        ("Causal boost accumulation",               test_causal_boost_accumulation),
+        (
+            "Feedback-loop (10 iters, nDCG@5)",
+            test_feedback_learning_loop,
+        ),
+        ("Suppression learning", test_suppression_learning),
+        ("Goal-clustering isolation", test_goal_clustering_isolation),
+        (
+            "Implicit feedback (via response text)",
+            test_implicit_feedback,
+        ),
+        ("Multi-goal API", test_multi_goal),
+        ("Domain transfer", test_domain_transfer),
+        ("Causal boost accumulation", test_causal_boost_accumulation),
         // Cache och persistens
-        ("Cache: JS/non-JS separation",             test_cache_js_variant_separation),
-        ("Save/load roundtrip",                     test_save_load_roundtrip),
+        (
+            "Cache: JS/non-JS separation",
+            test_cache_js_variant_separation,
+        ),
+        ("Save/load roundtrip", test_save_load_roundtrip),
         // Bug-hunt
-        ("miss_count ej uppblåst",                  test_miss_count_not_inflated),
+        ("miss_count ej uppblåst", test_miss_count_not_inflated),
         // Edge cases
-        ("Edge: tom HTML",                          test_edge_empty_html),
-        ("Edge: gigantisk text-nod",               test_edge_giant_text_node),
-        ("Edge: unicode HTML",                      test_edge_unicode),
-        ("Edge: ogiltiga feedback-IDs",             test_edge_invalid_feedback_ids),
-        ("Edge: feedback utan fält",                test_edge_feedback_no_field),
+        ("Edge: tom HTML", test_edge_empty_html),
+        ("Edge: gigantisk text-nod", test_edge_giant_text_node),
+        ("Edge: unicode HTML", test_edge_unicode),
+        (
+            "Edge: ogiltiga feedback-IDs",
+            test_edge_invalid_feedback_ids,
+        ),
+        ("Edge: feedback utan fält", test_edge_feedback_no_field),
         // Prestanda
-        ("Prestanda: 1000-nods DOM (build-adaptiv)",  test_performance_large_dom),
+        (
+            "Prestanda: 1000-nods DOM (build-adaptiv)",
+            test_performance_large_dom,
+        ),
     ];
 
     let mut results: Vec<TestResult> = Vec::new();
@@ -1400,7 +1658,11 @@ fn main() {
         print!("  ▶  {:<50}", name);
         std::io::Write::flush(&mut std::io::stdout()).ok();
         let result = func();
-        let status = if result.passed { "✓ PASS" } else { "✗ FAIL" };
+        let status = if result.passed {
+            "✓ PASS"
+        } else {
+            "✗ FAIL"
+        };
         println!("  {}  ({}ms)", status, result.duration_ms);
         if !result.passed {
             println!("         → {}", result.message);
