@@ -109,6 +109,11 @@ struct ParseCrfrParams {
     /// MUST call crfr_feedback after using broad mode to teach the system.
     #[serde(default)]
     broad_mode: Option<String>,
+    /// Follow high-relevance links: fetch top link targets, run CRFR, and merge results.
+    /// Adds up to 3 followed links with up to 3 extra nodes each.
+    /// Use when links are clearly relevant but you need the linked content.
+    #[serde(default)]
+    follow_links: bool,
 }
 
 fn default_crfr_top_n() -> u32 {
@@ -1617,7 +1622,167 @@ async fn handle_parse_crfr(
         )
     };
 
+    // ── Link-following: om relevanta länkar hittades, hämta och merga ──────
+    let follow_links = args
+        .get("follow_links")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if follow_links {
+        let result = follow_relevant_links(&result, goal, top_n, output_format).await;
+        return rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)]);
+    }
+
     rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)])
+}
+
+/// Link-following: extrahera hög-amplitude links, fetcha och kör CRFR, merga resultat.
+/// Max 3 links per anrop, threshold amplitude > 1.0.
+async fn follow_relevant_links(
+    original_result: &str,
+    goal: &str,
+    top_n: u32,
+    output_format: &str,
+) -> String {
+    const MAX_FOLLOW_LINKS: usize = 3;
+    const MIN_LINK_AMPLITUDE: f64 = 1.0;
+
+    // Parsa original-resultatet
+    let parsed: serde_json::Value = match serde_json::from_str(original_result) {
+        Ok(v) => v,
+        Err(_) => return original_result.to_string(),
+    };
+
+    // Extrahera link-noder med hög amplitude och action="click"
+    let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
+        Some(n) => n,
+        None => return original_result.to_string(),
+    };
+
+    let mut link_urls: Vec<(String, String)> = Vec::new(); // (label, href)
+    let original_url = parsed
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    for node in nodes {
+        let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let action = node.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        let amplitude = node
+            .get("relevance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+
+        if role == "link" && action == "click" && amplitude > MIN_LINK_AMPLITUDE {
+            // Extrahera href från value-fält (innehåller href/action URL)
+            if let Some(value) = node.get("value").and_then(|v| v.as_str()) {
+                let href = value.split_whitespace().next().unwrap_or(value);
+                if href.starts_with("http") || href.starts_with("/") {
+                    link_urls.push((label.to_string(), href.to_string()));
+                }
+            }
+        }
+
+        if link_urls.len() >= MAX_FOLLOW_LINKS {
+            break;
+        }
+    }
+
+    if link_urls.is_empty() {
+        // Inga följbara links hittade — returnera original
+        return original_result.to_string();
+    }
+
+    // Fetcha och kör CRFR på varje link
+    let mut followed_nodes: Vec<serde_json::Value> = Vec::new();
+    let mut followed_urls: Vec<String> = Vec::new();
+
+    for (label, href) in &link_urls {
+        // Resolve relativ URL mot original
+        let fetch_url = if href.starts_with("http") {
+            href.clone()
+        } else {
+            // Bygg bas-URL: "https://example.com" från original_url
+            let parts: Vec<&str> = original_url.splitn(4, '/').collect();
+            if parts.len() >= 3 {
+                format!(
+                    "{}//{}/{}",
+                    parts[0],
+                    parts[2],
+                    href.trim_start_matches('/')
+                )
+            } else {
+                continue;
+            }
+        };
+
+        if aether_agent::fetch::validate_url(&fetch_url).is_err() {
+            continue;
+        }
+
+        let config = aether_agent::types::FetchConfig::default();
+        let fetch_result = match aether_agent::fetch::fetch_page(&fetch_url, &config).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let link_result = aether_agent::parse_crfr(
+            &fetch_result.body,
+            goal,
+            &fetch_result.final_url,
+            top_n.min(5), // Max 5 noder per följd link
+            false,
+            "json",
+        );
+
+        if let Ok(link_parsed) = serde_json::from_str::<serde_json::Value>(&link_result) {
+            if let Some(link_nodes) = link_parsed.get("nodes").and_then(|n| n.as_array()) {
+                for node in link_nodes.iter().take(3) {
+                    followed_nodes.push(node.clone());
+                }
+            }
+        }
+        followed_urls.push(format!("{}: {}", label, fetch_url));
+    }
+
+    // Merga: original-resultat + followed_nodes
+    if followed_nodes.is_empty() {
+        return original_result.to_string();
+    }
+
+    let mut merged = parsed.clone();
+    if let Some(obj) = merged.as_object_mut() {
+        // Lägg till followed_links-metadata
+        obj.insert(
+            "followed_links".to_string(),
+            serde_json::json!({
+                "count": followed_urls.len(),
+                "urls": followed_urls,
+                "extra_nodes": followed_nodes.len(),
+            }),
+        );
+
+        // Merga extra noder med markering
+        if let Some(existing_nodes) = obj.get_mut("nodes").and_then(|n| n.as_array_mut()) {
+            for mut node in followed_nodes {
+                if let Some(obj) = node.as_object_mut() {
+                    obj.insert(
+                        "source".to_string(),
+                        serde_json::Value::String("followed_link".to_string()),
+                    );
+                }
+                existing_nodes.push(node);
+            }
+            // Uppdatera node_count
+            obj.insert(
+                "node_count".to_string(),
+                serde_json::json!(existing_nodes.len()),
+            );
+        }
+    }
+
+    serde_json::to_string(&merged).unwrap_or_else(|_| original_result.to_string())
 }
 
 /// Hanterar fetch_parse: hämta URL + parsa till semantiskt träd

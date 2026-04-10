@@ -540,6 +540,39 @@ fn crfr_post_filter<'a>(
                 return false;
             }
 
+            // 6. HTML ID-based sidebar/boilerplate filter
+            if let Some(ref html_id) = node.html_id {
+                let id_lower = html_id.to_lowercase();
+                if id_lower.contains("sidebar")
+                    || id_lower.contains("right-sidebar")
+                    || id_lower.contains("related-posts")
+                    || id_lower.contains("recommended")
+                    || id_lower.contains("advertisement")
+                    || id_lower.contains("ad-container")
+                    || id_lower.contains("cookie-banner")
+                {
+                    return false;
+                }
+            }
+
+            // 7. Wikipedia: academic citation hard filter (DOI + journal metadata)
+            if (lower.contains("doi :") || lower.contains("doi:"))
+                && (lower.contains("issn")
+                    || lower.contains("pmid")
+                    || lower.contains("bibcode")
+                    || lower.contains("arxiv"))
+            {
+                return false;
+            }
+
+            // 8. Wikipedia: category/maintenance metadata
+            if lower.starts_with("articles with short description")
+                || lower.starts_with("short description is different")
+                || lower.starts_with("category:articles with")
+            {
+                return false;
+            }
+
             true
         })
         .collect();
@@ -1250,6 +1283,7 @@ pub fn parse_crfr_from_tree_broad(
                     "html_id": node.html_id,
                     "name": node.name,
                     "action": node.action,
+                    "value": node.value,
                     "trust": node.trust,
                 })
             })
@@ -1419,6 +1453,7 @@ pub fn parse_crfr_from_tree_js(
                     "html_id": node.html_id,
                     "name": node.name,
                     "action": node.action,
+                    "value": node.value,
                     "trust": node.trust,
                 })
             })

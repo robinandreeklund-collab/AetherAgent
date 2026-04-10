@@ -755,6 +755,56 @@ fn metadata_penalty(label: &str) -> f32 {
     {
         return 0.3;
     }
+    // Wikipedia: academic citations (DOI, ISSN, PMID, Bibcode, hdl)
+    // These are reference metadata, not article content
+    if (lower.contains("doi :") || lower.contains("doi:"))
+        && (lower.contains("issn") || lower.contains("pmid") || lower.contains("bibcode"))
+    {
+        return 0.2; // Very strong penalty — academic citation, not content
+    }
+    // Wikipedia: category/maintenance tags ("Articles with short description", etc.)
+    if (lower.starts_with("articles with ")
+        || lower.starts_with("short description")
+        || lower.starts_with("category:articles"))
+        && lower.len() < 80
+    {
+        return 0.25;
+    }
+    // Wikipedia: bare footnote reference pattern ("^ " + author + year)
+    if label.starts_with("^ ") && label.len() > 30 {
+        // Heuristic: if it contains parenthesized year like (2021) or (2024-01-15)
+        let has_year = lower.contains("(20") || lower.contains("(19");
+        let has_academic =
+            lower.contains("doi") || lower.contains("isbn") || lower.contains("pmid");
+        if has_year || has_academic {
+            return 0.25;
+        }
+    }
+    // Reddit sidebar rules pattern: "posts must", "code of conduct", "message the mods"
+    if (lower.contains("posts must") || lower.contains("submissions must"))
+        && (lower.contains("code of conduct")
+            || lower.contains("message the mods")
+            || lower.contains("details"))
+    {
+        return 0.3; // Sidebar rules, not content
+    }
+    // Reddit: rule enumeration ("1 Observe our code of conduct", "2 Submissions must be on-topic")
+    if lower.starts_with("1 observe")
+        || lower.starts_with("2 submission")
+        || lower.starts_with("r/") && lower.contains("rules") && lower.contains("observe")
+    {
+        return 0.25;
+    }
+    // Reddit: sidebar metadata/community bookmarks
+    if (lower.contains("community bookmarks") || lower.contains("official resources"))
+        && (lower.contains("megathreads") || lower.contains("alternative venues"))
+    {
+        return 0.35;
+    }
+    // Generic sidebar pattern: "No meta posts; message the mods"
+    if lower.contains("no meta posts") && lower.contains("mods") {
+        return 0.3;
+    }
     // Search placeholder text (GitHub, etc.)
     if lower.starts_with("search ") && lower.contains("...") && lower.len() > 40 {
         return 0.3;
