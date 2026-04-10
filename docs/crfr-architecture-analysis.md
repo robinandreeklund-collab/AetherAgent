@@ -694,3 +694,189 @@ roll + label-likhet. Bara noder med `hit_count > 0` överförs.
   - Domain transfer: omedelbari effekt vid ny URL
   - Propagation weights: gradvis förbättring iteration 3-7
 ```
+
+---
+
+## 6. Analys av observerade mönster
+
+### 6.1 Observation: Headings utan barn är overrankade
+
+**Mönster:** En `<h2>Nyheter</h2>` utan underliggande noder rankas högt,
+men den innehåller ingen information — kontexten finns i barnnoderna.
+
+**Nuvarande beteende:** Headings får structural bypass (alltid med i
+cascade oavsett BM25-score) + role_priority=0.9 + heuristic_down_weight=1.2.
+Hierarkisk HDC ger 80% egen + 20% barns HV — men en heading utan barn
+saknar den 20%-kontexten helt.
+
+**Problemrot:** CRFR behandlar heading-noder som självständiga
+informationsbärare, men i verkligheten är de **navigationsmarkörer**
+som pekar på innehåll i sitt subträd.
+
+**Var i koden:**
+- `role_priority("heading")` → 0.9 (`resonance.rs:325`)
+- Structural bypass inkluderar heading alltid (`resonance.rs:1093-1107`)
+- Hierarkisk HDC: förälder får 20% barn-kontext (`resonance.rs:846-866`)
+  men tomma headings har inga barn att blenda med.
+
+**Potentiell förbättring:** En heading utan barn (leaf heading) borde:
+1. Kontextualiseras via **sibling-kontext** — headingens information
+   sitter i nästa syskon (text, lista, tabell som följer)
+2. Nedrankas om den saknar barn OCH syskon med hög amplitud
+3. Alternativt: bundla sibling-HV:er i heading (inte bara barn)
+
+### 6.2 Observation: Relevanta länkar bör följas
+
+**Mönster:** En link-nod rankas som relevant (amplitude 1.593) men
+vi utnyttjar inte länkens metadata (head, title, description).
+
+**Nuvarande beteende:** Links får role_priority=0.7 och deras
+`action`/`href` vägs via BM25F (value×2). Men vi hämtar aldrig
+länkens målsida för att verifiera relevans.
+
+**Potentiell koppling:** Adaptive crawl-modulen (`adaptive.rs`) har
+redan Thompson Sampling-baserad link-selektion och HDC saturation
+för att avgöra vilka länkar som är värda att följa. CRFR-rankade
+links med hög amplitude borde kunna trigga en on-demand crawl.
+
+**Möjlig integration:**
+```
+Om link.amplitude > threshold (t.ex. 1.0):
+  → Extrahera href
+  → Kör `fetch_parse` på länken
+  → Kör CRFR på resultatets DOM med samma goal
+  → Merge resultaten: original + länkens top-noder
+```
+
+### 6.3 Observation: Lär oss VAR informationen sitter
+
+**Mönster:** Vid "senaste nyheterna" på bbc.com borde systemet lära sig
+att information brukar sitta i `heading → child → siblings`, inte
+i navigation eller footer.
+
+**Nuvarande beteende:** CRFR lär sig PER NOD (kausalt minne) och
+PER RIKTNING+ROLL (propagation weights). Men vi bygger ingen explicit
+**strukturell profil** — "på den här typen av sida brukar svaret
+finnas i denna DOM-region".
+
+**Vad vi redan har:**
+- `propagation_stats["heading:down:news+latest"]` lär sig att
+  heading→down-propagation fungerar för news-queries
+- `page_profile()` detekterar sidtyp (text-tung, tabell-tung, nav-tung)
+- `structure_hash` detekterar template-matchning (samma DOM-struktur)
+
+**Vad som saknas — Structural Pattern Memory:**
+```
+Koncept: "URL-profil" — en karta över var information brukar finnas
+
+  bbc.com/news-profil:
+    ┌──────────────────────────────────────┐
+    │  answer_zone: depth 2-4              │
+    │  answer_roles: [heading, text, link] │
+    │  answer_pattern: heading→sibling     │
+    │  nav_zone: depth 0-1                 │
+    │  noise_zone: depth 5+                │
+    │                                      │
+    │  Dynamiskt: uppdateras vid feedback  │
+    │  Confidence: 0.0-1.0 (antal obs.)   │
+    └──────────────────────────────────────┘
+```
+
+Viktigt: allt måste vara **dynamiskt** — sidor ändras. Profilen
+ska ha temporal decay och confidence-score baserat på antal
+observationer.
+
+---
+
+## 7. Sammanfattning — Hela flödet
+
+```
+HTML Input
+    │
+    ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  1. PARSE: HTML → SemanticNode-träd (parser.rs)                   │
+│     Roller: heading, text, button, link, price, ...               │
+│     Labels: synlig text per nod                                   │
+│     Values: href, action, value                                   │
+└───────────────────────────┬────────────────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  2. FIELD BUILD: SemanticNode[] → ResonanceField (resonance.rs)   │
+│     - Platta ut träd → HashMap<id, ResonanceState>                │
+│     - HDC text-vektorer (2048-bit) per nod                        │
+│     - Hierarkisk HDC: 80% egen + 20% barns kontext               │
+│     - Bygg parent/children-mappningar                             │
+│     - Domain warm-start (om känd domän)                           │
+│     ELLER: cache-hit → återanvänd befintligt fält med allt minne  │
+└───────────────────────────┬────────────────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  3. SCORING FAS 1: Initial Resonans (per kandidat-nod)            │
+│     BM25 × 0.75 + HDC × 0.20 + Roll × 0.05 + Concept (inlärt)   │
+│     + Kausal boost (additivt, temporal decay)                     │
+│     + Answer-type boost (pris→$, datum→202x, etc.)                │
+│     × CombMNZ (konsensus 1.0-1.45)                               │
+│     × Template (×1.2 om igenkänd)                                 │
+│     × Answer shape (form-matchning)                               │
+│     × Zone penalty (nav=×0.5, banner=×0.5)                        │
+│     × Meta penalty (state injection=×0.15)                        │
+│     × Suppression (inlärd penalty, miss/query ratio)              │
+│     CASCADE: topp-200 BM25 + causal + structural → max 300        │
+└───────────────────────────┬────────────────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  4. PROPAGATION FAS 2: Chebyshev Spectral Filter                  │
+│     K=2-4 adaptivt, θ=[0.50, 0.30, 0.12, 0.05, 0.03]            │
+│     Inlärda kantvikter (DCFR regret matching per roll+riktning)   │
+│     PPR restart α=0.15 (teleport tillbaka till BM25-seed)         │
+│     RBP: prune nav/banner-subträd med dålig historik              │
+│     + Value-matched micro-boost (syskon +15%, 2-hop +8%)          │
+│     + Sibling pattern (≥3 syskon, samma roll → +10%)              │
+└───────────────────────────┬────────────────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  5. OUTPUT FAS 3: Filtrering & Ranking                            │
+│     - Threshold: amplitude > 0.01                                 │
+│     - Sort: amplitude DESC, node_id ASC                           │
+│     - Label-dedup (hash-baserad)                                  │
+│     - Diversity penalty (4:e+ syskon ×0.85)                       │
+│     - Gap detection: 30% relativ drop → klipp                     │
+│     - Post-filter: OG-tags, cookies, fotnoter, placeholders       │
+│     - Substring-dedup: ta bort noder som är delmängd av bättre    │
+└───────────────────────────┬────────────────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  6. FEEDBACK (efter svar)                                         │
+│     Explicit: crfr_feedback(url, goal, [nod_ids])                 │
+│     Implicit: implicit_feedback(goal, LLM-svar)                   │
+│     → Kausalt minne per nod (HV bundle)                           │
+│     → Suppression (query_count++, miss_count++)                   │
+│     → DCFR propagation weights (regret per kant)                  │
+│     → Concept memory (HV per goal-token)                          │
+│     → Domain registry update (warm-start för nya URL:er)          │
+│     → SQLite persist (överlevande server-restart)                  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### 7.1 Nyckeltal
+
+| Mått | Värde |
+|------|-------|
+| HDC dimension | 2048 bit |
+| BM25 cascade | top-200, max 300 kandidater |
+| Chebyshev ordning | K=2-4 (adaptivt) |
+| PPR restart α | 0.15 |
+| Gap threshold | 30% relativ drop |
+| Suppression min queries | 3 |
+| Suppression floor | 0.15 (aldrig under) |
+| Temporal decay | halvering var 10 min |
+| Concept memory | max 256 entries, FIFO |
+| Field cache | 1024 LRU (RAM) |
+| Domain registry | max 10 000 domäner |
+| Max field-noder | 10 000 |
