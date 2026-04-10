@@ -1696,15 +1696,25 @@ pub fn crfr_update_node(
 /// Use for cross-site learning (e.g., SVT → Expressen, Amazon → Zalando).
 #[wasm_bindgen]
 pub fn crfr_transfer(donor_url: &str, recipient_url: &str, min_similarity: f32) -> String {
-    let dummy: Vec<types::SemanticNode> = vec![];
-    let (donor, donor_found) = resonance::get_or_build_field(&dummy, donor_url);
-    if !donor_found {
-        return r#"{"error":"no cached donor field"}"#.to_string();
-    }
-    let (mut recipient, recipient_found) = resonance::get_or_build_field(&dummy, recipient_url);
-    if !recipient_found {
-        return r#"{"error":"no cached recipient field"}"#.to_string();
-    }
+    // BUG-FIX: get_or_build_field() does content-hash validation against the provided
+    // tree nodes. When called with an empty dummy tree (no HTML available), it always
+    // detects a "content change" and returns a fresh empty field with found=false —
+    // making transfer impossible even when the donor is cached.
+    // Fix: use peek_field() which reads directly from cache/SQLite without hash checks.
+    let donor = match resonance::peek_field(donor_url) {
+        Some(f) => f,
+        None => return r#"{"error":"no cached donor field"}"#.to_string(),
+    };
+    // For recipient: use peek_field when cached to preserve existing learning,
+    // otherwise build a new empty field to receive the transferred data.
+    let mut recipient = if let Some(f) = resonance::peek_field(recipient_url) {
+        f
+    } else {
+        // Recipient not cached: build empty field with correct url_hash
+        let dummy: Vec<types::SemanticNode> = vec![];
+        let (f, _) = resonance::get_or_build_field(&dummy, recipient_url);
+        f
+    };
     let transferred = recipient.transfer_from(&donor, min_similarity);
     resonance::save_field(&recipient);
     serde_json::json!({
