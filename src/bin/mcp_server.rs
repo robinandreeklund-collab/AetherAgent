@@ -1638,9 +1638,8 @@ async fn handle_parse_crfr(
     rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)])
 }
 
-/// Link-following: extrahera hög-amplitude links, fetcha och kör CRFR, merga resultat.
-/// Dedup: samma URL följs aldrig två gånger (normaliserad + post-redirect).
-/// Filtrerar annonser och rå SSR-data från följda sidor.
+/// Auto-follow relevant links: REPLACE link nodes with content from target pages.
+/// Smart filtering: skips nav, promo, ALL CAPS links.
 async fn follow_relevant_links(
     original_result: &str,
     goal: &str,
@@ -1654,38 +1653,34 @@ async fn follow_relevant_links(
         Ok(v) => v,
         Err(_) => return original_result.to_string(),
     };
-
     let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
-        Some(n) => n,
+        Some(n) => n.clone(),
         None => return original_result.to_string(),
     };
-
-    let original_url = parsed
-        .get("url")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
-
-    // Normalisera URL för dedup
-    let normalize = |u: &str| -> String {
-        let no_frag = u.split('#').next().unwrap_or(u);
-        let no_query = no_frag.split('?').next().unwrap_or(no_frag);
-        no_query.trim_end_matches('/').to_lowercase()
-    };
-
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    seen.insert(normalize(&original_url));
-
-    // Adaptive threshold: 50% av top-nodens amplitude, minst 0.5
     let top_amp = nodes
         .iter()
         .filter_map(|n| n.get("relevance").and_then(|v| v.as_f64()))
         .fold(0.0_f64, f64::max);
     let min_amp = (top_amp * 0.5).max(MIN_AMP_FLOOR);
+    let original_url = parsed
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let normalize = |u: &str| -> String {
+        let s = u.split('#').next().unwrap_or(u);
+        let s = s.split('?').next().unwrap_or(s);
+        s.trim_end_matches('/').to_lowercase()
+    };
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    seen.insert(normalize(&original_url));
 
-    // Extrahera unika link-noder
-    let mut link_urls: Vec<(String, String)> = Vec::new();
-    for node in nodes {
+    // Identify followable links with their indices
+    let mut targets: Vec<(usize, String, String)> = Vec::new();
+    for (idx, node) in nodes.iter().enumerate() {
+        if targets.len() >= MAX_FOLLOW {
+            break;
+        }
         let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
         let action = node.get("action").and_then(|v| v.as_str()).unwrap_or("");
         let amp = node
@@ -1693,8 +1688,10 @@ async fn follow_relevant_links(
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
         let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
-
         if role != "link" || action != "click" || amp <= min_amp {
+            continue;
+        }
+        if !should_follow_link_mcp(label) {
             continue;
         }
         let href = match node.get("value").and_then(|v| v.as_str()) {
@@ -1704,7 +1701,6 @@ async fn follow_relevant_links(
         if !href.starts_with("http") && !href.starts_with('/') {
             continue;
         }
-
         let resolved = if href.starts_with("http") {
             href.to_string()
         } else {
@@ -1720,24 +1716,22 @@ async fn follow_relevant_links(
                 continue;
             }
         };
-
         if !seen.insert(normalize(&resolved)) {
             continue;
         }
-        link_urls.push((label.to_string(), resolved));
-        if link_urls.len() >= MAX_FOLLOW {
-            break;
-        }
+        targets.push((idx, label.to_string(), resolved));
     }
 
-    if link_urls.is_empty() {
+    if targets.is_empty() {
         return original_result.to_string();
     }
 
-    let mut followed_nodes: Vec<serde_json::Value> = Vec::new();
+    // Fetch + CRFR, collect replacements per node index
+    let mut replacements: std::collections::HashMap<usize, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
     let mut followed_urls: Vec<String> = Vec::new();
 
-    for (label, fetch_url) in &link_urls {
+    for (idx, label, fetch_url) in &targets {
         if aether_agent::fetch::validate_url(fetch_url).is_err() {
             continue;
         }
@@ -1746,7 +1740,6 @@ async fn follow_relevant_links(
             Ok(r) => r,
             Err(_) => continue,
         };
-        // Post-redirect dedup: only if redirect changed the URL
         let final_norm = normalize(&fetched.final_url);
         let fetch_norm = normalize(fetch_url);
         if final_norm != fetch_norm && !seen.insert(final_norm) {
@@ -1762,22 +1755,22 @@ async fn follow_relevant_links(
             "json",
         );
 
-        if let Ok(link_parsed) = serde_json::from_str::<serde_json::Value>(&link_result) {
-            if let Some(link_nodes) = link_parsed.get("nodes").and_then(|n| n.as_array()) {
-                for node in link_nodes.iter().take(3) {
-                    let node_label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                    let ll = node_label.to_lowercase();
-                    if ll.starts_with("annons")
-                        || ll.starts_with("ad ")
+        if let Ok(lp) = serde_json::from_str::<serde_json::Value>(&link_result) {
+            if let Some(ln) = lp.get("nodes").and_then(|n| n.as_array()) {
+                let mut content: Vec<serde_json::Value> = Vec::new();
+                for node in ln.iter().take(2) {
+                    let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                    let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    let ll = nl.to_lowercase();
+                    if nl.len() < 10
+                        || ll.starts_with("annons")
                         || ll.starts_with("advertisement")
-                        || ll.contains("sponsored")
                         || ll.contains("cookie")
-                        || node_label.len() < 5
+                        || ll.contains("sponsored")
                     {
                         continue;
                     }
-                    let node_role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                    if node_role == "data"
+                    if nr == "data"
                         && node
                             .get("name")
                             .and_then(|v| v.as_str())
@@ -1785,49 +1778,84 @@ async fn follow_relevant_links(
                     {
                         continue;
                     }
-
                     let mut n = node.clone();
                     if let Some(obj) = n.as_object_mut() {
                         obj.insert("source".to_string(), serde_json::json!("followed_link"));
                         obj.insert("source_url".to_string(), serde_json::json!(fetch_url));
                     }
-                    followed_nodes.push(n);
+                    content.push(n);
+                }
+                if !content.is_empty() {
+                    replacements.insert(*idx, content);
+                    followed_urls.push(format!("{}: {}", label, fetch_url));
                 }
             }
         }
-        followed_urls.push(format!("{}: {}", label, fetch_url));
     }
 
-    if followed_nodes.is_empty() {
+    if replacements.is_empty() {
         return original_result.to_string();
+    }
+
+    // Build new nodes: replace followed links with content
+    let mut new_nodes: Vec<serde_json::Value> = Vec::new();
+    for (idx, node) in nodes.iter().enumerate() {
+        if let Some(repl) = replacements.get(&idx) {
+            for r in repl {
+                new_nodes.push(r.clone());
+            }
+        } else {
+            new_nodes.push(node.clone());
+        }
     }
 
     let mut merged = parsed.clone();
     if let Some(obj) = merged.as_object_mut() {
+        obj.insert("nodes".to_string(), serde_json::json!(new_nodes));
+        obj.insert("node_count".to_string(), serde_json::json!(new_nodes.len()));
         obj.insert(
             "followed_links".to_string(),
             serde_json::json!({
                 "count": followed_urls.len(),
                 "urls": followed_urls,
-                "extra_nodes": followed_nodes.len(),
+                "replaced_nodes": replacements.values().map(|v| v.len()).sum::<usize>(),
             }),
         );
-        let new_count = {
-            if let Some(existing) = obj.get_mut("nodes").and_then(|n| n.as_array_mut()) {
-                for node in followed_nodes {
-                    existing.push(node);
-                }
-                Some(existing.len())
-            } else {
-                None
-            }
-        };
-        if let Some(count) = new_count {
-            obj.insert("node_count".to_string(), serde_json::json!(count));
-        }
     }
-
     serde_json::to_string(&merged).unwrap_or_else(|_| original_result.to_string())
+}
+
+fn should_follow_link_mcp(label: &str) -> bool {
+    let t = label.trim();
+    if t.len() < 8 {
+        return false;
+    }
+    let upper = t.chars().filter(|c| c.is_uppercase()).count();
+    let alpha = t.chars().filter(|c| c.is_alphabetic()).count();
+    if alpha > 3 && upper as f32 / alpha as f32 > 0.7 {
+        return false;
+    }
+    let l = t.to_lowercase();
+    if l.starts_with("log in")
+        || l.starts_with("sign up")
+        || l.starts_with("register")
+        || l.starts_with("download")
+        || l.starts_with("subscribe")
+        || l.starts_with("contact")
+        || l.starts_with("privacy")
+        || l.starts_with("terms of")
+        || l.starts_with("cookie")
+        || l.starts_with("tipsa ")
+        || l == "fler artiklar"
+        || l == "read more"
+        || l == "see more"
+        || l == "show more"
+        || l == "visa mer"
+        || l == "läs mer"
+    {
+        return false;
+    }
+    true
 }
 
 /// Hanterar fetch_parse: hämta URL + parsa till semantiskt träd

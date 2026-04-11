@@ -75,12 +75,17 @@ struct ParseCrfrRequest {
     run_js: bool,
     #[serde(default = "default_json")]
     output_format: String,
-    #[serde(default)]
+    /// Auto-follow high-relevance links: fetch targets, run CRFR, replace link nodes
+    /// with extracted content. Default: true. Set false to disable.
+    #[serde(default = "default_true")]
     follow_links: bool,
 }
 
 fn default_crfr_top_n() -> u32 {
     20
+}
+fn default_true() -> bool {
+    true
 }
 fn default_json() -> String {
     "json".to_string()
@@ -1260,13 +1265,22 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     (StatusCode::OK, result).into_response()
 }
 
-/// Follow high-relevance link nodes: fetch targets, run CRFR, merge extra nodes.
-/// Deduplicates URLs (same path never fetched twice), skips original URL,
-/// filters ad/boilerplate nodes from followed pages.
+/// Auto-follow relevant link nodes: fetch targets, run CRFR, REPLACE link nodes
+/// with extracted content from the target page.
+///
+/// Smart link selection:
+/// - Only follows links with amplitude > adaptive threshold (50% of top node, min 0.5)
+/// - Skips nav-links (single words like "Product", "Home", "About")
+/// - Skips ALL CAPS promotional links ("REGISTER FOR PYCON US!")
+/// - Skips anchor-only links (#fragment), mailto:, javascript:
+/// - Max 3 links followed per request
+/// - URL dedup: same page never fetched twice (normalized + post-redirect)
+///
+/// Replacement: each followed link node is replaced by up to 2 content nodes
+/// from the target page, marked with source="followed_link" + source_url.
 #[cfg(feature = "fetch")]
 async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u32) -> String {
     const MAX_FOLLOW: usize = 3;
-    // Adaptive threshold: använd 50% av top-nodens amplitude, min 0.5
     const MIN_AMP_FLOOR: f64 = 0.5;
 
     let parsed: serde_json::Value = match serde_json::from_str(original_result) {
@@ -1275,10 +1289,10 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
     };
 
     let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
-        Some(n) => n,
+        Some(n) => n.clone(),
         None => return original_result.to_string(),
     };
-    // Adaptive MIN_AMP: 50% av top-nodens amplitude, minst 0.5
+
     let top_amp = nodes
         .iter()
         .filter_map(|n| n.get("relevance").and_then(|v| v.as_f64()))
@@ -1291,23 +1305,22 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
         .unwrap_or_default()
         .to_string();
 
-    // Normalize URL for dedup: strip trailing slash, fragment, query params
-    let normalize_url = |u: &str| -> String {
-        let without_fragment = u.split('#').next().unwrap_or(u);
-        let without_query = without_fragment
-            .split('?')
-            .next()
-            .unwrap_or(without_fragment);
-        without_query.trim_end_matches('/').to_lowercase()
+    let normalize = |u: &str| -> String {
+        let s = u.split('#').next().unwrap_or(u);
+        let s = s.split('?').next().unwrap_or(s);
+        s.trim_end_matches('/').to_lowercase()
     };
 
-    let original_normalized = normalize_url(&original_url);
-    let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
-    seen_urls.insert(original_normalized.clone());
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    seen.insert(normalize(&original_url));
 
-    // Extract unique link nodes with high amplitude
-    let mut link_urls: Vec<(String, String)> = Vec::new(); // (label, resolved_url)
-    for node in nodes {
+    // Identify which link nodes to follow + collect their indices
+    let mut follow_targets: Vec<(usize, String, String)> = Vec::new(); // (index, label, url)
+
+    for (idx, node) in nodes.iter().enumerate() {
+        if follow_targets.len() >= MAX_FOLLOW {
+            break;
+        }
         let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
         let action = node.get("action").and_then(|v| v.as_str()).unwrap_or("");
         let amp = node
@@ -1320,6 +1333,11 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
             continue;
         }
 
+        // Smart link filtering
+        if !should_follow_link(label) {
+            continue;
+        }
+
         let href = match node.get("value").and_then(|v| v.as_str()) {
             Some(v) => v.split_whitespace().next().unwrap_or(v),
             None => continue,
@@ -1329,7 +1347,6 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
             continue;
         }
 
-        // Resolve relative URLs
         let resolved = if href.starts_with("http") {
             href.to_string()
         } else {
@@ -1346,41 +1363,36 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
             }
         };
 
-        // Dedup: skip if already seen (same normalized URL)
-        let normalized = normalize_url(&resolved);
-        if !seen_urls.insert(normalized) {
-            continue; // Already seen
-        }
-
-        link_urls.push((label.to_string(), resolved));
-        if link_urls.len() >= MAX_FOLLOW {
-            break;
-        }
-    }
-
-    if link_urls.is_empty() {
-        return original_result.to_string();
-    }
-
-    // Fetch + CRFR each unique link
-    let mut followed_nodes: Vec<serde_json::Value> = Vec::new();
-    let mut followed_urls: Vec<String> = Vec::new();
-
-    for (label, fetch_url) in &link_urls {
-        if aether_agent::fetch::validate_url(fetch_url).is_err() {
+        if !seen.insert(normalize(&resolved)) {
             continue;
         }
 
+        follow_targets.push((idx, label.to_string(), resolved));
+    }
+
+    if follow_targets.is_empty() {
+        return original_result.to_string();
+    }
+
+    // Fetch + CRFR each link, collect replacement nodes per index
+    let mut replacements: std::collections::HashMap<usize, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    let mut followed_urls: Vec<String> = Vec::new();
+
+    for (idx, label, fetch_url) in &follow_targets {
+        if aether_agent::fetch::validate_url(fetch_url).is_err() {
+            continue;
+        }
         let config = aether_agent::types::FetchConfig::default();
         let fetched = match aether_agent::fetch::fetch_page(fetch_url, &config).await {
             Ok(r) => r,
             Err(_) => continue,
         };
 
-        // Post-redirect dedup: only check if redirect changed the URL
-        let final_normalized = normalize_url(&fetched.final_url);
-        let fetch_normalized = normalize_url(fetch_url);
-        if final_normalized != fetch_normalized && !seen_urls.insert(final_normalized) {
+        // Post-redirect dedup
+        let final_norm = normalize(&fetched.final_url);
+        let fetch_norm = normalize(fetch_url);
+        if final_norm != fetch_norm && !seen.insert(final_norm) {
             continue;
         }
 
@@ -1388,80 +1400,127 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
         let u = fetched.final_url.clone();
         let h = fetched.body;
         let n = top_n.min(5);
-        // Kör CRFR synkront (spawn_blocking deadlockar med FIELD_CACHE mutex)
         let link_result = aether_agent::parse_crfr(&h, &g, &u, n, false, "json");
 
         if let Ok(link_parsed) = serde_json::from_str::<serde_json::Value>(&link_result) {
             if let Some(link_nodes) = link_parsed.get("nodes").and_then(|n| n.as_array()) {
-                for node in link_nodes.iter().take(3) {
-                    // Filter: skip ad/boilerplate from followed pages
-                    let node_label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                    let node_role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                    let label_lower = node_label.to_lowercase();
-                    let skip_ad = label_lower.starts_with("annons")
-                        || label_lower.starts_with("ad ")
-                        || label_lower.starts_with("advertisement")
-                        || label_lower.contains("sponsored")
-                        || label_lower.contains("cookie");
-                    let skip_short = node_label.len() < 5;
-                    let skip_ssr = node_role == "data"
+                let mut content_nodes: Vec<serde_json::Value> = Vec::new();
+                for node in link_nodes.iter().take(2) {
+                    let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                    let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    let ll = nl.to_lowercase();
+
+                    // Filter boilerplate
+                    if nl.len() < 10
+                        || ll.starts_with("annons")
+                        || ll.starts_with("advertisement")
+                        || ll.contains("cookie")
+                        || ll.contains("sponsored")
+                    {
+                        continue;
+                    }
+                    // Filter raw SSR data
+                    if nr == "data"
                         && node
                             .get("name")
                             .and_then(|v| v.as_str())
-                            .is_some_and(|n| n.contains('[') || n.contains("page.@"));
-                    if skip_ad || skip_short || skip_ssr {
+                            .is_some_and(|n| n.contains('[') || n.contains("page.@"))
+                    {
                         continue;
                     }
 
                     let mut n = node.clone();
                     if let Some(obj) = n.as_object_mut() {
-                        obj.insert(
-                            "source".to_string(),
-                            serde_json::Value::String("followed_link".to_string()),
-                        );
-                        obj.insert(
-                            "source_url".to_string(),
-                            serde_json::Value::String(fetch_url.clone()),
-                        );
+                        obj.insert("source".to_string(), serde_json::json!("followed_link"));
+                        obj.insert("source_url".to_string(), serde_json::json!(fetch_url));
                     }
-                    followed_nodes.push(n);
+                    content_nodes.push(n);
+                }
+                if !content_nodes.is_empty() {
+                    replacements.insert(*idx, content_nodes);
+                    followed_urls.push(format!("{}: {}", label, fetch_url));
                 }
             }
         }
-        followed_urls.push(format!("{}: {}", label, fetch_url));
     }
 
-    if followed_nodes.is_empty() {
+    if replacements.is_empty() {
         return original_result.to_string();
     }
 
-    // Merge into original result
+    // Build new nodes array: replace link nodes with their content
+    let mut new_nodes: Vec<serde_json::Value> = Vec::new();
+    for (idx, node) in nodes.iter().enumerate() {
+        if let Some(replacement) = replacements.get(&idx) {
+            // Replace link node with content from followed page
+            for r in replacement {
+                new_nodes.push(r.clone());
+            }
+        } else {
+            new_nodes.push(node.clone());
+        }
+    }
+
+    // Build final result
     let mut merged = parsed;
     if let Some(obj) = merged.as_object_mut() {
+        obj.insert("nodes".to_string(), serde_json::json!(new_nodes));
+        obj.insert("node_count".to_string(), serde_json::json!(new_nodes.len()));
         obj.insert(
             "followed_links".to_string(),
             serde_json::json!({
                 "count": followed_urls.len(),
                 "urls": followed_urls,
-                "extra_nodes": followed_nodes.len(),
+                "replaced_nodes": replacements.values().map(|v| v.len()).sum::<usize>(),
             }),
         );
-        let new_count = {
-            if let Some(existing) = obj.get_mut("nodes").and_then(|n| n.as_array_mut()) {
-                for node in followed_nodes {
-                    existing.push(node);
-                }
-                Some(existing.len())
-            } else {
-                None
-            }
-        };
-        if let Some(count) = new_count {
-            obj.insert("node_count".to_string(), serde_json::json!(count));
-        }
     }
 
     serde_json::to_string(&merged).unwrap_or_else(|_| original_result.to_string())
+}
+
+/// Decide if a link label looks like content worth following.
+/// Rejects navigation, promotional, and structural links.
+#[cfg(feature = "fetch")]
+fn should_follow_link(label: &str) -> bool {
+    let trimmed = label.trim();
+
+    // Too short = navigation ("Home", "About", "Product")
+    if trimmed.len() < 8 {
+        return false;
+    }
+
+    // ALL CAPS promotional ("REGISTER FOR PYCON US!", "BUY NOW")
+    let upper_count = trimmed.chars().filter(|c| c.is_uppercase()).count();
+    let alpha_count = trimmed.chars().filter(|c| c.is_alphabetic()).count();
+    if alpha_count > 3 && upper_count as f32 / alpha_count as f32 > 0.7 {
+        return false;
+    }
+
+    let lower = trimmed.to_lowercase();
+
+    // Common nav/action patterns
+    if lower.starts_with("log in")
+        || lower.starts_with("sign up")
+        || lower.starts_with("register")
+        || lower.starts_with("download")
+        || lower.starts_with("subscribe")
+        || lower.starts_with("contact")
+        || lower.starts_with("privacy")
+        || lower.starts_with("terms of")
+        || lower.starts_with("cookie")
+        || lower.starts_with("tipsa ")
+        || lower == "fler artiklar"
+        || lower == "read more"
+        || lower == "see more"
+        || lower == "show more"
+        || lower == "visa mer"
+        || lower == "läs mer"
+    {
+        return false;
+    }
+
+    true
 }
 
 async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl IntoResponse {
