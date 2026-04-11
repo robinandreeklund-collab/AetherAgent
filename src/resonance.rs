@@ -42,11 +42,11 @@ const MIN_OUTPUT_THRESHOLD: f32 = 0.01;
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
 /// BM25-vikt i hybrid-scoring (keyword-precision)
-const BM25_WEIGHT: f32 = 0.75;
-/// HDC text-vikt (n-gram strukturell likhet)
-const HDC_TEXT_WEIGHT: f32 = 0.20;
+const BM25_WEIGHT: f32 = 0.55;
+/// HDC text-vikt (n-gram strukturell likhet — fångar synonymer och delvis-matchningar)
+const HDC_TEXT_WEIGHT: f32 = 0.35;
 /// Roll-aspekt vikt (ren prioritetstabell — låg vikt pga ej goal-beroende)
-const ROLE_WEIGHT: f32 = 0.05;
+const ROLE_WEIGHT: f32 = 0.10;
 /// Kausal-boost vikt
 const CAUSAL_WEIGHT: f32 = 0.3;
 /// Temporal decay-faktor: halvering var 10:e minut (λ = ln2/600s ≈ 0.00115)
