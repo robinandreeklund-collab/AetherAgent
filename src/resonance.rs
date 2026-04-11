@@ -2347,7 +2347,8 @@ impl ResonanceField {
         top_k: usize,
     ) -> (Vec<ResonanceResult>, GapInfo) {
         let total = results.len();
-        if total <= 3 {
+        // Minimum 5 noder innan gap-cut (var 3 — för aggressivt)
+        if total <= 5 {
             return (
                 results,
                 GapInfo {
@@ -2363,11 +2364,15 @@ impl ResonanceField {
         let mut cut_at = limit;
         let mut gap_size: f32 = 0.0;
 
-        for i in 2..limit {
+        // Dynamisk threshold: relaxar med högre top_k
+        // top_k=10 → 0.30, top_k=50 → 0.22
+        let threshold = GAP_RATIO_THRESHOLD - 0.10 * ((top_k as f32 / 50.0).min(1.0));
+
+        for i in 4..limit {
             let prev = results[i - 1].amplitude;
             let curr = results[i].amplitude;
 
-            if prev > 0.001 && curr < prev * (1.0 - GAP_RATIO_THRESHOLD) {
+            if prev > 0.001 && curr < prev * (1.0 - threshold) {
                 cut_at = i;
                 gap_size = (prev - curr) / prev;
                 break;
