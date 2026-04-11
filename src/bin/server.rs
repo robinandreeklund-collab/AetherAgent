@@ -1255,6 +1255,7 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     let result = if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&result) {
         json["raw_html_chars"] = serde_json::json!(raw_html_chars);
         json["fetch_ms"] = serde_json::json!(fetch_ms);
+        json["follow_links_requested"] = serde_json::json!(follow_links);
         json.to_string()
     } else {
         result
