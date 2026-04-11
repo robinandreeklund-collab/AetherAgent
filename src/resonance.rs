@@ -1316,19 +1316,21 @@ impl ResonanceField {
             .copied()
             .collect();
         // Structural bypass: include content-role nodes that BM25 may miss.
-        // Headings, text, articles — these are semantically important regardless
-        // of keyword overlap. Without this, "find article headlines" never finds
-        // headings whose text has zero query-word overlap (e.g. Swedish titles).
+        // Only heading/article with depth < 6 — avoids deep wrapper/nav headings.
+        // Leaf headings (no children) excluded — they get penalized anyway.
         let structural_nodes: Vec<u32> = node_ids
             .iter()
             .filter(|&&nid| {
                 self.nodes
                     .get(&nid)
                     .map(|s| {
-                        matches!(
-                            s.role.as_str(),
-                            "heading" | "article" | "text" | "paragraph"
-                        )
+                        matches!(s.role.as_str(), "heading" | "article")
+                            && s.depth < 6
+                            && self
+                                .children_map
+                                .get(&nid)
+                                .map(|c| !c.is_empty())
+                                .unwrap_or(false)
                     })
                     .unwrap_or(false)
             })
