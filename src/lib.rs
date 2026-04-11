@@ -540,6 +540,39 @@ fn crfr_post_filter<'a>(
                 return false;
             }
 
+            // 6. HTML ID-based sidebar/boilerplate filter
+            if let Some(ref html_id) = node.html_id {
+                let id_lower = html_id.to_lowercase();
+                if id_lower.contains("sidebar")
+                    || id_lower.contains("right-sidebar")
+                    || id_lower.contains("related-posts")
+                    || id_lower.contains("recommended")
+                    || id_lower.contains("advertisement")
+                    || id_lower.contains("ad-container")
+                    || id_lower.contains("cookie-banner")
+                {
+                    return false;
+                }
+            }
+
+            // 7. Wikipedia: academic citation hard filter (DOI + journal metadata)
+            if (lower.contains("doi :") || lower.contains("doi:"))
+                && (lower.contains("issn")
+                    || lower.contains("pmid")
+                    || lower.contains("bibcode")
+                    || lower.contains("arxiv"))
+            {
+                return false;
+            }
+
+            // 8. Wikipedia: category/maintenance metadata
+            if lower.starts_with("articles with short description")
+                || lower.starts_with("short description is different")
+                || lower.starts_with("category:articles with")
+            {
+                return false;
+            }
+
             true
         })
         .collect();
@@ -1087,21 +1120,34 @@ fn is_ssr_json_only(matched: &[(&types::SemanticNode, &resonance::ResonanceResul
     if matched.is_empty() {
         return false;
     }
-    let data_count = matched.iter().filter(|(n, _)| n.role == "data").count();
-    // BUG-3: also detect JSON-like labels (key.path.name patterns)
+    // Räkna noder med "data" roll som INTE har semantisk label
+    // (hydraterade noder med title/description har nu heading/text-roller)
+    let raw_data_count = matched
+        .iter()
+        .filter(|(n, _)| {
+            n.role == "data"
+                && n.name
+                    .as_ref()
+                    .is_some_and(|name| name.contains('.') && name.contains('['))
+        })
+        .count();
+    // Noder som ser ut som rå JSON path-labels (page.@"news",.sections[2]...)
     let json_like = matched
         .iter()
         .filter(|(n, _)| {
             n.label.contains("__NEXT_DATA__")
                 || n.label.contains("__NUXT__")
                 || n.label.contains("initialState")
-                || n.label.contains("pageProps")
                 || n.label.contains("window.__data")
-                || (n.role == "data" && n.label.contains('.') && n.label.contains(':'))
+                || (n.role == "data"
+                    && n.name.as_ref().is_some_and(|name| {
+                        name.contains("page.@") || name.contains("navigation.")
+                    }))
         })
         .count();
     let total = matched.len() as f32;
-    (data_count as f32 / total > 0.5) || (json_like > 0 && data_count as f32 / total > 0.3)
+    // Bara flagga om >60% är RÅ JSON data (inte hydrerade content-noder)
+    (raw_data_count as f32 / total > 0.6) || (json_like > 0 && raw_data_count as f32 / total > 0.4)
 }
 
 fn goal_title_overlap(goal: &str, title: &str) -> f32 {
@@ -1242,7 +1288,7 @@ pub fn parse_crfr_from_tree_broad(
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
-                    "label": truncate_label(&node.label, 500),
+                    "label": truncate_label(&node.label, 2000),
                     "relevance": r.amplitude,
                     "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
@@ -1250,6 +1296,7 @@ pub fn parse_crfr_from_tree_broad(
                     "html_id": node.html_id,
                     "name": node.name,
                     "action": node.action,
+                    "value": node.value,
                     "trust": node.trust,
                 })
             })
@@ -1411,7 +1458,7 @@ pub fn parse_crfr_from_tree_js(
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
-                    "label": truncate_label(&node.label, 500),
+                    "label": truncate_label(&node.label, 2000),
                     "relevance": r.amplitude,
                     "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
@@ -1419,6 +1466,7 @@ pub fn parse_crfr_from_tree_js(
                     "html_id": node.html_id,
                     "name": node.name,
                     "action": node.action,
+                    "value": node.value,
                     "trust": node.trust,
                 })
             })
@@ -2165,6 +2213,15 @@ pub fn dashboard_persistence() -> String {
         "db_size_bytes": db_size,
     });
     result.to_string()
+}
+
+/// Get domain intelligence detail for a specific domain hash.
+pub fn dashboard_domain_detail(domain_hash: u64) -> String {
+    match resonance::domain_intelligence(domain_hash) {
+        Some(intel) => serde_json::to_string(&intel)
+            .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.into()),
+        None => r#"{"error":"domain not found"}"#.to_string(),
+    }
 }
 
 /// Run a CRFR query with full trace for dashboard explorer.

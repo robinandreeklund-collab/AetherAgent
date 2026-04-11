@@ -109,10 +109,15 @@ struct ParseCrfrParams {
     /// MUST call crfr_feedback after using broad mode to teach the system.
     #[serde(default)]
     broad_mode: Option<String>,
+    /// Follow high-relevance links: fetch top link targets, run CRFR, and merge results.
+    /// Adds up to 3 followed links with up to 3 extra nodes each.
+    /// Use when links are clearly relevant but you need the linked content.
+    #[serde(default)]
+    follow_links: bool,
 }
 
 fn default_crfr_top_n() -> u32 {
-    20
+    50
 }
 
 fn default_json_format() -> String {
@@ -576,7 +581,7 @@ impl AetherMcpServer {
                 eprintln!("[MCP] WARN: Cannot read vocab '{vocab_path}'");
             }
 
-            let mut embedding_loaded = false;
+            let mut _embedding_loaded = false;
             if let Ok(model_path) = std::env::var("AETHER_EMBEDDING_MODEL") {
                 if let (Ok(mb), Some(ref vt)) = (std::fs::read(&model_path), &vocab_text) {
                     eprintln!(
@@ -587,7 +592,7 @@ impl AetherMcpServer {
                     match aether_agent::embedding::init_global(&mb, vt) {
                         Ok(()) => {
                             eprintln!("[MCP] Bi-encoder ready");
-                            embedding_loaded = true;
+                            _embedding_loaded = true;
                         }
                         Err(e) => eprintln!("[MCP] WARN: Bi-encoder load failed: {e}"),
                     }
@@ -1583,8 +1588,10 @@ async fn handle_parse_crfr(
                 "[MCP-COOKIE-BRIDGE] Challenge detected on {} — re-fetching",
                 current_url
             );
-            let mut rc = aether_agent::types::FetchConfig::default();
-            rc.cookies = tree.js_cookies.clone();
+            let mut rc = aether_agent::types::FetchConfig {
+                cookies: tree.js_cookies.clone(),
+                ..Default::default()
+            };
             for (k, v) in &extra_headers {
                 rc.extra_headers.insert(k.clone(), v.clone());
             }
@@ -1617,7 +1624,245 @@ async fn handle_parse_crfr(
         )
     };
 
+    // ── Link-following: om relevanta länkar hittades, hämta och merga ──────
+    let follow_links = args
+        .get("follow_links")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if follow_links {
+        let result = follow_relevant_links(&result, goal, top_n, output_format).await;
+        return rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)]);
+    }
+
     rmcp::model::CallToolResult::success(vec![rmcp::model::Content::text(result)])
+}
+
+/// Auto-follow relevant links: REPLACE link nodes with content from target pages.
+/// Smart filtering: skips nav, promo, ALL CAPS links.
+async fn follow_relevant_links(
+    original_result: &str,
+    goal: &str,
+    top_n: u32,
+    _output_format: &str,
+) -> String {
+    const MAX_FOLLOW: usize = 10;
+    const MIN_AMP_FLOOR: f64 = 0.5;
+
+    let parsed: serde_json::Value = match serde_json::from_str(original_result) {
+        Ok(v) => v,
+        Err(_) => return original_result.to_string(),
+    };
+    let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
+        Some(n) => n.clone(),
+        None => return original_result.to_string(),
+    };
+    let top_amp = nodes
+        .iter()
+        .filter_map(|n| n.get("relevance").and_then(|v| v.as_f64()))
+        .fold(0.0_f64, f64::max);
+    let min_amp = (top_amp * 0.5).max(MIN_AMP_FLOOR);
+    let original_url = parsed
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let normalize = |u: &str| -> String {
+        let s = u.split('#').next().unwrap_or(u);
+        let s = s.split('?').next().unwrap_or(s);
+        s.trim_end_matches('/').to_lowercase()
+    };
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    seen.insert(normalize(&original_url));
+
+    // Identify followable links with their indices
+    let mut targets: Vec<(usize, String, String)> = Vec::new();
+    for (idx, node) in nodes.iter().enumerate() {
+        if targets.len() >= MAX_FOLLOW {
+            break;
+        }
+        let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let action = node.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        let amp = node
+            .get("relevance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+        if role != "link" || action != "click" || amp <= min_amp {
+            continue;
+        }
+        if !should_follow_link_mcp(label) {
+            continue;
+        }
+        let href = match node.get("value").and_then(|v| v.as_str()) {
+            Some(v) => v.split_whitespace().next().unwrap_or(v),
+            None => continue,
+        };
+        if !href.starts_with("http") && !href.starts_with('/') {
+            continue;
+        }
+        let resolved = if href.starts_with("http") {
+            href.to_string()
+        } else {
+            let parts: Vec<&str> = original_url.splitn(4, '/').collect();
+            if parts.len() >= 3 {
+                format!(
+                    "{}//{}/{}",
+                    parts[0],
+                    parts[2],
+                    href.trim_start_matches('/')
+                )
+            } else {
+                continue;
+            }
+        };
+        if !seen.insert(normalize(&resolved)) {
+            continue;
+        }
+        targets.push((idx, label.to_string(), resolved));
+    }
+
+    if targets.is_empty() {
+        return original_result.to_string();
+    }
+
+    // Fetch + CRFR, collect replacements per node index
+    let mut replacements: std::collections::HashMap<usize, Vec<serde_json::Value>> =
+        std::collections::HashMap::new();
+    let mut followed_urls: Vec<String> = Vec::new();
+
+    for (idx, label, fetch_url) in &targets {
+        if aether_agent::fetch::validate_url(fetch_url).is_err() {
+            continue;
+        }
+        let config = aether_agent::types::FetchConfig::default();
+        let fetched = match aether_agent::fetch::fetch_page(fetch_url, &config).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        let final_norm = normalize(&fetched.final_url);
+        let fetch_norm = normalize(fetch_url);
+        if final_norm != fetch_norm && !seen.insert(final_norm) {
+            continue;
+        }
+
+        let link_result = aether_agent::parse_crfr(
+            &fetched.body,
+            goal,
+            &fetched.final_url,
+            top_n.min(5),
+            false,
+            "json",
+        );
+
+        if let Ok(lp) = serde_json::from_str::<serde_json::Value>(&link_result) {
+            if let Some(ln) = lp.get("nodes").and_then(|n| n.as_array()) {
+                let mut content: Vec<serde_json::Value> = Vec::new();
+                for node in ln.iter().take(2) {
+                    let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                    let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    if nr == "link" {
+                        continue;
+                    }
+                    let ll = nl.to_lowercase();
+                    if nl.len() < 10
+                        || ll.starts_with("annons")
+                        || ll.starts_with("advertisement")
+                        || ll.contains("cookie")
+                        || ll.contains("sponsored")
+                    {
+                        continue;
+                    }
+                    if nr == "data"
+                        && node
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|n| n.contains('[') || n.contains("page.@"))
+                    {
+                        continue;
+                    }
+                    let mut n = node.clone();
+                    if let Some(obj) = n.as_object_mut() {
+                        obj.insert("source".to_string(), serde_json::json!("followed_link"));
+                        obj.insert("source_url".to_string(), serde_json::json!(fetch_url));
+                    }
+                    content.push(n);
+                }
+                if !content.is_empty() {
+                    replacements.insert(*idx, content);
+                    followed_urls.push(format!("{}: {}", label, fetch_url));
+                }
+            }
+        }
+    }
+
+    if replacements.is_empty() {
+        return original_result.to_string();
+    }
+
+    // Build new nodes: replace followed links, filter unfollowable links
+    let mut new_nodes: Vec<serde_json::Value> = Vec::new();
+    for (idx, node) in nodes.iter().enumerate() {
+        if let Some(repl) = replacements.get(&idx) {
+            for r in repl {
+                new_nodes.push(r.clone());
+            }
+        } else {
+            let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+            if role == "link" {
+                continue;
+            }
+            new_nodes.push(node.clone());
+        }
+    }
+
+    let mut merged = parsed.clone();
+    if let Some(obj) = merged.as_object_mut() {
+        obj.insert("nodes".to_string(), serde_json::json!(new_nodes));
+        obj.insert("node_count".to_string(), serde_json::json!(new_nodes.len()));
+        obj.insert(
+            "followed_links".to_string(),
+            serde_json::json!({
+                "count": followed_urls.len(),
+                "urls": followed_urls,
+                "replaced_nodes": replacements.values().map(|v| v.len()).sum::<usize>(),
+            }),
+        );
+    }
+    serde_json::to_string(&merged).unwrap_or_else(|_| original_result.to_string())
+}
+
+fn should_follow_link_mcp(label: &str) -> bool {
+    let t = label.trim();
+    if t.len() < 8 {
+        return false;
+    }
+    let upper = t.chars().filter(|c| c.is_uppercase()).count();
+    let alpha = t.chars().filter(|c| c.is_alphabetic()).count();
+    if alpha > 3 && upper as f32 / alpha as f32 > 0.7 {
+        return false;
+    }
+    let l = t.to_lowercase();
+    if l.starts_with("log in")
+        || l.starts_with("sign up")
+        || l.starts_with("register")
+        || l.starts_with("download")
+        || l.starts_with("subscribe")
+        || l.starts_with("contact")
+        || l.starts_with("privacy")
+        || l.starts_with("terms of")
+        || l.starts_with("cookie")
+        || l.starts_with("tipsa ")
+        || l == "fler artiklar"
+        || l == "read more"
+        || l == "see more"
+        || l == "show more"
+        || l == "visa mer"
+        || l == "läs mer"
+    {
+        return false;
+    }
+    true
 }
 
 /// Hanterar fetch_parse: hämta URL + parsa till semantiskt träd
@@ -1664,7 +1909,7 @@ async fn handle_fetch_parse(
     let api_responses =
         aether_agent::prefetch_api_urls(&fetch_result.body, &fetch_result.final_url, 10, 3000)
             .await;
-    let prefetched_count = api_responses.len();
+    let _prefetched_count = api_responses.len();
 
     let parse_start = std::time::Instant::now();
 
@@ -2563,7 +2808,7 @@ impl ServerHandler for AetherMcpServer {
                     && args
                         .and_then(|a| a.get("html"))
                         .and_then(|v| v.as_str())
-                        .map_or(true, |h| h.is_empty());
+                        .is_none_or(|h| h.is_empty());
                 if needs_fetch {
                     let result = handle_fetch_extract_links(args).await;
                     Ok(result)
@@ -2587,7 +2832,7 @@ impl ServerHandler for AetherMcpServer {
                     && args
                         .and_then(|a| a.get("html"))
                         .and_then(|v| v.as_str())
-                        .map_or(true, |h| h.is_empty());
+                        .is_none_or(|h| h.is_empty());
                 if needs_fetch {
                     let result = handle_fetch_parse_crfr_multi(args).await;
                     Ok(result)

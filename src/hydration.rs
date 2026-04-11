@@ -103,7 +103,8 @@ pub fn extract_hydration_state(html: &str) -> Option<HydrationData> {
 }
 
 /// Konvertera HydrationData till semantiska noder.
-/// Bygger ett platt träd av text/data-noder med trust shield.
+/// Analyserar JSON-fältnamn och tilldelar semantiska roller:
+/// title/headline → heading, description/summary → text, href/url → link, etc.
 pub fn hydration_to_nodes(data: &HydrationData, goal: &str) -> HydrationResult {
     let mut nodes = Vec::new();
     let mut warnings = Vec::new();
@@ -124,7 +125,8 @@ pub fn hydration_to_nodes(data: &HydrationData, goal: &str) -> HydrationResult {
             continue;
         }
 
-        let label = format!("{}: {}", key, value);
+        // Semantisk rollmappning baserat på JSON-fältnamn
+        let (role, label) = semantic_role_from_key(key, value);
 
         // Trust shield — analysera text
         let (trust, warning) = analyze_text(next_id, &label);
@@ -141,13 +143,20 @@ pub fn hydration_to_nodes(data: &HydrationData, goal: &str) -> HydrationResult {
         // Beräkna relevans mot målet
         let relevance = score_entry_relevance(key, value, &goal_words);
 
+        // Skapa action för link-noder
+        let action = if role == "link" {
+            Some("click".to_string())
+        } else {
+            None
+        };
+
         let node = SemanticNode {
             id: next_id,
-            role: "data".to_string(),
+            role,
             label: sanitized_label,
             value: Some(value.clone()),
             state: NodeState::default_state(),
-            action: None,
+            action,
             relevance,
             trust,
             children: vec![],
@@ -164,6 +173,129 @@ pub fn hydration_to_nodes(data: &HydrationData, goal: &str) -> HydrationResult {
         nodes,
         warnings,
     }
+}
+
+/// Mappa JSON-fältnamn till semantisk roll + ren label.
+/// Returnerar (roll, label) där label är "value" för content-fält
+/// och "key: value" för okända fält.
+fn semantic_role_from_key(key: &str, value: &str) -> (String, String) {
+    let last_segment = key.rsplit('.').next().unwrap_or(key).to_lowercase();
+
+    // Tomma/korta värden → data (inte content)
+    if value.is_empty() || value == "true" || value == "false" || value == "null" {
+        return ("data".to_string(), format!("{}: {}", key, value));
+    }
+
+    // Headings: title, headline, name (för artiklar/sidor)
+    if matches!(
+        last_segment.as_str(),
+        "title" | "headline" | "heading" | "name" | "shortname"
+    ) && value.len() > 3
+        && value.len() < 300
+        && !value.starts_with("http")
+        && !value.starts_with('/')
+    {
+        return ("heading".to_string(), value.to_string());
+    }
+
+    // Text/paragraf: description, summary, abstract, body, content, synopsis
+    if matches!(
+        last_segment.as_str(),
+        "description"
+            | "summary"
+            | "abstract"
+            | "synopsis"
+            | "body"
+            | "excerpt"
+            | "text"
+            | "intro"
+            | "lead"
+            | "teaser"
+            | "caption"
+            | "alttext"
+            | "alt"
+    ) && value.len() > 10
+    {
+        return ("text".to_string(), value.to_string());
+    }
+
+    // Länkar: href, url, path, slug (med tillräcklig kontext)
+    if matches!(
+        last_segment.as_str(),
+        "href" | "url" | "link" | "path" | "permalink" | "canonical"
+    ) && (value.starts_with("http") || value.starts_with('/'))
+    {
+        return ("link".to_string(), value.to_string());
+    }
+
+    // Bilder: image, imageUrl, thumbnail, poster, src
+    if matches!(
+        last_segment.as_str(),
+        "image" | "imageurl" | "thumbnail" | "poster" | "src" | "logo"
+    ) && (value.starts_with("http") || value.starts_with('/'))
+    {
+        return ("img".to_string(), value.to_string());
+    }
+
+    // Datum/tid: date, published, updated, created, timestamp
+    if matches!(
+        last_segment.as_str(),
+        "date"
+            | "published"
+            | "publishedat"
+            | "updated"
+            | "updatedat"
+            | "created"
+            | "createdat"
+            | "timestamp"
+            | "firstpublished"
+            | "lastupdated"
+    ) {
+        return ("data".to_string(), format!("{}: {}", key, value));
+    }
+
+    // Pris: price, cost, amount
+    if matches!(
+        last_segment.as_str(),
+        "price" | "cost" | "amount" | "fee" | "total"
+    ) {
+        return ("price".to_string(), value.to_string());
+    }
+
+    // Författare: author, byline, writer, contributor
+    if matches!(
+        last_segment.as_str(),
+        "author" | "byline" | "writer" | "contributor" | "creator"
+    ) && value.len() > 2
+        && value.len() < 100
+    {
+        return ("text".to_string(), value.to_string());
+    }
+
+    // Kategori/tagg: category, tag, topic, section, genre
+    if matches!(
+        last_segment.as_str(),
+        "category" | "tag" | "topic" | "section" | "genre" | "label"
+    ) && value.len() < 80
+    {
+        return ("listitem".to_string(), value.to_string());
+    }
+
+    // Innehållsrikt text-fält: lång text (>40 tecken) utan URL-mönster
+    if value.len() > 40
+        && !value.starts_with("http")
+        && !value.starts_with('{')
+        && !value.starts_with('[')
+        && !last_segment.contains("id")
+        && !last_segment.contains("hash")
+        && !last_segment.contains("token")
+        && !last_segment.contains("config")
+    {
+        return ("text".to_string(), value.to_string());
+    }
+
+    // Default: behåll key: value format
+    ("data".to_string(), format!("{}: {}", key, value))
 }
 
 // ─── Ramverks-extraktorer ───────────────────────────────────────────────────
@@ -1048,6 +1180,10 @@ fn format_value(value: &Value) -> String {
 
 /// Nycklar som ska skippas (ramverk-interna, metadata)
 fn is_internal_key(key: &str) -> bool {
+    let key_lower = key.to_lowercase();
+    let last_segment = key.rsplit('.').next().unwrap_or(key).to_lowercase();
+
+    // Exakta prefix-matchningar
     let internal_prefixes = [
         "__N_",          // Next.js intern
         "_sentryTrace",  // Sentry
@@ -1057,12 +1193,54 @@ fn is_internal_key(key: &str) -> bool {
         "_resolved",     // Qwik
         "__typename",    // Apollo/GraphQL
     ];
-
     for prefix in &internal_prefixes {
         if key.starts_with(prefix) || key.contains(prefix) {
             return true;
         }
     }
+
+    // Metadata-fält som aldrig är content
+    if matches!(
+        last_segment.as_str(),
+        "isspecial"
+            | "islivenow"
+            | "inoverlay"
+            | "ismissingaccesstoken"
+            | "isinternational"
+            | "brandid"
+            | "seriesid"
+            | "indeximage"
+            | "contenttype"
+            | "firstupdated"
+            | "lastupdated"
+            | "livereorderingallowed"
+            | "allowadvertisingflag"
+            | "experimentalfeatures"
+            | "reportinguri"
+            | "trackingid"
+            | "gauid"
+    ) {
+        return true;
+    }
+
+    // Navigations-metadata (hamburger menus, footer links, etc.)
+    if key_lower.contains("hamburgernavigation")
+        || key_lower.contains("footerlink")
+        || key_lower.contains("footer.legal")
+        || key_lower.contains("footer.language")
+        || key_lower.contains("authinfo")
+        || key_lower.contains("navigation.footer")
+        || key_lower.contains("navigation.hamburger")
+    {
+        return true;
+    }
+
+    // ID/hash/token-fält (UUID, hashes, build IDs)
+    if (last_segment == "id" || last_segment.ends_with("id")) && key.split('.').count() > 2 {
+        // Tillåt top-level "id" men filtrera djupt nästlade som "sections[2].content[3].id"
+        return true;
+    }
+
     false
 }
 
@@ -1367,18 +1545,37 @@ mod tests {
             "Borde generera noder från hydration data"
         );
 
-        // Alla noder borde ha roll "data"
+        // Noder borde ha semantiska roller baserat på fältnamn
         for node in &result.nodes {
-            assert_eq!(node.role, "data", "Hydration-noder borde ha roll 'data'");
             assert!(node.value.is_some(), "Borde ha value");
         }
+        // title → heading, description → text, price → price
+        let title_node = result
+            .nodes
+            .iter()
+            .find(|n| n.label.contains("Testprodukt"));
+        assert!(title_node.is_some(), "Borde hitta title-nod");
+        assert_eq!(
+            title_node.unwrap().role,
+            "heading",
+            "title borde bli heading"
+        );
+        let price_node = result.nodes.iter().find(|n| n.label.contains("199"));
+        assert!(price_node.is_some(), "Borde hitta price-nod");
+        assert_eq!(price_node.unwrap().role, "price", "price borde bli price");
 
         // Noder relaterade till "produkt" borde ha högre relevans
+        // description-noden har nu ren label (utan key-prefix) och roll "text"
         let product_node = result
             .nodes
             .iter()
-            .find(|n| n.label.contains("description"));
+            .find(|n| n.label.contains("En bra produkt"));
         assert!(product_node.is_some(), "Borde hitta description-nod");
+        assert_eq!(
+            product_node.unwrap().role,
+            "text",
+            "description borde bli text"
+        );
         let product_rel = product_node.unwrap().relevance;
         assert!(
             product_rel > 0.1,

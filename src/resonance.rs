@@ -28,7 +28,8 @@ const CHEBYSHEV_THETA: [f32; 5] = [0.50, 0.30, 0.12, 0.05, 0.03];
 const PPR_ALPHA: f32 = 0.15;
 
 /// Suppression: minsta antal query-appearances innan suppression aktiveras
-const SUPPRESSION_MIN_QUERIES: u32 = 3;
+/// 5 ger mer statistisk säkerhet än 3 (undviker false suppression)
+const SUPPRESSION_MIN_QUERIES: u32 = 5;
 /// Suppression: om success_ratio < detta → applicera penalty
 const SUPPRESSION_RATIO_THRESHOLD: f32 = 0.25;
 /// Suppression: minimalt multiplier (aldrig under detta)
@@ -42,21 +43,86 @@ const MIN_OUTPUT_THRESHOLD: f32 = 0.01;
 /// Max antal noder i fältet (skydd mot extremt stora DOM:ar)
 const MAX_FIELD_NODES: usize = 10_000;
 /// BM25-vikt i hybrid-scoring (keyword-precision)
-const BM25_WEIGHT: f32 = 0.75;
-/// HDC text-vikt (n-gram strukturell likhet)
-const HDC_TEXT_WEIGHT: f32 = 0.20;
+const BM25_WEIGHT: f32 = 0.55;
+/// HDC text-vikt (n-gram strukturell likhet — fångar synonymer och delvis-matchningar)
+const HDC_TEXT_WEIGHT: f32 = 0.35;
 /// Roll-aspekt vikt (ren prioritetstabell — låg vikt pga ej goal-beroende)
-const ROLE_WEIGHT: f32 = 0.05;
+const ROLE_WEIGHT: f32 = 0.10;
 /// Kausal-boost vikt
 const CAUSAL_WEIGHT: f32 = 0.3;
 /// Temporal decay-faktor: halvering var 10:e minut (λ = ln2/600s ≈ 0.00115)
 const CAUSAL_DECAY_LAMBDA: f64 = 0.001_155;
 /// Minsta relativa amplitud-gap för att klippa output (30% drop)
 const GAP_RATIO_THRESHOLD: f32 = 0.30;
-/// Max antal concept entries i field-level concept memory
+/// Bas antal concept entries i field-level concept memory
+/// Adaptivt: ökar med feedback (se concept eviction i feedback())
 const MAX_CONCEPT_ENTRIES: usize = 256;
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
+
+/// Structural Pattern Memory: lär oss VAR i DOM:en svaret brukar finnas.
+/// Per roll+djup-bucket lagras (successes, total) för att bygga en dynamisk
+/// karta över informationsregioner. Uppdateras vid feedback.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AnswerZoneProfile {
+    /// Per "role:depth_bucket" → (successes, observations)
+    /// depth_bucket: 0-1 = "shallow", 2-4 = "mid", 5+ = "deep"
+    zone_hits: HashMap<String, (f32, f32)>,
+}
+
+impl AnswerZoneProfile {
+    /// Depth → bucket-namn
+    fn depth_bucket(depth: u32) -> &'static str {
+        match depth {
+            0..=1 => "shallow",
+            2..=4 => "mid",
+            _ => "deep",
+        }
+    }
+
+    /// Registrera att en nod med given roll+djup var/inte var framgångsrik
+    fn record(&mut self, role: &str, depth: u32, success: bool) {
+        let key = format!("{}:{}", role, Self::depth_bucket(depth));
+        let entry = self.zone_hits.entry(key).or_insert((0.0, 0.0));
+        entry.1 += 1.0; // observation
+        if success {
+            entry.0 += 1.0; // success
+        }
+    }
+
+    /// Hämta success-rate för en roll+djup (None om inga observationer)
+    fn success_rate(&self, role: &str, depth: u32) -> Option<f32> {
+        let key = format!("{}:{}", role, Self::depth_bucket(depth));
+        self.zone_hits.get(&key).and_then(|&(succ, total)| {
+            if total >= 3.0 {
+                Some(succ / total)
+            } else {
+                None // Inte nog med data
+            }
+        })
+    }
+
+    /// Beräkna boost/penalty baserat på inlärd answer-zone profil.
+    /// Returnerar multiplikator (0.7–1.3).
+    fn zone_boost(&self, role: &str, depth: u32) -> f32 {
+        if let Some(rate) = self.success_rate(role, depth) {
+            // rate 0.0 → 0.7 (penalty), rate 0.5 → 1.0 (neutral), rate 1.0 → 1.3 (boost)
+            0.7 + rate * 0.6
+        } else {
+            1.0 // Ingen data → neutral
+        }
+    }
+
+    /// Temporal decay: alla observations degraderas sakta
+    fn decay(&mut self, factor: f32) {
+        for (succ, total) in self.zone_hits.values_mut() {
+            *succ *= factor;
+            *total *= factor;
+        }
+        // Ta bort entries med < 0.5 observations (utfasade)
+        self.zone_hits.retain(|_, &mut (_, total)| total >= 0.5);
+    }
+}
 
 /// Type of resonance that caused a node to appear in results
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -287,6 +353,10 @@ pub struct ResonanceField {
     /// so the oldest concept is evicted first rather than an arbitrary one.
     #[serde(default)]
     concept_memory_order: VecDeque<String>,
+    /// Structural Pattern Memory: lär oss i vilka DOM-regioner (roll+djup)
+    /// svaret brukar finnas. Uppdateras vid feedback, appliceras som boost/penalty.
+    #[serde(default)]
+    answer_zone: AnswerZoneProfile,
     /// Cached site-name words derived from the first few node labels.
     /// OPT-2: computed once and reused across queries; invalidated by node mutations.
     #[serde(skip)]
@@ -384,8 +454,28 @@ fn adaptive_fan_out(children_count: usize) -> usize {
 
 /// Answer-shape scoring: how much does this node look like an answer?
 /// Pure structure + statistics — no semantics.
-fn answer_shape_score(label: &str, role: &str, siblings_count: usize) -> f32 {
+fn answer_shape_score(
+    label: &str,
+    role: &str,
+    siblings_count: usize,
+    has_children: bool,
+    sibling_has_content: bool,
+) -> f32 {
     let mut score: f32 = 0.0;
+
+    // Leaf-heading penalty: headings utan barn är navigationsmarkörer,
+    // inte informationsbärare. Kontexten sitter i grannar/barn.
+    // "Senaste nytt – Nyheter" utan barn → penalty.
+    // Men en heading MED content-syskon lyfter syskonen istället (se propagation).
+    if role == "heading" && !has_children {
+        score -= 0.35;
+        // Partial mitigation: om headingens syskon har content-roller
+        // är headingen åtminstone en strukturell ledtråd
+        if sibling_has_content {
+            score += 0.10;
+        }
+    }
+
     // Contains numbers (prices, dates, populations, percentages)
     if label.bytes().any(|b| b.is_ascii_digit()) {
         score += 0.3;
@@ -667,6 +757,56 @@ fn metadata_penalty(label: &str) -> f32 {
     {
         return 0.3;
     }
+    // Wikipedia: academic citations (DOI, ISSN, PMID, Bibcode, hdl)
+    // These are reference metadata, not article content
+    if (lower.contains("doi :") || lower.contains("doi:"))
+        && (lower.contains("issn") || lower.contains("pmid") || lower.contains("bibcode"))
+    {
+        return 0.2; // Very strong penalty — academic citation, not content
+    }
+    // Wikipedia: category/maintenance tags ("Articles with short description", etc.)
+    if (lower.starts_with("articles with ")
+        || lower.starts_with("short description")
+        || lower.starts_with("category:articles"))
+        && lower.len() < 80
+    {
+        return 0.25;
+    }
+    // Wikipedia: bare footnote reference pattern ("^ " + author + year)
+    if label.starts_with("^ ") && label.len() > 30 {
+        // Heuristic: if it contains parenthesized year like (2021) or (2024-01-15)
+        let has_year = lower.contains("(20") || lower.contains("(19");
+        let has_academic =
+            lower.contains("doi") || lower.contains("isbn") || lower.contains("pmid");
+        if has_year || has_academic {
+            return 0.25;
+        }
+    }
+    // Reddit sidebar rules pattern: "posts must", "code of conduct", "message the mods"
+    if (lower.contains("posts must") || lower.contains("submissions must"))
+        && (lower.contains("code of conduct")
+            || lower.contains("message the mods")
+            || lower.contains("details"))
+    {
+        return 0.3; // Sidebar rules, not content
+    }
+    // Reddit: rule enumeration ("1 Observe our code of conduct", "2 Submissions must be on-topic")
+    if lower.starts_with("1 observe")
+        || lower.starts_with("2 submission")
+        || lower.starts_with("r/") && lower.contains("rules") && lower.contains("observe")
+    {
+        return 0.25;
+    }
+    // Reddit: sidebar metadata/community bookmarks
+    if (lower.contains("community bookmarks") || lower.contains("official resources"))
+        && (lower.contains("megathreads") || lower.contains("alternative venues"))
+    {
+        return 0.35;
+    }
+    // Generic sidebar pattern: "No meta posts; message the mods"
+    if lower.contains("no meta posts") && lower.contains("mods") {
+        return 0.3;
+    }
     // Search placeholder text (GitHub, etc.)
     if lower.starts_with("search ") && lower.contains("...") && lower.len() > 40 {
         return 0.3;
@@ -708,6 +848,51 @@ impl ResonanceField {
             }
         }
 
+        // Sibling-context blending for leaf headings:
+        // En heading utan barn saknar child-context i sin HV.
+        // Blenda in syskonens HV:er så att headingen "känner" sin kontext.
+        // "Senaste nytt" heading bredvid [link:"Putin...", link:"Brand..."]
+        // → headingens HV inkluderar syskonnodernas semantik.
+        {
+            let heading_ids: Vec<u32> = nodes
+                .iter()
+                .filter(|(id, s)| {
+                    s.role == "heading"
+                        && !children_map.get(id).map(|c| !c.is_empty()).unwrap_or(false)
+                })
+                .map(|(&id, _)| id)
+                .collect();
+            for hid in heading_ids {
+                if let Some(&pid) = parent_map.get(&hid) {
+                    if let Some(siblings) = children_map.get(&pid) {
+                        let sib_hvs: Vec<Hypervector> = siblings
+                            .iter()
+                            .filter(|&&sid| sid != hid)
+                            .take(Self::HDC_MAX_BUNDLE_CHILDREN)
+                            .filter_map(|&sid| nodes.get(&sid).map(|s| s.text_hv.clone()))
+                            .collect();
+                        if !sib_hvs.is_empty() {
+                            let refs: Vec<&Hypervector> = sib_hvs.iter().collect();
+                            let sib_bundle = Hypervector::bundle(&refs);
+                            // 85% own text + 15% sibling context
+                            // (less than child-blend 80/20 since siblings are peers, not owned)
+                            if let Some(state) = nodes.get_mut(&hid) {
+                                let own = state.text_hv.clone();
+                                state.text_hv = Hypervector::bundle(&[
+                                    &own,
+                                    &own,
+                                    &own,
+                                    &own,
+                                    &own,
+                                    &sib_bundle,
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // #3: Samla värde-data (action/href/value) per nod
         let mut node_values: HashMap<u32, String> = HashMap::new();
         Self::collect_values(tree_nodes, &mut node_values);
@@ -737,6 +922,7 @@ impl ResonanceField {
             total_chars_out: 0,
             latency_samples: Vec::new(),
             concept_memory_order: VecDeque::new(),
+            answer_zone: AnswerZoneProfile::default(),
             cached_site_words: None,
             cached_shape_scores: None,
             cached_meta_penalties: None,
@@ -756,6 +942,14 @@ impl ResonanceField {
                         .concept_memory
                         .entry(token.clone())
                         .or_insert_with(|| hv_data.clone());
+                }
+                // Warm-start answer zone from domain profile
+                for (key, &(succ, total)) in &profile.answer_zone.zone_hits {
+                    field
+                        .answer_zone
+                        .zone_hits
+                        .entry(key.clone())
+                        .or_insert((succ, total));
                 }
             }
         }
@@ -1016,12 +1210,49 @@ impl ResonanceField {
                     .iter()
                     .map(|(&id, label)| {
                         let role = self.nodes.get(&id).map(|s| s.role.as_str()).unwrap_or("");
-                        let siblings = self
+                        let parent_id = self.parent_map.get(&id).copied().unwrap_or(0);
+                        let sibling_ids = self.children_map.get(&parent_id);
+                        let siblings = sibling_ids.map(|c| c.len()).unwrap_or(0);
+                        let has_children = self
                             .children_map
-                            .get(&self.parent_map.get(&id).copied().unwrap_or(0))
-                            .map(|c| c.len())
-                            .unwrap_or(0);
-                        (id, answer_shape_score(label, role, siblings))
+                            .get(&id)
+                            .map(|c| !c.is_empty())
+                            .unwrap_or(false);
+                        // Kolla om syskon har content-roller (text, paragraph, listitem, etc.)
+                        let sibling_has_content = sibling_ids
+                            .map(|sibs| {
+                                sibs.iter().any(|&sid| {
+                                    sid != id
+                                        && self
+                                            .nodes
+                                            .get(&sid)
+                                            .map(|s| {
+                                                matches!(
+                                                    s.role.as_str(),
+                                                    "text"
+                                                        | "paragraph"
+                                                        | "listitem"
+                                                        | "link"
+                                                        | "price"
+                                                        | "data"
+                                                        | "cell"
+                                                        | "button"
+                                                )
+                                            })
+                                            .unwrap_or(false)
+                                })
+                            })
+                            .unwrap_or(false);
+                        (
+                            id,
+                            answer_shape_score(
+                                label,
+                                role,
+                                siblings,
+                                has_children,
+                                sibling_has_content,
+                            ),
+                        )
                     })
                     .collect(),
             );
@@ -1087,19 +1318,21 @@ impl ResonanceField {
             .copied()
             .collect();
         // Structural bypass: include content-role nodes that BM25 may miss.
-        // Headings, text, articles — these are semantically important regardless
-        // of keyword overlap. Without this, "find article headlines" never finds
-        // headings whose text has zero query-word overlap (e.g. Swedish titles).
+        // Only heading/article with depth < 6 — avoids deep wrapper/nav headings.
+        // Leaf headings (no children) excluded — they get penalized anyway.
         let structural_nodes: Vec<u32> = node_ids
             .iter()
             .filter(|&&nid| {
                 self.nodes
                     .get(&nid)
                     .map(|s| {
-                        matches!(
-                            s.role.as_str(),
-                            "heading" | "article" | "text" | "paragraph"
-                        )
+                        matches!(s.role.as_str(), "heading" | "article")
+                            && s.depth < 6
+                            && self
+                                .children_map
+                                .get(&nid)
+                                .map(|c| !c.is_empty())
+                                .unwrap_or(false)
                     })
                     .unwrap_or(false)
             })
@@ -1217,8 +1450,10 @@ impl ResonanceField {
                 .iter()
                 .filter(|&&b| b)
                 .count() as f32;
+                // CombMNZ: starkare bonus för konsensus mellan signaler
+                // 2 signaler: 1.25, 3: 1.50, 4: 1.75
                 let combmnz = if signal_count >= 2.0 {
-                    1.0 + (signal_count - 1.0) * 0.15
+                    1.0 + (signal_count - 1.0) * 0.25
                 } else {
                     1.0
                 };
@@ -1281,6 +1516,12 @@ impl ResonanceField {
                                 * (success_ratio / SUPPRESSION_RATIO_THRESHOLD);
                         state.amplitude *= factor;
                     }
+                }
+
+                // Structural Pattern Memory: boost/penalize baserat på inlärd answer-zone
+                let zone_boost = self.answer_zone.zone_boost(&state.role, state.depth);
+                if (zone_boost - 1.0).abs() > 0.001 {
+                    state.amplitude *= zone_boost;
                 }
 
                 causal_boosts.insert(nid, causal_boost);
@@ -2110,7 +2351,8 @@ impl ResonanceField {
         top_k: usize,
     ) -> (Vec<ResonanceResult>, GapInfo) {
         let total = results.len();
-        if total <= 3 {
+        // Minimum 5 noder innan gap-cut (var 3 — för aggressivt)
+        if total <= 5 {
             return (
                 results,
                 GapInfo {
@@ -2126,11 +2368,15 @@ impl ResonanceField {
         let mut cut_at = limit;
         let mut gap_size: f32 = 0.0;
 
-        for i in 2..limit {
+        // Dynamisk threshold: relaxar med högre top_k
+        // top_k=10 → 0.30, top_k=50 → 0.22
+        let threshold = GAP_RATIO_THRESHOLD - 0.10 * ((top_k as f32 / 50.0).min(1.0));
+
+        for i in 4..limit {
             let prev = results[i - 1].amplitude;
             let curr = results[i].amplitude;
 
-            if prev > 0.001 && curr < prev * (1.0 - GAP_RATIO_THRESHOLD) {
+            if prev > 0.001 && curr < prev * (1.0 - threshold) {
                 cut_at = i;
                 gap_size = (prev - curr) / prev;
                 break;
@@ -2241,6 +2487,24 @@ impl ResonanceField {
             }
         }
 
+        // Steg 1c: Structural Pattern Memory — lär oss var svaret sitter
+        // Registrera framgångsrika noders roll+djup i answer_zone-profilen
+        for &nid in successful_node_ids {
+            if let Some(state) = self.nodes.get(&nid) {
+                self.answer_zone.record(&state.role, state.depth, true);
+            }
+        }
+        // Registrera topp-synliga noder som INTE var framgångsrika (negativ signal)
+        for (&nid, state) in &self.nodes {
+            if state.amplitude > 0.3 && !successful_set.contains(&nid) {
+                self.answer_zone.record(&state.role, state.depth, false);
+            }
+        }
+        // Temporal decay var 10:e feedback (hindrar att gammal data dominerar)
+        if self.total_feedback.is_multiple_of(10) {
+            self.answer_zone.decay(0.9);
+        }
+
         // Steg 2: DCFR cumulative regret update.
         // Success → positive regret, Failure → negative regret.
         // Regret magnitude scales with confidence (amplitude).
@@ -2331,9 +2595,9 @@ impl ResonanceField {
             }
         }
 
-        // BUG-6 fix: evict oldest concept (FIFO via concept_memory_order) instead of
-        // a random HashMap entry.  Keeps recently-learned concepts, evicts stale ones.
-        while self.concept_memory.len() > MAX_CONCEPT_ENTRIES {
+        // Adaptiv concept memory: grows with feedback (256 base + 1 per feedback, max 1024)
+        let adaptive_max = MAX_CONCEPT_ENTRIES + (self.total_feedback as usize / 2).min(768);
+        while self.concept_memory.len() > adaptive_max {
             if let Some(key) = self.concept_memory_order.pop_front() {
                 self.concept_memory.remove(&key);
             } else {
@@ -2906,6 +3170,9 @@ pub struct DomainProfile {
     pub concepts: HashMap<String, HvData>,
     /// Number of fields that contributed to this profile
     pub field_count: u32,
+    /// Aggregated answer zone profile from all URLs on this domain
+    #[serde(default)]
+    pub answer_zone: AnswerZoneProfile,
 }
 
 struct DomainRegistry {
@@ -2935,6 +3202,7 @@ impl DomainRegistry {
                 stats: HashMap::new(),
                 concepts: HashMap::new(),
                 field_count: 0,
+                answer_zone: AnswerZoneProfile::default(),
             });
 
         // OPT-9 fix: weight each field's contribution by its total_feedback count so
@@ -2956,6 +3224,17 @@ impl DomainRegistry {
             let entry = profile.stats.entry(key.clone()).or_insert((1.0, 1.0));
             entry.0 = entry.0 * existing_w + alpha * new_w;
             entry.1 = entry.1 * existing_w + beta * new_w;
+        }
+
+        // Merge answer zone profile (weighted average of zone_hits)
+        for (key, &(succ, total)) in &field.answer_zone.zone_hits {
+            let entry = profile
+                .answer_zone
+                .zone_hits
+                .entry(key.clone())
+                .or_insert((0.0, 0.0));
+            entry.0 = entry.0 * existing_w + succ * new_w;
+            entry.1 = entry.1 * existing_w + total * new_w;
         }
 
         // Merge concept memory (bundle HVs)
@@ -3298,6 +3577,333 @@ pub fn list_cached_fields() -> Vec<FieldSummary> {
             }
         })
         .collect()
+}
+
+// ─── Domain Intelligence ─────────────────────────────────────────────────
+
+/// Per-nod sammanfattning för node leaderboard
+#[derive(Debug, Clone, Serialize)]
+pub struct NodeIntelligence {
+    pub node_id: u32,
+    pub role: String,
+    pub label: String,
+    pub depth: u32,
+    pub hit_count: u32,
+    pub miss_count: u32,
+    pub query_count: u32,
+    pub success_rate: f32,
+    pub suppressed: bool,
+}
+
+/// Answer zone bucket: roll + djup → success rate
+#[derive(Debug, Clone, Serialize)]
+pub struct ZoneBucket {
+    pub role: String,
+    pub depth_bucket: String,
+    pub successes: f32,
+    pub observations: f32,
+    pub success_rate: f32,
+}
+
+/// Propagation edge: roll+riktning → learned weight
+#[derive(Debug, Clone, Serialize)]
+pub struct PropagationEdge {
+    pub source_role: String,
+    pub direction: String,
+    pub cluster: String,
+    pub alpha: f32,
+    pub beta: f32,
+    pub mean: f32,
+    pub pruned: bool,
+}
+
+/// URL-detalj inom en domän
+#[derive(Debug, Clone, Serialize)]
+pub struct UrlDetail {
+    pub url: String,
+    pub node_count: usize,
+    pub total_queries: u32,
+    pub total_feedback: u32,
+    pub learned_nodes: usize,
+    pub total_chars_in: u64,
+    pub total_chars_out: u64,
+    pub compression_pct: f32,
+    pub p95_latency_us: u64,
+    pub template_match: bool,
+    pub max_depth: u32,
+}
+
+/// Komplett domain intelligence — alla 5 nivåer
+#[derive(Debug, Clone, Serialize)]
+pub struct DomainIntelligence {
+    // Meta
+    pub domain: String,
+    pub domain_hash: u64,
+    pub url_count: usize,
+    pub total_queries: u32,
+    pub total_feedback: u32,
+    pub total_learned_nodes: usize,
+    pub total_chars_in: u64,
+    pub total_chars_out: u64,
+    pub compression_pct: f32,
+    pub avg_latency_us: u64,
+    pub p95_latency_us: u64,
+
+    // Nivå 1: DOM Understanding (answer zones)
+    pub answer_zones: Vec<ZoneBucket>,
+
+    // Nivå 2: Signal Propagation (edge weights)
+    pub propagation_edges: Vec<PropagationEdge>,
+
+    // Nivå 3: Query Intelligence (goal clusters)
+    pub query_clusters: Vec<QueryCluster>,
+
+    // Nivå 4: Node Leaderboard
+    pub top_nodes: Vec<NodeIntelligence>,
+
+    // Nivå 5: URLs
+    pub urls: Vec<UrlDetail>,
+}
+
+/// Goal-cluster sammanfattning
+#[derive(Debug, Clone, Serialize)]
+pub struct QueryCluster {
+    pub cluster_id: String,
+    pub edge_count: usize,
+    pub top_roles: Vec<String>,
+}
+
+/// Samla all intelligence för en domän. Aggregerar alla cached fields.
+pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence> {
+    let fields = list_cached_fields();
+    let domain_fields: Vec<&FieldSummary> = fields
+        .iter()
+        .filter(|f| f.domain_hash == target_domain_hash)
+        .collect();
+
+    if domain_fields.is_empty() {
+        return None;
+    }
+
+    // Domännamn från första URL:en
+    let first_url = &domain_fields[0].url;
+    let domain = first_url
+        .split("//")
+        .nth(1)
+        .unwrap_or(first_url)
+        .split('/')
+        .next()
+        .unwrap_or(first_url)
+        .replace("www.", "");
+
+    // Aggregera grunddata
+    let total_queries: u32 = domain_fields.iter().map(|f| f.total_queries).sum();
+    let total_feedback: u32 = domain_fields.iter().map(|f| f.total_feedback).sum();
+    let total_learned: usize = domain_fields.iter().map(|f| f.learned_nodes).sum();
+    let total_chars_in: u64 = domain_fields.iter().map(|f| f.total_chars_in).sum();
+    let total_chars_out: u64 = domain_fields.iter().map(|f| f.total_chars_out).sum();
+    let compression_pct = if total_chars_in > 0 {
+        ((1.0 - total_chars_out as f64 / total_chars_in as f64) * 100.0) as f32
+    } else {
+        0.0
+    };
+    let latencies: Vec<u64> = domain_fields
+        .iter()
+        .filter(|f| f.p95_latency_us > 0)
+        .map(|f| f.p95_latency_us)
+        .collect();
+    let avg_latency_us = if latencies.is_empty() {
+        0
+    } else {
+        latencies.iter().sum::<u64>() / latencies.len() as u64
+    };
+    let p95_latency_us = if latencies.is_empty() {
+        0
+    } else {
+        let mut sorted = latencies.clone();
+        sorted.sort_unstable();
+        let idx = ((sorted.len() as f64) * 0.95).ceil() as usize;
+        sorted[idx.min(sorted.len() - 1)]
+    };
+
+    // Nivå 1: Answer Zones — aggregera från domain profile
+    let answer_zones = if let Ok(registry) = DOMAIN_REGISTRY.lock() {
+        if let Some(profile) = registry.get(target_domain_hash) {
+            profile
+                .answer_zone
+                .zone_hits
+                .iter()
+                .map(|(key, &(succ, total))| {
+                    let parts: Vec<&str> = key.splitn(2, ':').collect();
+                    ZoneBucket {
+                        role: parts.first().unwrap_or(&"?").to_string(),
+                        depth_bucket: parts.get(1).unwrap_or(&"?").to_string(),
+                        successes: succ,
+                        observations: total,
+                        success_rate: if total > 0.0 { succ / total } else { 0.0 },
+                    }
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    // Nivå 2: Propagation edges — aggregera alla fälts propagation_stats
+    let mut merged_stats: HashMap<String, (f32, f32)> = HashMap::new();
+    for f in &domain_fields {
+        for (key, &(alpha, beta)) in &f.propagation_stats {
+            let entry = merged_stats.entry(key.clone()).or_insert((0.0, 0.0));
+            entry.0 += alpha;
+            entry.1 += beta;
+        }
+    }
+    let mut propagation_edges: Vec<PropagationEdge> = merged_stats
+        .iter()
+        .map(|(key, &(alpha, beta))| {
+            let parts: Vec<&str> = key.splitn(3, ':').collect();
+            let source_role = parts.first().unwrap_or(&"?").to_string();
+            let direction = parts.get(1).unwrap_or(&"?").to_string();
+            let cluster = parts.get(2).unwrap_or(&"").to_string();
+            let sum = alpha + beta;
+            let mean = if sum > 0.001 { alpha / sum } else { 0.5 };
+            PropagationEdge {
+                source_role,
+                direction,
+                cluster,
+                alpha,
+                beta,
+                mean,
+                pruned: mean < 0.3
+                    && parts.first().map(|r| {
+                        matches!(
+                            *r,
+                            "navigation" | "complementary" | "contentinfo" | "banner"
+                        )
+                    }) == Some(true),
+            }
+        })
+        .collect();
+    propagation_edges.sort_by(|a, b| b.mean.total_cmp(&a.mean));
+
+    // Nivå 3: Query clusters — extrahera unika clusters från propagation_stats keys
+    let mut cluster_map: HashMap<String, Vec<String>> = HashMap::new();
+    for key in merged_stats.keys() {
+        let parts: Vec<&str> = key.splitn(3, ':').collect();
+        if parts.len() >= 3 && !parts[2].is_empty() {
+            let cluster = parts[2].to_string();
+            let role = parts[0].to_string();
+            cluster_map.entry(cluster).or_default().push(role);
+        }
+    }
+    let mut query_clusters: Vec<QueryCluster> = cluster_map
+        .into_iter()
+        .map(|(cluster_id, mut roles)| {
+            roles.sort_unstable();
+            roles.dedup();
+            let edge_count = roles.len();
+            roles.truncate(5);
+            QueryCluster {
+                cluster_id,
+                edge_count,
+                top_roles: roles,
+            }
+        })
+        .collect();
+    query_clusters.sort_by(|a, b| b.edge_count.cmp(&a.edge_count));
+
+    // Nivå 4: Node leaderboard — samla noder med causal memory
+    let cache = match FIELD_CACHE.lock() {
+        Ok(c) => c,
+        Err(p) => p.into_inner(),
+    };
+    let mut all_nodes: Vec<NodeIntelligence> = Vec::new();
+    for (_, _, field) in &cache.entries {
+        if field.domain_hash != target_domain_hash {
+            continue;
+        }
+        for (&nid, state) in &field.nodes {
+            if state.hit_count > 0 || state.query_count >= 3 {
+                let label = field.node_labels.get(&nid).cloned().unwrap_or_default();
+                let label_trunc = if label.len() > 80 {
+                    format!("{}...", &label[..label.floor_char_boundary(77)])
+                } else {
+                    label
+                };
+                let sr = if state.query_count > 0 {
+                    state.hit_count as f32 / state.query_count as f32
+                } else {
+                    0.0
+                };
+                all_nodes.push(NodeIntelligence {
+                    node_id: nid,
+                    role: state.role.clone(),
+                    label: label_trunc,
+                    depth: state.depth,
+                    hit_count: state.hit_count,
+                    miss_count: state.miss_count,
+                    query_count: state.query_count,
+                    success_rate: sr,
+                    suppressed: state.query_count >= 3 && sr < 0.25,
+                });
+            }
+        }
+    }
+    all_nodes.sort_by(|a, b| b.hit_count.cmp(&a.hit_count));
+    all_nodes.truncate(30); // Top 30 noder
+
+    // Nivå 5: URL-lista
+    let structure_hashes: Vec<u64> = domain_fields.iter().map(|f| f.structure_hash).collect();
+    let urls: Vec<UrlDetail> = domain_fields
+        .iter()
+        .map(|f| {
+            let comp = if f.total_chars_in > 0 {
+                ((1.0 - f.total_chars_out as f64 / f.total_chars_in as f64) * 100.0) as f32
+            } else {
+                0.0
+            };
+            // Template match: minst en annan URL har samma structure_hash
+            let template_match = structure_hashes
+                .iter()
+                .filter(|&&h| h == f.structure_hash && h != 0)
+                .count()
+                > 1;
+            UrlDetail {
+                url: f.url.clone(),
+                node_count: f.node_count,
+                total_queries: f.total_queries,
+                total_feedback: f.total_feedback,
+                learned_nodes: f.learned_nodes,
+                total_chars_in: f.total_chars_in,
+                total_chars_out: f.total_chars_out,
+                compression_pct: comp,
+                p95_latency_us: f.p95_latency_us,
+                template_match,
+                max_depth: f.max_depth,
+            }
+        })
+        .collect();
+
+    Some(DomainIntelligence {
+        domain,
+        domain_hash: target_domain_hash,
+        url_count: domain_fields.len(),
+        total_queries,
+        total_feedback,
+        total_learned_nodes: total_learned,
+        total_chars_in,
+        total_chars_out,
+        compression_pct,
+        avg_latency_us,
+        p95_latency_us,
+        answer_zones,
+        propagation_edges,
+        query_clusters,
+        top_nodes: all_nodes,
+        urls,
+    })
 }
 
 #[cfg(test)]
@@ -3718,23 +4324,33 @@ mod tests {
 
     #[test]
     fn test_structural_cascade_bypass() {
-        // Test that heading nodes are included in cascade even without BM25 match
-        // Build a large enough tree (>= 200 nodes) to trigger cascade filtering
+        // Test that heading nodes WITH children are included in cascade
+        // even without BM25 match. Leaf headings are excluded (by design).
         let mut children = Vec::new();
         for i in 0..200 {
-            children.push(make_node(
-                i + 10,
-                if i < 5 { "heading" } else { "generic" },
-                &format!("Node content {}", i),
-                vec![],
-            ));
+            if i < 5 {
+                // Headings with a child node (non-leaf)
+                children.push(make_node(
+                    i + 10,
+                    "heading",
+                    &format!("Section heading {}", i),
+                    vec![make_node(i + 1000, "text", "Content under heading", vec![])],
+                ));
+            } else {
+                children.push(make_node(
+                    i + 10,
+                    "generic",
+                    &format!("Node content {}", i),
+                    vec![],
+                ));
+            }
         }
         let tree = vec![make_node(1, "main", "Page", children)];
 
         let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
         let results = field.propagate("find article headlines");
 
-        // Heading nodes (10-14) should be in results thanks to structural cascade bypass
+        // Heading nodes (10-14) WITH children should be in results via structural bypass
         let heading_ids: Vec<u32> = (10..15).collect();
         let found = results
             .iter()
@@ -3743,7 +4359,7 @@ mod tests {
 
         assert!(
             found >= 3,
-            "Borde hitta minst 3 av 5 headings via structural bypass, hittade {found}"
+            "Borde hitta minst 3 av 5 headings (med barn) via structural bypass, hittade {found}"
         );
     }
 
