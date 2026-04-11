@@ -1288,7 +1288,7 @@ pub fn parse_crfr_from_tree_broad(
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
-                    "label": truncate_label(&node.label, 500),
+                    "label": truncate_label(&node.label, 2000),
                     "relevance": r.amplitude,
                     "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
@@ -1458,7 +1458,7 @@ pub fn parse_crfr_from_tree_js(
                 serde_json::json!({
                     "id": node.id,
                     "role": node.role,
-                    "label": truncate_label(&node.label, 500),
+                    "label": truncate_label(&node.label, 2000),
                     "relevance": r.amplitude,
                     "confidence": confidence,
                     "resonance_type": format!("{:?}", r.resonance_type),
