@@ -1374,33 +1374,48 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
         return original_result.to_string();
     }
 
-    // Fetch + CRFR each link, collect replacement nodes per index
+    // Phase 1: Parallel fetch all links concurrently via JoinSet
+    let mut fetch_set = tokio::task::JoinSet::new();
+    for (idx, label, url) in &follow_targets {
+        if aether_agent::fetch::validate_url(url).is_err() {
+            continue;
+        }
+        let url = url.clone();
+        let label = label.clone();
+        let idx = *idx;
+        fetch_set.spawn(async move {
+            let config = aether_agent::types::FetchConfig::default();
+            match aether_agent::fetch::fetch_page(&url, &config).await {
+                Ok(r) => Some((idx, label, url, r.final_url, r.body)),
+                Err(_) => None,
+            }
+        });
+    }
+
+    let mut fetched_pages: Vec<(usize, String, String, String, String)> = Vec::new();
+    while let Some(result) = fetch_set.join_next().await {
+        if let Ok(Some(page)) = result {
+            fetched_pages.push(page);
+        }
+    }
+    // Sort by original index to maintain deterministic order
+    fetched_pages.sort_by_key(|(idx, _, _, _, _)| *idx);
+
+    // Phase 2: Sequential CRFR on fetched pages (mutex requires single-thread)
     let mut replacements: std::collections::HashMap<usize, Vec<serde_json::Value>> =
         std::collections::HashMap::new();
     let mut followed_urls: Vec<String> = Vec::new();
 
-    for (idx, label, fetch_url) in &follow_targets {
-        if aether_agent::fetch::validate_url(fetch_url).is_err() {
-            continue;
-        }
-        let config = aether_agent::types::FetchConfig::default();
-        let fetched = match aether_agent::fetch::fetch_page(fetch_url, &config).await {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
+    for (idx, label, fetch_url, final_url, body) in &fetched_pages {
         // Post-redirect dedup
-        let final_norm = normalize(&fetched.final_url);
+        let final_norm = normalize(final_url);
         let fetch_norm = normalize(fetch_url);
         if final_norm != fetch_norm && !seen.insert(final_norm) {
             continue;
         }
 
-        let g = goal.to_string();
-        let u = fetched.final_url.clone();
-        let h = fetched.body;
         let n = top_n.min(5);
-        let link_result = aether_agent::parse_crfr(&h, &g, &u, n, false, "json");
+        let link_result = aether_agent::parse_crfr(body, goal, final_url, n, false, "json");
 
         if let Ok(link_parsed) = serde_json::from_str::<serde_json::Value>(&link_result) {
             if let Some(link_nodes) = link_parsed.get("nodes").and_then(|n| n.as_array()) {
@@ -1438,7 +1453,7 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
                 }
                 if !content_nodes.is_empty() {
                     replacements.insert(*idx, content_nodes);
-                    followed_urls.push(format!("{}: {}", label, fetch_url));
+                    followed_urls.push(format!("{}: {}", label, final_url));
                 }
             }
         }
