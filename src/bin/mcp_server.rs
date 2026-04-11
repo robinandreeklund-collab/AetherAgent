@@ -1639,73 +1639,68 @@ async fn handle_parse_crfr(
 }
 
 /// Link-following: extrahera hög-amplitude links, fetcha och kör CRFR, merga resultat.
-/// Max 3 links per anrop, threshold amplitude > 1.0.
+/// Dedup: samma URL följs aldrig två gånger (normaliserad + post-redirect).
+/// Filtrerar annonser och rå SSR-data från följda sidor.
 async fn follow_relevant_links(
     original_result: &str,
     goal: &str,
     top_n: u32,
     _output_format: &str,
 ) -> String {
-    const MAX_FOLLOW_LINKS: usize = 3;
-    const MIN_LINK_AMPLITUDE: f64 = 1.0;
+    const MAX_FOLLOW: usize = 3;
+    const MIN_AMP: f64 = 1.0;
 
-    // Parsa original-resultatet
     let parsed: serde_json::Value = match serde_json::from_str(original_result) {
         Ok(v) => v,
         Err(_) => return original_result.to_string(),
     };
 
-    // Extrahera link-noder med hög amplitude och action="click"
     let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
         Some(n) => n,
         None => return original_result.to_string(),
     };
 
-    let mut link_urls: Vec<(String, String)> = Vec::new(); // (label, href)
     let original_url = parsed
         .get("url")
         .and_then(|v| v.as_str())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .to_string();
 
+    // Normalisera URL för dedup
+    let normalize = |u: &str| -> String {
+        let no_frag = u.split('#').next().unwrap_or(u);
+        let no_query = no_frag.split('?').next().unwrap_or(no_frag);
+        no_query.trim_end_matches('/').to_lowercase()
+    };
+
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    seen.insert(normalize(&original_url));
+
+    // Extrahera unika link-noder
+    let mut link_urls: Vec<(String, String)> = Vec::new();
     for node in nodes {
         let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
         let action = node.get("action").and_then(|v| v.as_str()).unwrap_or("");
-        let amplitude = node
+        let amp = node
             .get("relevance")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
         let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
 
-        if role == "link" && action == "click" && amplitude > MIN_LINK_AMPLITUDE {
-            // Extrahera href från value-fält (innehåller href/action URL)
-            if let Some(value) = node.get("value").and_then(|v| v.as_str()) {
-                let href = value.split_whitespace().next().unwrap_or(value);
-                if href.starts_with("http") || href.starts_with("/") {
-                    link_urls.push((label.to_string(), href.to_string()));
-                }
-            }
+        if role != "link" || action != "click" || amp <= MIN_AMP {
+            continue;
+        }
+        let href = match node.get("value").and_then(|v| v.as_str()) {
+            Some(v) => v.split_whitespace().next().unwrap_or(v),
+            None => continue,
+        };
+        if !href.starts_with("http") && !href.starts_with('/') {
+            continue;
         }
 
-        if link_urls.len() >= MAX_FOLLOW_LINKS {
-            break;
-        }
-    }
-
-    if link_urls.is_empty() {
-        // Inga följbara links hittade — returnera original
-        return original_result.to_string();
-    }
-
-    // Fetcha och kör CRFR på varje link
-    let mut followed_nodes: Vec<serde_json::Value> = Vec::new();
-    let mut followed_urls: Vec<String> = Vec::new();
-
-    for (label, href) in &link_urls {
-        // Resolve relativ URL mot original
-        let fetch_url = if href.starts_with("http") {
-            href.clone()
+        let resolved = if href.starts_with("http") {
+            href.to_string()
         } else {
-            // Bygg bas-URL: "https://example.com" från original_url
             let parts: Vec<&str> = original_url.splitn(4, '/').collect();
             if parts.len() >= 3 {
                 format!(
@@ -1719,21 +1714,40 @@ async fn follow_relevant_links(
             }
         };
 
-        if aether_agent::fetch::validate_url(&fetch_url).is_err() {
+        if !seen.insert(normalize(&resolved)) {
             continue;
         }
+        link_urls.push((label.to_string(), resolved));
+        if link_urls.len() >= MAX_FOLLOW {
+            break;
+        }
+    }
 
+    if link_urls.is_empty() {
+        return original_result.to_string();
+    }
+
+    let mut followed_nodes: Vec<serde_json::Value> = Vec::new();
+    let mut followed_urls: Vec<String> = Vec::new();
+
+    for (label, fetch_url) in &link_urls {
+        if aether_agent::fetch::validate_url(fetch_url).is_err() {
+            continue;
+        }
         let config = aether_agent::types::FetchConfig::default();
-        let fetch_result = match aether_agent::fetch::fetch_page(&fetch_url, &config).await {
+        let fetched = match aether_agent::fetch::fetch_page(fetch_url, &config).await {
             Ok(r) => r,
             Err(_) => continue,
         };
+        if !seen.insert(normalize(&fetched.final_url)) {
+            continue;
+        }
 
         let link_result = aether_agent::parse_crfr(
-            &fetch_result.body,
+            &fetched.body,
             goal,
-            &fetch_result.final_url,
-            top_n.min(5), // Max 5 noder per följd link
+            &fetched.final_url,
+            top_n.min(5),
             false,
             "json",
         );
@@ -1741,21 +1755,45 @@ async fn follow_relevant_links(
         if let Ok(link_parsed) = serde_json::from_str::<serde_json::Value>(&link_result) {
             if let Some(link_nodes) = link_parsed.get("nodes").and_then(|n| n.as_array()) {
                 for node in link_nodes.iter().take(3) {
-                    followed_nodes.push(node.clone());
+                    let node_label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                    let ll = node_label.to_lowercase();
+                    if ll.starts_with("annons")
+                        || ll.starts_with("ad ")
+                        || ll.starts_with("advertisement")
+                        || ll.contains("sponsored")
+                        || ll.contains("cookie")
+                        || node_label.len() < 5
+                    {
+                        continue;
+                    }
+                    let node_role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    if node_role == "data"
+                        && node
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|n| n.contains('[') || n.contains("page.@"))
+                    {
+                        continue;
+                    }
+
+                    let mut n = node.clone();
+                    if let Some(obj) = n.as_object_mut() {
+                        obj.insert("source".to_string(), serde_json::json!("followed_link"));
+                        obj.insert("source_url".to_string(), serde_json::json!(fetch_url));
+                    }
+                    followed_nodes.push(n);
                 }
             }
         }
         followed_urls.push(format!("{}: {}", label, fetch_url));
     }
 
-    // Merga: original-resultat + followed_nodes
     if followed_nodes.is_empty() {
         return original_result.to_string();
     }
 
     let mut merged = parsed.clone();
     if let Some(obj) = merged.as_object_mut() {
-        // Lägg till followed_links-metadata
         obj.insert(
             "followed_links".to_string(),
             serde_json::json!({
@@ -1764,21 +1802,12 @@ async fn follow_relevant_links(
                 "extra_nodes": followed_nodes.len(),
             }),
         );
-
-        // Merga extra noder med markering
-        // Beräkna count FÖRST, sedan insert (undvik dubbel mutable borrow)
         let new_count = {
-            if let Some(existing_nodes) = obj.get_mut("nodes").and_then(|n| n.as_array_mut()) {
-                for mut node in followed_nodes {
-                    if let Some(nobj) = node.as_object_mut() {
-                        nobj.insert(
-                            "source".to_string(),
-                            serde_json::Value::String("followed_link".to_string()),
-                        );
-                    }
-                    existing_nodes.push(node);
+            if let Some(existing) = obj.get_mut("nodes").and_then(|n| n.as_array_mut()) {
+                for node in followed_nodes {
+                    existing.push(node);
                 }
-                Some(existing_nodes.len())
+                Some(existing.len())
             } else {
                 None
             }
