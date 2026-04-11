@@ -1648,7 +1648,7 @@ async fn follow_relevant_links(
     _output_format: &str,
 ) -> String {
     const MAX_FOLLOW: usize = 3;
-    const MIN_AMP: f64 = 1.0;
+    const MIN_AMP_FLOOR: f64 = 0.5;
 
     let parsed: serde_json::Value = match serde_json::from_str(original_result) {
         Ok(v) => v,
@@ -1676,6 +1676,13 @@ async fn follow_relevant_links(
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     seen.insert(normalize(&original_url));
 
+    // Adaptive threshold: 50% av top-nodens amplitude, minst 0.5
+    let top_amp = nodes
+        .iter()
+        .filter_map(|n| n.get("relevance").and_then(|v| v.as_f64()))
+        .fold(0.0_f64, f64::max);
+    let min_amp = (top_amp * 0.5).max(MIN_AMP_FLOOR);
+
     // Extrahera unika link-noder
     let mut link_urls: Vec<(String, String)> = Vec::new();
     for node in nodes {
@@ -1687,7 +1694,7 @@ async fn follow_relevant_links(
             .unwrap_or(0.0);
         let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
 
-        if role != "link" || action != "click" || amp <= MIN_AMP {
+        if role != "link" || action != "click" || amp <= min_amp {
             continue;
         }
         let href = match node.get("value").and_then(|v| v.as_str()) {
@@ -1739,7 +1746,10 @@ async fn follow_relevant_links(
             Ok(r) => r,
             Err(_) => continue,
         };
-        if !seen.insert(normalize(&fetched.final_url)) {
+        // Post-redirect dedup: only if redirect changed the URL
+        let final_norm = normalize(&fetched.final_url);
+        let fetch_norm = normalize(fetch_url);
+        if final_norm != fetch_norm && !seen.insert(final_norm) {
             continue;
         }
 

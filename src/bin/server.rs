@@ -1241,10 +1241,7 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     // Follow high-relevance links if requested
     #[cfg(feature = "fetch")]
     let result = if follow_links {
-        eprintln!("[FOLLOW-LINKS] Activated for goal={}", goal);
-        let r = follow_relevant_links_http(&result, &goal, top_n).await;
-        eprintln!("[FOLLOW-LINKS] Done, result len={}", r.len());
-        r
+        follow_relevant_links_http(&result, &goal, top_n).await
     } else {
         result
     };
@@ -1255,7 +1252,6 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     let result = if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&result) {
         json["raw_html_chars"] = serde_json::json!(raw_html_chars);
         json["fetch_ms"] = serde_json::json!(fetch_ms);
-        json["follow_links_requested"] = serde_json::json!(follow_links);
         json.to_string()
     } else {
         result
@@ -1270,7 +1266,8 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
 #[cfg(feature = "fetch")]
 async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u32) -> String {
     const MAX_FOLLOW: usize = 3;
-    const MIN_AMP: f64 = 1.0;
+    // Adaptive threshold: använd 50% av top-nodens amplitude, min 0.5
+    const MIN_AMP_FLOOR: f64 = 0.5;
 
     let parsed: serde_json::Value = match serde_json::from_str(original_result) {
         Ok(v) => v,
@@ -1281,28 +1278,12 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
         Some(n) => n,
         None => return original_result.to_string(),
     };
-
-    // Debug: log how many link candidates we see
-    let link_candidates: Vec<_> = nodes
+    // Adaptive MIN_AMP: 50% av top-nodens amplitude, minst 0.5
+    let top_amp = nodes
         .iter()
-        .filter(|n| {
-            n.get("role").and_then(|v| v.as_str()) == Some("link")
-                && n.get("action").and_then(|v| v.as_str()) == Some("click")
-                && n.get("relevance").and_then(|v| v.as_f64()).unwrap_or(0.0) > MIN_AMP
-        })
-        .collect();
-    eprintln!(
-        "[FOLLOW-LINKS] {} link candidates with amp > {}",
-        link_candidates.len(),
-        MIN_AMP
-    );
-    for c in &link_candidates {
-        eprintln!(
-            "[FOLLOW-LINKS]   value={:?} label={:?}",
-            c.get("value").and_then(|v| v.as_str()).unwrap_or("NULL"),
-            c.get("label").and_then(|v| v.as_str()).unwrap_or("?")
-        );
-    }
+        .filter_map(|n| n.get("relevance").and_then(|v| v.as_f64()))
+        .fold(0.0_f64, f64::max);
+    let min_amp = (top_amp * 0.5).max(MIN_AMP_FLOOR);
 
     let original_url = parsed
         .get("url")
@@ -1335,7 +1316,7 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
             .unwrap_or(0.0);
         let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
 
-        if role != "link" || action != "click" || amp <= MIN_AMP {
+        if role != "link" || action != "click" || amp <= min_amp {
             continue;
         }
 
@@ -1396,45 +1377,39 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
             Err(_) => continue,
         };
 
-        // Also dedup on final_url (after redirects)
+        // Post-redirect dedup: only check if redirect changed the URL
         let final_normalized = normalize_url(&fetched.final_url);
-        if !seen_urls.insert(final_normalized) {
-            continue; // Redirect landed on already-seen URL
+        let fetch_normalized = normalize_url(fetch_url);
+        if final_normalized != fetch_normalized && !seen_urls.insert(final_normalized) {
+            continue;
         }
 
         let g = goal.to_string();
         let u = fetched.final_url.clone();
         let h = fetched.body;
         let n = top_n.min(5);
-        let link_result = tokio::task::spawn_blocking(move || {
-            aether_agent::parse_crfr(&h, &g, &u, n, false, "json")
-        })
-        .await
-        .unwrap_or_default();
+        // Kör CRFR synkront (spawn_blocking deadlockar med FIELD_CACHE mutex)
+        let link_result = aether_agent::parse_crfr(&h, &g, &u, n, false, "json");
 
         if let Ok(link_parsed) = serde_json::from_str::<serde_json::Value>(&link_result) {
             if let Some(link_nodes) = link_parsed.get("nodes").and_then(|n| n.as_array()) {
                 for node in link_nodes.iter().take(3) {
                     // Filter: skip ad/boilerplate from followed pages
                     let node_label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                    let node_role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
                     let label_lower = node_label.to_lowercase();
-                    if label_lower.starts_with("annons")
+                    let skip_ad = label_lower.starts_with("annons")
                         || label_lower.starts_with("ad ")
                         || label_lower.starts_with("advertisement")
                         || label_lower.contains("sponsored")
-                        || label_lower.contains("cookie")
-                        || node_label.len() < 5
-                    {
-                        continue;
-                    }
-                    // Skip raw SSR data nodes (key: value patterns)
-                    let node_role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                    if node_role == "data"
+                        || label_lower.contains("cookie");
+                    let skip_short = node_label.len() < 5;
+                    let skip_ssr = node_role == "data"
                         && node
                             .get("name")
                             .and_then(|v| v.as_str())
-                            .is_some_and(|n| n.contains('[') || n.contains("page.@"))
-                    {
+                            .is_some_and(|n| n.contains('[') || n.contains("page.@"));
+                    if skip_ad || skip_short || skip_ssr {
                         continue;
                     }
 
