@@ -1282,6 +1282,28 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
         None => return original_result.to_string(),
     };
 
+    // Debug: log how many link candidates we see
+    let link_candidates: Vec<_> = nodes
+        .iter()
+        .filter(|n| {
+            n.get("role").and_then(|v| v.as_str()) == Some("link")
+                && n.get("action").and_then(|v| v.as_str()) == Some("click")
+                && n.get("relevance").and_then(|v| v.as_f64()).unwrap_or(0.0) > MIN_AMP
+        })
+        .collect();
+    eprintln!(
+        "[FOLLOW-LINKS] {} link candidates with amp > {}",
+        link_candidates.len(),
+        MIN_AMP
+    );
+    for c in &link_candidates {
+        eprintln!(
+            "[FOLLOW-LINKS]   value={:?} label={:?}",
+            c.get("value").and_then(|v| v.as_str()).unwrap_or("NULL"),
+            c.get("label").and_then(|v| v.as_str()).unwrap_or("?")
+        );
+    }
+
     let original_url = parsed
         .get("url")
         .and_then(|v| v.as_str())
