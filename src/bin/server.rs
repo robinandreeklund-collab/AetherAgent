@@ -1424,6 +1424,10 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
                 for node in ln.iter().take(2) {
                     let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
                     let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    // Skip links from followed pages too
+                    if nr == "link" {
+                        continue;
+                    }
                     let ll = nl.to_lowercase();
                     if nl.len() < 10
                         || ll.starts_with("annons")
@@ -1468,19 +1472,12 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
                 new_nodes.push(r.clone());
             }
         } else {
-            // Only remove link nodes that were ATTEMPTED but failed to produce content.
-            // Links we didn't attempt (beyond MAX_FOLLOW) stay — we didn't fetch them.
+            // Remove ALL link nodes — we want content, not links.
+            // Links that were followed got replaced above.
+            // Links that weren't followed provide no value to the user.
             let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
             if role == "link" {
-                let value = node.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                // Always remove anchors and unfollowable links
-                if value.starts_with('#') {
-                    continue;
-                }
-                let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                if label.trim().len() < 10 || !should_follow_link(label) {
-                    continue;
-                }
+                continue;
             }
             new_nodes.push(node.clone());
         }

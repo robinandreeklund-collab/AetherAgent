@@ -1761,6 +1761,9 @@ async fn follow_relevant_links(
                 for node in ln.iter().take(2) {
                     let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
                     let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    if nr == "link" {
+                        continue;
+                    }
                     let ll = nl.to_lowercase();
                     if nl.len() < 10
                         || ll.starts_with("annons")
@@ -1807,14 +1810,7 @@ async fn follow_relevant_links(
         } else {
             let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
             if role == "link" {
-                let value = node.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                if value.starts_with('#') {
-                    continue;
-                }
-                let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                if label.trim().len() < 10 || !should_follow_link_mcp(label) {
-                    continue;
-                }
+                continue;
             }
             new_nodes.push(node.clone());
         }
