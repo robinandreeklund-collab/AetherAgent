@@ -1646,7 +1646,7 @@ async fn follow_relevant_links(
     top_n: u32,
     _output_format: &str,
 ) -> String {
-    const MAX_FOLLOW: usize = 3;
+    const MAX_FOLLOW: usize = 10;
     const MIN_AMP_FLOOR: f64 = 0.5;
 
     let parsed: serde_json::Value = match serde_json::from_str(original_result) {
@@ -1807,12 +1807,12 @@ async fn follow_relevant_links(
         } else {
             let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
             if role == "link" {
-                let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
                 let value = node.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                if value.starts_with('#')
-                    || label.trim().len() < 10
-                    || !should_follow_link_mcp(label)
-                {
+                if value.starts_with('#') {
+                    continue;
+                }
+                let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                if label.trim().len() < 10 || !should_follow_link_mcp(label) {
                     continue;
                 }
             }

@@ -1280,7 +1280,7 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
 /// from the target page, marked with source="followed_link" + source_url.
 #[cfg(feature = "fetch")]
 async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u32) -> String {
-    const MAX_FOLLOW: usize = 3;
+    const MAX_FOLLOW: usize = 10;
     const MIN_AMP_FLOOR: f64 = 0.5;
 
     let parsed: serde_json::Value = match serde_json::from_str(original_result) {
@@ -1456,13 +1456,17 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
                 new_nodes.push(r.clone());
             }
         } else {
-            // Remove bare link nodes that can't provide content:
-            // anchors (#section), short nav ("All", "Product"), promo
+            // Only remove link nodes that were ATTEMPTED but failed to produce content.
+            // Links we didn't attempt (beyond MAX_FOLLOW) stay — we didn't fetch them.
             let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
             if role == "link" {
-                let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
                 let value = node.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                if value.starts_with('#') || label.trim().len() < 10 || !should_follow_link(label) {
+                // Always remove anchors and unfollowable links
+                if value.starts_with('#') {
+                    continue;
+                }
+                let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                if label.trim().len() < 10 || !should_follow_link(label) {
                     continue;
                 }
             }
