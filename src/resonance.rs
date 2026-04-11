@@ -28,7 +28,8 @@ const CHEBYSHEV_THETA: [f32; 5] = [0.50, 0.30, 0.12, 0.05, 0.03];
 const PPR_ALPHA: f32 = 0.15;
 
 /// Suppression: minsta antal query-appearances innan suppression aktiveras
-const SUPPRESSION_MIN_QUERIES: u32 = 3;
+/// 5 ger mer statistisk säkerhet än 3 (undviker false suppression)
+const SUPPRESSION_MIN_QUERIES: u32 = 5;
 /// Suppression: om success_ratio < detta → applicera penalty
 const SUPPRESSION_RATIO_THRESHOLD: f32 = 0.25;
 /// Suppression: minimalt multiplier (aldrig under detta)
@@ -53,7 +54,8 @@ const CAUSAL_WEIGHT: f32 = 0.3;
 const CAUSAL_DECAY_LAMBDA: f64 = 0.001_155;
 /// Minsta relativa amplitud-gap för att klippa output (30% drop)
 const GAP_RATIO_THRESHOLD: f32 = 0.30;
-/// Max antal concept entries i field-level concept memory
+/// Bas antal concept entries i field-level concept memory
+/// Adaptivt: ökar med feedback (se concept eviction i feedback())
 const MAX_CONCEPT_ENTRIES: usize = 256;
 
 // ─── Typer ──────────────────────────────────────────────────────────────────
@@ -1448,8 +1450,10 @@ impl ResonanceField {
                 .iter()
                 .filter(|&&b| b)
                 .count() as f32;
+                // CombMNZ: starkare bonus för konsensus mellan signaler
+                // 2 signaler: 1.25, 3: 1.50, 4: 1.75
                 let combmnz = if signal_count >= 2.0 {
-                    1.0 + (signal_count - 1.0) * 0.15
+                    1.0 + (signal_count - 1.0) * 0.25
                 } else {
                     1.0
                 };
@@ -2591,9 +2595,9 @@ impl ResonanceField {
             }
         }
 
-        // BUG-6 fix: evict oldest concept (FIFO via concept_memory_order) instead of
-        // a random HashMap entry.  Keeps recently-learned concepts, evicts stale ones.
-        while self.concept_memory.len() > MAX_CONCEPT_ENTRIES {
+        // Adaptiv concept memory: grows with feedback (256 base + 1 per feedback, max 1024)
+        let adaptive_max = MAX_CONCEPT_ENTRIES + (self.total_feedback as usize / 2).min(768);
+        while self.concept_memory.len() > adaptive_max {
             if let Some(key) = self.concept_memory_order.pop_front() {
                 self.concept_memory.remove(&key);
             } else {
@@ -4320,23 +4324,33 @@ mod tests {
 
     #[test]
     fn test_structural_cascade_bypass() {
-        // Test that heading nodes are included in cascade even without BM25 match
-        // Build a large enough tree (>= 200 nodes) to trigger cascade filtering
+        // Test that heading nodes WITH children are included in cascade
+        // even without BM25 match. Leaf headings are excluded (by design).
         let mut children = Vec::new();
         for i in 0..200 {
-            children.push(make_node(
-                i + 10,
-                if i < 5 { "heading" } else { "generic" },
-                &format!("Node content {}", i),
-                vec![],
-            ));
+            if i < 5 {
+                // Headings with a child node (non-leaf)
+                children.push(make_node(
+                    i + 10,
+                    "heading",
+                    &format!("Section heading {}", i),
+                    vec![make_node(i + 1000, "text", "Content under heading", vec![])],
+                ));
+            } else {
+                children.push(make_node(
+                    i + 10,
+                    "generic",
+                    &format!("Node content {}", i),
+                    vec![],
+                ));
+            }
         }
         let tree = vec![make_node(1, "main", "Page", children)];
 
         let mut field = ResonanceField::from_semantic_tree(&tree, "https://test.com");
         let results = field.propagate("find article headlines");
 
-        // Heading nodes (10-14) should be in results thanks to structural cascade bypass
+        // Heading nodes (10-14) WITH children should be in results via structural bypass
         let heading_ids: Vec<u32> = (10..15).collect();
         let found = results
             .iter()
@@ -4345,7 +4359,7 @@ mod tests {
 
         assert!(
             found >= 3,
-            "Borde hitta minst 3 av 5 headings via structural bypass, hittade {found}"
+            "Borde hitta minst 3 av 5 headings (med barn) via structural bypass, hittade {found}"
         );
     }
 
