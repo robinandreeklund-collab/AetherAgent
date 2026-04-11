@@ -75,6 +75,8 @@ struct ParseCrfrRequest {
     run_js: bool,
     #[serde(default = "default_json")]
     output_format: String,
+    #[serde(default)]
+    follow_links: bool,
 }
 
 fn default_crfr_top_n() -> u32 {
@@ -1112,6 +1114,7 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
 }
 
 async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoResponse {
+    let follow_links = req.follow_links;
     let goal = req.goal;
     let url = req.url;
     let top_n = req.top_n;
@@ -1235,6 +1238,16 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     .await
     .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
 
+    // Follow high-relevance links if requested
+    #[cfg(feature = "fetch")]
+    let result = if follow_links {
+        follow_relevant_links_http(&result, &goal, top_n).await
+    } else {
+        result
+    };
+    #[cfg(not(feature = "fetch"))]
+    let _ = follow_links;
+
     // Inject raw_html_chars and fetch_ms into the JSON response
     let result = if let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&result) {
         json["raw_html_chars"] = serde_json::json!(raw_html_chars);
@@ -1245,6 +1258,147 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     };
 
     (StatusCode::OK, result).into_response()
+}
+
+/// Follow high-relevance link nodes: fetch targets, run CRFR, merge extra nodes.
+#[cfg(feature = "fetch")]
+async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u32) -> String {
+    const MAX_FOLLOW: usize = 3;
+    const MIN_AMP: f64 = 1.0;
+
+    let parsed: serde_json::Value = match serde_json::from_str(original_result) {
+        Ok(v) => v,
+        Err(_) => return original_result.to_string(),
+    };
+
+    let nodes = match parsed.get("nodes").and_then(|n| n.as_array()) {
+        Some(n) => n,
+        None => return original_result.to_string(),
+    };
+
+    let original_url = parsed
+        .get("url")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    // Extract link nodes with high amplitude + value URL
+    let mut link_urls: Vec<(String, String)> = Vec::new();
+    for node in nodes {
+        let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let action = node.get("action").and_then(|v| v.as_str()).unwrap_or("");
+        let amp = node
+            .get("relevance")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+
+        if role == "link" && action == "click" && amp > MIN_AMP {
+            if let Some(value) = node.get("value").and_then(|v| v.as_str()) {
+                let href = value.split_whitespace().next().unwrap_or(value);
+                if href.starts_with("http") || href.starts_with('/') {
+                    link_urls.push((label.to_string(), href.to_string()));
+                }
+            }
+        }
+        if link_urls.len() >= MAX_FOLLOW {
+            break;
+        }
+    }
+
+    if link_urls.is_empty() {
+        return original_result.to_string();
+    }
+
+    // Resolve + fetch + CRFR each link
+    let mut followed_nodes: Vec<serde_json::Value> = Vec::new();
+    let mut followed_urls: Vec<String> = Vec::new();
+
+    for (label, href) in &link_urls {
+        let fetch_url = if href.starts_with("http") {
+            href.clone()
+        } else {
+            let parts: Vec<&str> = original_url.splitn(4, '/').collect();
+            if parts.len() >= 3 {
+                format!(
+                    "{}//{}/{}",
+                    parts[0],
+                    parts[2],
+                    href.trim_start_matches('/')
+                )
+            } else {
+                continue;
+            }
+        };
+
+        if aether_agent::fetch::validate_url(&fetch_url).is_err() {
+            continue;
+        }
+
+        let config = aether_agent::types::FetchConfig::default();
+        let fetched = match aether_agent::fetch::fetch_page(&fetch_url, &config).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        let g = goal.to_string();
+        let u = fetched.final_url.clone();
+        let h = fetched.body;
+        let n = top_n.min(5);
+        let link_result = tokio::task::spawn_blocking(move || {
+            aether_agent::parse_crfr(&h, &g, &u, n, false, "json")
+        })
+        .await
+        .unwrap_or_default();
+
+        if let Ok(link_parsed) = serde_json::from_str::<serde_json::Value>(&link_result) {
+            if let Some(link_nodes) = link_parsed.get("nodes").and_then(|n| n.as_array()) {
+                for node in link_nodes.iter().take(3) {
+                    let mut n = node.clone();
+                    if let Some(obj) = n.as_object_mut() {
+                        obj.insert(
+                            "source".to_string(),
+                            serde_json::Value::String("followed_link".to_string()),
+                        );
+                    }
+                    followed_nodes.push(n);
+                }
+            }
+        }
+        followed_urls.push(format!("{}: {}", label, fetch_url));
+    }
+
+    if followed_nodes.is_empty() {
+        return original_result.to_string();
+    }
+
+    // Merge into original result
+    let mut merged = parsed;
+    if let Some(obj) = merged.as_object_mut() {
+        obj.insert(
+            "followed_links".to_string(),
+            serde_json::json!({
+                "count": followed_urls.len(),
+                "urls": followed_urls,
+                "extra_nodes": followed_nodes.len(),
+            }),
+        );
+        let new_count = {
+            if let Some(existing) = obj.get_mut("nodes").and_then(|n| n.as_array_mut()) {
+                for node in followed_nodes {
+                    existing.push(node);
+                }
+                Some(existing.len())
+            } else {
+                None
+            }
+        };
+        if let Some(count) = new_count {
+            obj.insert("node_count".to_string(), serde_json::json!(count));
+        }
+    }
+
+    serde_json::to_string(&merged).unwrap_or_else(|_| original_result.to_string())
 }
 
 async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl IntoResponse {
