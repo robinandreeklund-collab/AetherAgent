@@ -517,11 +517,11 @@ async function runDistill() {
     const [resJson, resMd] = await Promise.all([
       fetch('/api/parse-crfr', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url, goal, top_n: 10, output_format: 'json'})
+        body: JSON.stringify({url, goal, output_format: 'json'})
       }),
       fetch('/api/parse-crfr', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({url, goal, top_n: 10, output_format: 'markdown'})
+        body: JSON.stringify({url, goal, output_format: 'markdown'})
       })
     ]);
     if (!resJson.ok) throw new Error('Server returned ' + resJson.status);

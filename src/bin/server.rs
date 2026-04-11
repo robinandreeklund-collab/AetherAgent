@@ -82,7 +82,7 @@ struct ParseCrfrRequest {
 }
 
 fn default_crfr_top_n() -> u32 {
-    20
+    50
 }
 fn default_true() -> bool {
     true
