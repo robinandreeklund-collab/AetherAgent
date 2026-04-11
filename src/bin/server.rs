@@ -1448,15 +1448,24 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
         return original_result.to_string();
     }
 
-    // Build new nodes array: replace link nodes with their content
+    // Build new nodes: replace followed links, filter unfollowable links
     let mut new_nodes: Vec<serde_json::Value> = Vec::new();
     for (idx, node) in nodes.iter().enumerate() {
         if let Some(replacement) = replacements.get(&idx) {
-            // Replace link node with content from followed page
             for r in replacement {
                 new_nodes.push(r.clone());
             }
         } else {
+            // Remove bare link nodes that can't provide content:
+            // anchors (#section), short nav ("All", "Product"), promo
+            let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+            if role == "link" {
+                let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                let value = node.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                if value.starts_with('#') || label.trim().len() < 10 || !should_follow_link(label) {
+                    continue;
+                }
+            }
             new_nodes.push(node.clone());
         }
     }

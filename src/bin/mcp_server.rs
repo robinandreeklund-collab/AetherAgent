@@ -1797,7 +1797,7 @@ async fn follow_relevant_links(
         return original_result.to_string();
     }
 
-    // Build new nodes: replace followed links with content
+    // Build new nodes: replace followed links, filter unfollowable links
     let mut new_nodes: Vec<serde_json::Value> = Vec::new();
     for (idx, node) in nodes.iter().enumerate() {
         if let Some(repl) = replacements.get(&idx) {
@@ -1805,6 +1805,17 @@ async fn follow_relevant_links(
                 new_nodes.push(r.clone());
             }
         } else {
+            let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+            if role == "link" {
+                let label = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                let value = node.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                if value.starts_with('#')
+                    || label.trim().len() < 10
+                    || !should_follow_link_mcp(label)
+                {
+                    continue;
+                }
+            }
             new_nodes.push(node.clone());
         }
     }
