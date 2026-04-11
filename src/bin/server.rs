@@ -1374,9 +1374,8 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
         return original_result.to_string();
     }
 
-    // Single-phase: parallel fetch + CRFR per link (all concurrent)
-    // Each task: fetch → parse_crfr → filter → return content nodes
-    let mut task_set = tokio::task::JoinSet::new();
+    // Phase 1: Parallel fetch (network I/O concurrent)
+    let mut fetch_set = tokio::task::JoinSet::new();
     for (idx, label, url) in &follow_targets {
         if aether_agent::fetch::validate_url(url).is_err() {
             continue;
@@ -1384,84 +1383,76 @@ async fn follow_relevant_links_http(original_result: &str, goal: &str, top_n: u3
         let url = url.clone();
         let label = label.clone();
         let idx = *idx;
-        let goal = goal.to_string();
-        let n = top_n.min(5);
-        task_set.spawn(async move {
-            // Fetch with short timeout (3s per link)
+        fetch_set.spawn(async move {
             let config = aether_agent::types::FetchConfig {
                 timeout_ms: 3000,
                 ..Default::default()
             };
-            let fetched = match aether_agent::fetch::fetch_page(&url, &config).await {
-                Ok(r) => r,
-                Err(_) => return None,
-            };
-            // CRFR in blocking thread (takes FIELD_CACHE mutex briefly)
-            let final_url = fetched.final_url.clone();
-            let body = fetched.body;
-            let fetch_url = url.clone();
-            let crfr_result = tokio::task::spawn_blocking(move || {
-                aether_agent::parse_crfr(&body, &goal, &final_url, n, false, "json")
-            })
-            .await
-            .unwrap_or_default();
-
-            // Filter content nodes
-            let parsed: serde_json::Value = match serde_json::from_str(&crfr_result) {
-                Ok(v) => v,
-                Err(_) => return None,
-            };
-            let nodes = parsed.get("nodes").and_then(|n| n.as_array())?;
-            let mut content: Vec<serde_json::Value> = Vec::new();
-            for node in nodes.iter().take(2) {
-                let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
-                let ll = nl.to_lowercase();
-                if nl.len() < 10
-                    || ll.starts_with("annons")
-                    || ll.starts_with("advertisement")
-                    || ll.contains("cookie")
-                    || ll.contains("sponsored")
-                {
-                    continue;
-                }
-                if nr == "data"
-                    && node
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .is_some_and(|n| n.contains('[') || n.contains("page.@"))
-                {
-                    continue;
-                }
-                let mut n = node.clone();
-                if let Some(obj) = n.as_object_mut() {
-                    obj.insert("source".to_string(), serde_json::json!("followed_link"));
-                    obj.insert("source_url".to_string(), serde_json::json!(&fetch_url));
-                }
-                content.push(n);
+            match aether_agent::fetch::fetch_page(&url, &config).await {
+                Ok(r) => Some((idx, label, url, r.final_url, r.body)),
+                Err(_) => None,
             }
-            if content.is_empty() {
-                return None;
-            }
-            Some((idx, label, fetch_url, fetched.final_url.clone(), content))
         });
     }
 
-    // Collect results with 5s overall timeout
+    let mut fetched: Vec<(usize, String, String, String, String)> = Vec::new();
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    while let Ok(Some(result)) = tokio::time::timeout_at(deadline, fetch_set.join_next()).await {
+        if let Ok(Some(page)) = result {
+            fetched.push(page);
+        }
+    }
+
+    // Phase 2: Sequential CRFR on fetched pages
+    // MUST be sequential: spawn_blocking deadlocks with FIELD_CACHE mutex
     let mut replacements: std::collections::HashMap<usize, Vec<serde_json::Value>> =
         std::collections::HashMap::new();
     let mut followed_urls: Vec<String> = Vec::new();
 
-    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
-    while let Ok(Some(result)) = tokio::time::timeout_at(deadline, task_set.join_next()).await {
-        if let Ok(Some((idx, label, _fetch_url, final_url, content))) = result {
-            // Post-redirect dedup
-            let final_norm = normalize(&final_url);
-            if !seen.insert(final_norm.clone()) {
-                continue;
+    for (idx, label, fetch_url, final_url, body) in &fetched {
+        let final_norm = normalize(final_url);
+        let fetch_norm = normalize(fetch_url);
+        if final_norm != fetch_norm && !seen.insert(final_norm) {
+            continue;
+        }
+        let n = top_n.min(5);
+        let link_result = aether_agent::parse_crfr(body, goal, final_url, n, false, "json");
+
+        if let Ok(lp) = serde_json::from_str::<serde_json::Value>(&link_result) {
+            if let Some(ln) = lp.get("nodes").and_then(|n| n.as_array()) {
+                let mut content: Vec<serde_json::Value> = Vec::new();
+                for node in ln.iter().take(2) {
+                    let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                    let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    let ll = nl.to_lowercase();
+                    if nl.len() < 10
+                        || ll.starts_with("annons")
+                        || ll.starts_with("advertisement")
+                        || ll.contains("cookie")
+                        || ll.contains("sponsored")
+                    {
+                        continue;
+                    }
+                    if nr == "data"
+                        && node
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .is_some_and(|n| n.contains('[') || n.contains("page.@"))
+                    {
+                        continue;
+                    }
+                    let mut n = node.clone();
+                    if let Some(obj) = n.as_object_mut() {
+                        obj.insert("source".to_string(), serde_json::json!("followed_link"));
+                        obj.insert("source_url".to_string(), serde_json::json!(fetch_url));
+                    }
+                    content.push(n);
+                }
+                if !content.is_empty() {
+                    replacements.insert(*idx, content);
+                    followed_urls.push(format!("{}: {}", label, final_url));
+                }
             }
-            replacements.insert(idx, content);
-            followed_urls.push(format!("{}: {}", label, final_url));
         }
     }
 
