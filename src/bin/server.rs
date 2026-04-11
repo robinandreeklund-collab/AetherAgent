@@ -1241,7 +1241,10 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     // Follow high-relevance links if requested
     #[cfg(feature = "fetch")]
     let result = if follow_links {
-        follow_relevant_links_http(&result, &goal, top_n).await
+        eprintln!("[FOLLOW-LINKS] Activated for goal={}", goal);
+        let r = follow_relevant_links_http(&result, &goal, top_n).await;
+        eprintln!("[FOLLOW-LINKS] Done, result len={}", r.len());
+        r
     } else {
         result
     };
