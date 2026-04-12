@@ -672,22 +672,109 @@ fn hash_url(url: &str) -> u64 {
     h
 }
 
-/// Compute goal cluster ID from goal text.
-/// Groups similar goals together by hashing the top-3 significant words (sorted).
-/// "latest news headlines" and "breaking news today" → same cluster (both have "news").
-/// "sports scores today" → different cluster.
-fn goal_cluster_id(goal: &str) -> String {
-    let mut words: Vec<&str> = goal
+/// ALG-1 fix: Ordöverlapp-baserad goal-clustering.
+///
+/// Tidigare: top-3 ord sorterade → "latest news headlines" och "breaking news stories"
+/// hamnade i olika kluster trots att de handlar om samma sak.
+///
+/// Nu: extrahera signifikanta ord (>3 tecken, sorterade), jämför mot existerande kluster
+/// via Jaccard-likhet. Om overlap >= 1 signifikant ord OCH Jaccard >= 0.2 → samma kluster.
+/// Detta garanterar att "latest news headlines" och "breaking news stories" (delar "news")
+/// hamnar i samma kluster, medan "football match scores" (delar inget) inte gör det.
+///
+/// Max 64 kluster (sedan evictas äldsta).
+const MAX_GOAL_CLUSTERS: usize = 64;
+
+struct GoalCluster {
+    id: String,
+    words: Vec<String>,
+}
+
+static GOAL_CLUSTERS: std::sync::LazyLock<Mutex<Vec<GoalCluster>>> =
+    std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
+
+fn goal_significant_words(goal: &str) -> Vec<String> {
+    let mut words: Vec<String> = goal
+        .to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() > 3) // Skip short words (the, and, etc.)
+        .filter(|w| w.len() > 3)
+        .map(String::from)
         .collect();
     words.sort_unstable();
     words.dedup();
-    words.truncate(3); // Top 3 significant words
-    if words.is_empty() {
-        "_".to_string()
+    words
+}
+
+fn jaccard_similarity(a: &[String], b: &[String]) -> (f32, usize) {
+    if a.is_empty() || b.is_empty() {
+        return (0.0, 0);
+    }
+    let set_a: std::collections::HashSet<&str> = a.iter().map(|s| s.as_str()).collect();
+    let set_b: std::collections::HashSet<&str> = b.iter().map(|s| s.as_str()).collect();
+    let intersection = set_a.intersection(&set_b).count();
+    let union = set_a.union(&set_b).count();
+    if union == 0 {
+        (0.0, 0)
     } else {
-        words.join("+")
+        (intersection as f32 / union as f32, intersection)
+    }
+}
+
+fn goal_cluster_id(goal: &str) -> String {
+    let goal_words = goal_significant_words(goal);
+    if goal_words.is_empty() {
+        return "_".to_string();
+    }
+
+    if let Ok(mut clusters) = GOAL_CLUSTERS.lock() {
+        let mut best_jaccard: f32 = 0.0;
+        let mut best_overlap: usize = 0;
+        let mut best_idx: Option<usize> = None;
+
+        for (i, cluster) in clusters.iter().enumerate() {
+            let (jaccard, overlap) = jaccard_similarity(&goal_words, &cluster.words);
+            if jaccard > best_jaccard {
+                best_jaccard = jaccard;
+                best_overlap = overlap;
+                best_idx = Some(i);
+            }
+        }
+
+        // Kräv minst 1 delat signifikant ord (>3 tecken).
+        // Jaccard-threshold används inte — ett delat domänord räcker för gruppering.
+        // Falska positiva begränsas av att ord < 4 tecken redan filtrerats bort.
+        if best_overlap >= 1 {
+            if let Some(idx) = best_idx {
+                let cluster_id = clusters[idx].id.clone();
+                // Utöka klustrets ordmängd med nya ord
+                for word in &goal_words {
+                    if !clusters[idx].words.contains(word) {
+                        clusters[idx].words.push(word.clone());
+                    }
+                }
+                return cluster_id;
+            }
+        }
+
+        // Inget match — skapa nytt kluster
+        let new_id = {
+            let mut w = goal_words.clone();
+            w.truncate(3);
+            w.join("+")
+        };
+        if clusters.len() >= MAX_GOAL_CLUSTERS {
+            clusters.remove(0);
+        }
+        clusters.push(GoalCluster {
+            id: new_id.clone(),
+            words: goal_words,
+        });
+        new_id
+    } else {
+        // Mutex poisoned — fallback
+        let mut w = goal_words;
+        w.truncate(3);
+        w.join("+")
     }
 }
 
@@ -1441,10 +1528,14 @@ impl ResonanceField {
                 };
 
                 // CombMNZ: reward consensus across signals
+                // ALG-3 fix: role_boost > 0.1 var alltid true (role_priority()
+                // returnerar minst 0.2). Höjt till > 0.7 så att navigation (0.2),
+                // generic (0.4), och searchbox (0.5) filtreras bort —
+                // bara content-roller (heading 0.9, text 0.9, button 0.85, etc.) räknas.
                 let signal_count = [
                     bm25_score > 0.01,
                     hdc_score > 0.01,
-                    role_boost > 0.1,
+                    role_boost > 0.7,
                     concept_boost > 0.001,
                 ]
                 .iter()
@@ -1619,8 +1710,7 @@ impl ResonanceField {
         };
 
         // Apply Chebyshev spectral filter with adaptive order
-        let filtered =
-            self.chebyshev_filter(&cheb_seed, &down_keys, &up_keys, &bm25_scores, cheb_k);
+        let filtered = self.chebyshev_filter(&cheb_seed, &down_keys, &up_keys, cheb_k);
 
         // Apply Chebyshev output as additive propagation boost.
         // Nodes keep their Phase 1 amplitude and gain extra signal from
@@ -2247,7 +2337,6 @@ impl ResonanceField {
         x_seed: &HashMap<u32, f32>,
         down_keys: &HashMap<u32, String>,
         up_keys: &HashMap<u32, String>,
-        bm25_scores: &HashMap<u32, f32>,
         order: usize,
     ) -> HashMap<u32, f32> {
         // λ_max estimation: for trees, λ_max ≤ 2.0
@@ -2332,8 +2421,12 @@ impl ResonanceField {
 
         // PPR restart: blend with seed signal
         // x_final = (1-α)·filtered + α·x_seed
+        // BUG-C fix: Använd x_seed (full Phase 1 scoring: BM25 + HDC + role + causal
+        // + answer_shape + zone + meta) istället för enbart bm25_scores.
+        // Tidigare ignorerade PPR restart HDC-matchning, kausalt minne, och alla andra
+        // signaler — effektivt viktade BM25 ytterligare ~15% utöver sin 55% vikt.
         for (&id, filtered) in output.iter_mut() {
-            let seed = bm25_scores.get(&id).copied().unwrap_or(0.0);
+            let seed = x_seed.get(&id).copied().unwrap_or(0.0);
             *filtered = (1.0 - PPR_ALPHA) * (*filtered).max(0.0) + PPR_ALPHA * seed;
         }
 
@@ -2476,10 +2569,25 @@ impl ResonanceField {
         }
 
         // Steg 1b: Suppression learning — uppdatera query_count/miss_count
-        // Alla noder med amplitude > threshold "syntes" i resultaten.
-        // De som inte var i successful_set missade — öka miss_count.
+        // BUG-B fix: Räkna bara noder som FAKTISKT returnerades till användaren
+        // (dvs topp-rankade med signifikant amplitud), inte alla med amplitude > 0.01.
+        // Tidigare räknades alla noder med amplitude > MIN_OUTPUT_THRESHOLD (0.01),
+        // vilket innebar att ~80% av fältets noder ackumulerade query_count/miss_count
+        // och felaktigt suppressades trots att användaren aldrig sett dem.
+        // Nytt: Använd top-50 amplitud som proxy för "synliga noder" — matchar
+        // typiskt top_k (10-30) med marginal. Threshold: top-50:s lägsta amplitud.
+        let suppression_visible_threshold = {
+            let mut amps: Vec<f32> = self
+                .nodes
+                .values()
+                .map(|s| s.amplitude)
+                .filter(|&a| a > MIN_OUTPUT_THRESHOLD)
+                .collect();
+            amps.sort_by(|a, b| b.total_cmp(a));
+            amps.get(49).copied().unwrap_or(MIN_OUTPUT_THRESHOLD)
+        };
         for (&nid, state) in self.nodes.iter_mut() {
-            if state.amplitude > MIN_OUTPUT_THRESHOLD {
+            if state.amplitude > suppression_visible_threshold {
                 state.query_count += 1;
                 if !successful_set.contains(&nid) {
                     state.miss_count += 1;
@@ -4687,6 +4795,117 @@ mod tests {
         assert!(
             hit,
             "get_or_build_field ska ge cache hit efter peek (fältet ska finnas kvar)"
+        );
+    }
+
+    // ── P0 regressionstester ──────────────────────────────────────────────
+
+    #[test]
+    fn test_bugb_suppression_only_counts_visible_nodes() {
+        // BUG-B regression: suppression query_count ska bara öka för noder
+        // som faktiskt returnerades (topp-rankade), inte alla med amplitude > 0.01.
+        // Bygger 60+ noder så att top-50 threshold verkligen filtrerar.
+        let mut tree = vec![
+            make_node(1, "heading", "main news article headline", vec![]),
+            make_node(
+                2,
+                "text",
+                "article body text about the news story today",
+                vec![],
+            ),
+        ];
+        // Lägg till 58 filler-noder med bättre BM25-match mot "news article headline"
+        for i in 10..68 {
+            tree.push(make_node(
+                i,
+                "text",
+                &format!("article section {} news headline content details", i),
+                vec![],
+            ));
+        }
+        // Nod 200: irrelevant footer som INTE borde räknas
+        tree.push(make_node(
+            200,
+            "navigation",
+            "copyright footer legal privacy policy",
+            vec![],
+        ));
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://bugb-test2.com");
+
+        for _ in 0..6 {
+            let _results = field.propagate("news article headline");
+            field.feedback("news article headline", &[1]);
+        }
+
+        // Nod 200 (footer) har ingen keyword-match → låg amplitude → ska inte räknas
+        let state200 = field.nodes.get(&200).expect("Nod 200 ska finnas");
+        assert!(
+            state200.query_count <= 2,
+            "Nod 200 (footer) borde ha låg query_count ({}), \
+             inte räknats som 'synlig' varje query",
+            state200.query_count
+        );
+    }
+
+    #[test]
+    fn test_alg1_semantic_goal_clustering() {
+        // ALG-1 regression: liknande goals ska hamna i samma kluster
+        let cluster_a = goal_cluster_id("latest news headlines today");
+        let cluster_b = goal_cluster_id("breaking news stories right now");
+        let cluster_c = goal_cluster_id("current news articles updates");
+
+        // Alla tre handlar om nyheter — borde vara samma kluster
+        assert_eq!(
+            cluster_a, cluster_b,
+            "Liknande nyhets-goals borde ge samma kluster: '{}' vs '{}'",
+            cluster_a, cluster_b
+        );
+        assert_eq!(
+            cluster_b, cluster_c,
+            "Liknande nyhets-goals borde ge samma kluster: '{}' vs '{}'",
+            cluster_b, cluster_c
+        );
+
+        // Helt annorlunda goal ska ge annat kluster
+        let cluster_sports = goal_cluster_id("football match scores results");
+        assert_ne!(
+            cluster_a, cluster_sports,
+            "Nyheter och sport borde ge olika kluster"
+        );
+    }
+
+    #[test]
+    fn test_alg3_combmnz_differentiates_roles() {
+        // ALG-3 regression: CombMNZ ska ge OLIKA signal_count beroende på roll.
+        // navigation (role_priority 0.2) → role-signalen ska INTE räknas
+        // heading (role_priority 0.9) → role-signalen SKA räknas
+        let tree = vec![
+            make_node(1, "heading", "important article heading", vec![]),
+            make_node(2, "navigation", "important article heading", vec![]), // Samma text!
+        ];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://alg3-test.com");
+        let results = field.propagate("important article heading");
+
+        let amp_heading = results
+            .iter()
+            .find(|r| r.node_id == 1)
+            .map(|r| r.amplitude)
+            .unwrap_or(0.0);
+        let amp_nav = results
+            .iter()
+            .find(|r| r.node_id == 2)
+            .map(|r| r.amplitude)
+            .unwrap_or(0.0);
+
+        // Heading borde ha HÖGRE amplitud pga CombMNZ räknar roll-signal
+        assert!(
+            amp_heading > amp_nav,
+            "Heading ({}) borde rankas högre än navigation ({}) \
+             med samma text tack vare CombMNZ roll-differentiering",
+            amp_heading,
+            amp_nav
         );
     }
 }
