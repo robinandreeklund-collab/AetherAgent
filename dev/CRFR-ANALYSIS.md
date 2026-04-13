@@ -485,23 +485,28 @@ DELTA (medianvärde):
 | P0 | 4 | 3 | 1 | 0 | 0 |
 | P1 | 6 | 4 | 0 | 2 | 0 |
 | P2 | 10 | 6 | 1 | 3 | 0 |
-| P3 | 13 | 5 | 1 | 0 | 7 |
-| **Totalt** | **33** | **18** | **3** | **5** | **7** |
+| P3 | 13 | 7 | 1 | 2 | 3 |
+| **Totalt** | **33** | **20** | **3** | **7** | **3** |
 
-### Kvarvarande backlog (7 poster)
+### Kvarvarande backlog (3 poster)
 
-Alla kvarvarande poster är antingen stora refactors (OPT-M1, CP-1, ARCH-4.2)
-eller micro-optimeringar med låg estimerad ROI (OPT-P3, OPT-P4, OPT-S2, OPT-M2).
+Micro-optimeringar med låg estimerad ROI.
 
 | # | Typ | Ref | Beskrivning | Varför backlog |
 |---|-----|-----|-------------|----------------|
-| 8 | OPT | M1 | 6 HashMaps per fält → konsoliderad struct | Stor refactor (~500 rader), alla field-accessors ändras |
-| 9 | CP | 1 | Anti-bot detection (3-tier från crawl4ai) | Ny modul, kräver HTML-mönstermatchning + page-size gates |
 | 25 | OPT | P4 | Chebyshev HashMap-alloc → Vec<f32> med index | Kräver stabil id→index mapping |
 | 26 | OPT | S2 | Dubbel HDC-build (ResonanceField + HdcTree) | Kräver API-ändring i scoring-pipeline |
 | 27 | OPT | M2 | HvData JSON → base64 serialisering | Brytande serialiseringsformat |
-| 30 | CP | 5 | URL freshness scoring | Kräver link_extract-ändring + regex |
-| 32 | ARCH | 4.2 | resonance.rs → modul-uppdelning | Ren refactor, ~4700 LOC → 6 filer |
+
+### Skjutna poster (inte värda risken/kostnaden)
+
+| # | Typ | Ref | Beskrivning | Varför skjuten |
+|---|-----|-----|-------------|----------------|
+| 8 | OPT | M1 | 6 HashMaps → konsoliderad struct | ~500 rader refactor, 0 latens/ranking-vinst, bara ~180KB memory |
+| 30 | CP | 5 | URL freshness scoring | link_extract-ändring, ej CRFR-ranking |
+| 31 | CP | 6 | Path-depth scoring | link_extract, ej CRFR-ranking |
+| 32 | ARCH | 4.2 | resonance.rs modul-uppdelning | Ren kosmetik, ~4700 LOC → 6 filer, hög bugg-risk |
+| 33 | ARCH | 4.3 | Attention-baserad implicit feedback | Kräver LLM-integration, ej scope |
 
 ---
 
