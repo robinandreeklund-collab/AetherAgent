@@ -78,10 +78,10 @@
 <div class="header">
   <h1>AetherAgent Live Dashboard</h1>
   <div class="status"><span class="dot"></span><span id="conn-status">Connecting</span></div>
-  <button class="refresh-btn" onclick="refreshAll()">Refresh</button>
+  <button class="refresh-btn" onclick="refreshAll()" aria-label="Refresh dashboard data">Refresh</button>
 </div>
 
-<div class="stats-row" id="stats-row">
+<div class="stats-row" id="stats-row" aria-live="polite" aria-label="Server statistics">
   <div class="stat-card"><div class="label">RSS Memory</div><div class="value" id="st-rss">--</div><div class="sub" id="st-rss-sub">peak --</div></div>
   <div class="stat-card"><div class="label">Threads</div><div class="value" id="st-threads">--</div><div class="sub">active</div></div>
   <div class="stat-card"><div class="label">CRFR Cache</div><div class="value" id="st-cache">--</div><div class="sub" id="st-cache-sub">of -- capacity</div></div>
@@ -96,9 +96,9 @@
     <div class="panel-header"><h2>CRFR Query Explorer</h2><span class="badge">Pipeline Trace</span></div>
     <div class="panel-body">
       <div class="explore-form">
-        <input id="ex-url" placeholder="URL (e.g. https://svt.se)" value="">
-        <input id="ex-goal" placeholder="Goal (e.g. hitta senaste nyheterna)" value="">
-        <button onclick="runExplore()">Explore CRFR</button>
+        <input id="ex-url" placeholder="URL (e.g. https://svt.se)" value="" aria-label="URL to explore">
+        <input id="ex-goal" placeholder="Goal (e.g. hitta senaste nyheterna)" value="" aria-label="Search goal">
+        <button id="ex-btn" onclick="runExplore()" aria-label="Run CRFR exploration">Explore CRFR</button>
       </div>
       <div id="explore-body"><div class="empty">Enter a URL and goal above to trace the full CRFR pipeline</div></div>
     </div>
@@ -325,15 +325,19 @@ async function runExplore() {
   const url = document.getElementById('ex-url').value.trim();
   const goal = document.getElementById('ex-goal').value.trim();
   const body = document.getElementById('explore-body');
+  const btn = document.getElementById('ex-btn');
   if (!url || !goal) { body.innerHTML = '<div class="empty">Enter both URL and goal</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Running...';
   body.innerHTML = '<div class="loading">Fetching page &amp; running CRFR pipeline</div>';
-  // Step 1: fetch HTML
-  const fetchRes = await postJson('/api/fetch', {url});
-  if (!fetchRes || !fetchRes.body) { body.innerHTML = '<div class="empty">Failed to fetch URL</div>'; return; }
-  // Step 2: explore CRFR (pass Set-Cookie headers for JS cookie bridge)
-  const data = await postJson('/api/dashboard/explore', {html: fetchRes.body, goal, url: fetchRes.final_url || url, top_n: 20, set_cookie_headers: fetchRes.set_cookie_headers || []});
-  if (!data || data.error) { body.innerHTML = `<div class="empty">${data?.error || 'Explore failed'}</div>`; return; }
-  renderExplore(data);
+  try {
+    const fetchRes = await postJson('/api/fetch', {url});
+    if (!fetchRes || !fetchRes.body) { body.innerHTML = '<div class="empty">Failed to fetch URL</div>'; return; }
+    const data = await postJson('/api/dashboard/explore', {html: fetchRes.body, goal, url: fetchRes.final_url || url, top_n: 20, set_cookie_headers: fetchRes.set_cookie_headers || []});
+    if (!data || data.error) { body.innerHTML = `<div class="empty">${esc(data?.error || 'Explore failed')}</div>`; return; }
+    renderExplore(data);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Explore CRFR';
+  }
 }
 
 function renderExplore(d) {
