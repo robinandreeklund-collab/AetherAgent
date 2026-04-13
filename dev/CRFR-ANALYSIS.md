@@ -467,16 +467,16 @@ DELTA (medianvärde):
 | 21 | BUG | F | adaptive_fan_out i sibling-boost (value-match, uncle, sibling-pattern) | ✅ | `31e37c6` |
 | 22 | BUG | G | latency_samples Vec → VecDeque (pop_front O(1)) | ✅ | `31e37c6` |
 | 23 | BUG | H | persist load_field lock scope (släpper lock före deserialisering) | ✅ | `31e37c6` |
-| 24 | OPT | P3 | to_lowercase() per nod per query → pre-lowercase |
-| 25 | OPT | P4 | Chebyshev HashMap-alloc → Vec<f32> med index |
-| 26 | OPT | S2 | Dubbel HDC-build (ResonanceField + HdcTree) |
-| 27 | OPT | M2 | HvData JSON → base64 serialisering |
-| 28 | ALG | 2 | HDC bundle SNR-degradering vid 15+ komponenter |
-| 29 | ALG | 6 | answer_type_boost hardkodad → inlärd profil |
-| 30 | CP | 5 | URL freshness scoring (datum från URL-mönster) |
-| 31 | CP | 6 | Path-depth scoring i link extraction |
-| 32 | ARCH | 4.2 | resonance.rs 4692 LOC → modul-uppdelning |
-| 33 | ARCH | 4.3 | Attention-baserad implicit feedback |
+| 24 | OPT | P3 | to_lowercase() per nod per query → pre-lowercase | ❌ BACKLOG | Mätt: ~6µs per query, ej värt komplexiteten |
+| 25 | OPT | P4 | Chebyshev HashMap-alloc → Vec<f32> med index | ❌ BACKLOG | |
+| 26 | OPT | S2 | Dubbel HDC-build (ResonanceField + HdcTree) | ❌ BACKLOG | |
+| 27 | OPT | M2 | HvData JSON → base64 serialisering | ❌ BACKLOG | |
+| 28 | ALG | 2 | HDC bundle viktning (unigrams 3×, bigrams 2×) | ⏪ ROLLBACK | +55% latens (17→27ms), 0 ranking-vinst. `bdce5d6` |
+| 29 | ALG | 6 | answer_type_boost → tabell-driven + time/measurement-typer | ✅ | `bdce5d6` |
+| 30 | CP | 5 | URL freshness scoring (datum från URL-mönster) | ❌ BACKLOG | |
+| 31 | CP | 6 | Path-depth scoring i link extraction | ❌ BACKLOG | |
+| 32 | ARCH | 4.2 | resonance.rs 4692 LOC → modul-uppdelning | ❌ BACKLOG | |
+| 33 | ARCH | 4.3 | Attention-baserad implicit feedback | ❌ BACKLOG | |
 
 ### Sammanfattning
 
@@ -485,23 +485,23 @@ DELTA (medianvärde):
 | P0 | 4 | 3 | 1 | 0 | 0 |
 | P1 | 6 | 4 | 0 | 2 | 0 |
 | P2 | 10 | 6 | 1 | 3 | 0 |
-| P3 | 13 | 3 | 0 | 0 | 10 |
-| **Totalt** | **33** | **16** | **2** | **5** | **10** |
+| P3 | 13 | 5 | 1 | 0 | 7 |
+| **Totalt** | **33** | **18** | **3** | **5** | **7** |
 
-### Kvarvarande backlog (10 poster)
+### Kvarvarande backlog (7 poster)
 
-| # | Typ | Ref | Beskrivning |
-|---|-----|-----|-------------|
-| 8 | OPT | M1 | 6 HashMaps per fält → konsoliderad struct |
-| 9 | CP | 1 | Anti-bot detection (3-tier från crawl4ai) |
-| 16 | ARCH | 4.5 | Temporal decay per domän |
-| 19 | OPT | D1 | ConnectionPool readers round-robin |
-| 24 | OPT | P3 | to_lowercase() per nod per query → pre-lowercase |
-| 25 | OPT | P4 | Chebyshev HashMap-alloc → Vec<f32> med index |
-| 26 | OPT | S2 | Dubbel HDC-build (ResonanceField + HdcTree) |
-| 27 | OPT | M2 | HvData JSON → base64 serialisering |
-| 28 | ALG | 2 | HDC bundle SNR-degradering vid 15+ komponenter |
-| 29 | ALG | 6 | answer_type_boost hardkodad → inlärd profil |
+Alla kvarvarande poster är antingen stora refactors (OPT-M1, CP-1, ARCH-4.2)
+eller micro-optimeringar med låg estimerad ROI (OPT-P3, OPT-P4, OPT-S2, OPT-M2).
+
+| # | Typ | Ref | Beskrivning | Varför backlog |
+|---|-----|-----|-------------|----------------|
+| 8 | OPT | M1 | 6 HashMaps per fält → konsoliderad struct | Stor refactor (~500 rader), alla field-accessors ändras |
+| 9 | CP | 1 | Anti-bot detection (3-tier från crawl4ai) | Ny modul, kräver HTML-mönstermatchning + page-size gates |
+| 25 | OPT | P4 | Chebyshev HashMap-alloc → Vec<f32> med index | Kräver stabil id→index mapping |
+| 26 | OPT | S2 | Dubbel HDC-build (ResonanceField + HdcTree) | Kräver API-ändring i scoring-pipeline |
+| 27 | OPT | M2 | HvData JSON → base64 serialisering | Brytande serialiseringsformat |
+| 30 | CP | 5 | URL freshness scoring | Kräver link_extract-ändring + regex |
+| 32 | ARCH | 4.2 | resonance.rs → modul-uppdelning | Ren refactor, ~4700 LOC → 6 filer |
 
 ---
 
