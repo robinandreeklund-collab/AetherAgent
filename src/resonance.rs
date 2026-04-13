@@ -369,6 +369,9 @@ pub struct ResonanceField {
     /// OPT-3: same lifecycle as cached_shape_scores.
     #[serde(skip)]
     cached_meta_penalties: Option<HashMap<u32, f32>>,
+    /// OPT-P2: Cachad sorterad nod-ID-lista. Invalideras vid add/remove/update.
+    #[serde(skip)]
+    cached_sorted_ids: Option<Vec<u32>>,
 }
 
 /// Compute content hash from node labels (FNV-1a over all label text).
@@ -1013,6 +1016,7 @@ impl ResonanceField {
             cached_site_words: None,
             cached_shape_scores: None,
             cached_meta_penalties: None,
+            cached_sorted_ids: None,
         };
 
         // Applicera domain-level priors (warm-start från samma domäns lärande)
@@ -1192,7 +1196,10 @@ impl ResonanceField {
             return;
         }
         // #2: Cachad BM25-index (byggs vid första anrop, återanvänds)
-        // #3: Label + values konkateneras per nod (ett dokument per nod)
+        // #3: Label + values konkateneras per nod (ett dokument per nod).
+        // ARCH-4.6 fix: Value appenderas EN gång (inte dubbelt). Tidigare orsakade
+        // dubblering att value-termer fick 3× TF (en gång i label, två i value-delen)
+        // OCH att doc_len blåstes upp (BM25:s length-normalisering straffade noden).
         let combined: Vec<(u32, String)> = self
             .node_labels
             .iter()
@@ -1201,8 +1208,7 @@ impl ResonanceField {
                 if val.is_empty() {
                     (id, label.clone())
                 } else {
-                    // BM25F approximation: value appears twice = higher TF weight
-                    (id, format!("{} {} {}", label, val, val))
+                    (id, format!("{} {}", label, val))
                 }
             })
             .collect();
@@ -1326,8 +1332,13 @@ impl ResonanceField {
         // Fas 1: Multi-field initial resonans
         // #9: Zero semantic — roll-signal = ren prioritetstabell, ingen HV-matchning
         let now = now_ms();
-        let mut node_ids: Vec<u32> = self.nodes.keys().copied().collect();
-        node_ids.sort_unstable();
+        // OPT-P2: Cachad sorterad nod-ID-lista (invalideras vid mutation)
+        if self.cached_sorted_ids.is_none() {
+            let mut ids: Vec<u32> = self.nodes.keys().copied().collect();
+            ids.sort_unstable();
+            self.cached_sorted_ids = Some(ids);
+        }
+        let node_ids = self.cached_sorted_ids.clone().unwrap();
 
         // OPT-3: Use cached shape scores (computed once, reused across queries).
         // These depend only on label structure and role — unchanged between queries
@@ -1747,15 +1758,38 @@ impl ResonanceField {
         let max_depth = self.nodes.values().map(|s| s.depth).max().unwrap_or(0);
         let cheb_k = adaptive_chebyshev_k(self.nodes.len(), max_depth);
 
-        // For large DOMs: limit Chebyshev to top-500 nodes by seed amplitude.
-        // This prevents O(K×|E|) from blowing up on 1000+ node pages.
-        // Nodes outside the top-500 keep their Phase 1 amplitude (no propagation boost).
+        // ALG-4 fix: Limit Chebyshev to top-200 nodes + all their 1-hop neighbors.
+        // Previously: flat top-500 cutoff lost propagation to relevant neighbors.
+        // Now: top-200 seeds + their parents/children guarantees that propagation
+        // can lift nodes adjacent to strong matches, which is the whole point of
+        // the spectral filter. Typical expansion: 200 → 300-500 nodes.
         let cheb_seed = if seed_signal.len() > 500 {
             let mut sorted: Vec<(u32, f32)> =
                 seed_signal.iter().map(|(&id, &amp)| (id, amp)).collect();
             sorted.sort_by(|a, b| b.1.total_cmp(&a.1));
-            sorted.truncate(500);
-            sorted.into_iter().collect::<HashMap<u32, f32>>()
+            sorted.truncate(200);
+            let top_ids: std::collections::HashSet<u32> =
+                sorted.iter().map(|(id, _)| *id).collect();
+
+            // Expand with 1-hop neighbors (parents + children)
+            let mut expanded: HashMap<u32, f32> = sorted.into_iter().collect::<HashMap<u32, f32>>();
+            for &nid in &top_ids {
+                // Add parent
+                if let Some(&pid) = self.parent_map.get(&nid) {
+                    expanded
+                        .entry(pid)
+                        .or_insert_with(|| seed_signal.get(&pid).copied().unwrap_or(0.0));
+                }
+                // Add children
+                if let Some(children) = self.children_map.get(&nid) {
+                    for &cid in children.iter().take(8) {
+                        expanded
+                            .entry(cid)
+                            .or_insert_with(|| seed_signal.get(&cid).copied().unwrap_or(0.0));
+                    }
+                }
+            }
+            expanded
         } else {
             seed_signal.clone()
         };
@@ -1941,33 +1975,10 @@ impl ResonanceField {
             results = deduped;
         }
 
-        // Diversity penalty: penalize nodes sharing the same parent
-        // Prevents top-N from being dominated by one DOM subtree
-        {
-            let mut parent_count: HashMap<u32, u32> = HashMap::new();
-            for r in &results {
-                if let Some(&pid) = self.parent_map.get(&r.node_id) {
-                    *parent_count.entry(pid).or_insert(0) += 1;
-                }
-            }
-            // Penalize 3rd+ sibling from same parent
-            let mut parent_seen: HashMap<u32, u32> = HashMap::new();
-            for r in results.iter_mut() {
-                if let Some(&pid) = self.parent_map.get(&r.node_id) {
-                    let seen = parent_seen.entry(pid).or_insert(0);
-                    *seen += 1;
-                    if *seen >= 4 && parent_count.get(&pid).copied().unwrap_or(0) >= 5 {
-                        r.amplitude *= 0.85; // 15% penalty for 4th+ sibling (only in large groups)
-                    }
-                }
-            }
-            // Re-sort after diversity penalty
-            results.sort_by(|a, b| {
-                b.amplitude
-                    .total_cmp(&a.amplitude)
-                    .then_with(|| a.node_id.cmp(&b.node_id))
-            });
-        }
+        // ALG-5 fix: Diversity penalty MOVED to apply_diversity_penalty().
+        // Previously applied here (before gap-filter), which created artificial
+        // amplitude drops that gap-filter misinterpreted as natural relevance gaps.
+        // Now applied AFTER gap-filter in propagate_top_k_with_gap().
 
         // Build trace if requested
         let trace = if capture_trace {
@@ -2083,7 +2094,9 @@ impl ResonanceField {
     ) -> (Vec<ResonanceResult>, GapInfo) {
         let t0 = std::time::Instant::now();
         let all = self.propagate(goal);
-        let (results, gap) = Self::apply_gap_filter(all, top_k);
+        let (mut results, gap) = Self::apply_gap_filter(all, top_k);
+        // ALG-5: Apply diversity AFTER gap-filter to avoid artificial gap triggers
+        self.apply_diversity_penalty(&mut results);
         let elapsed_us = t0.elapsed().as_micros() as u64;
         self.last_propagation_us = elapsed_us;
         self.last_result_count = results.len() as u32;
@@ -2140,7 +2153,9 @@ impl ResonanceField {
     ) -> (Vec<ResonanceResult>, PropagationTrace) {
         let (all, mut trace) = self.propagate_traced(goal);
         let total = all.len();
-        let (filtered, _gap) = Self::apply_gap_filter(all, top_k);
+        let (mut filtered, _gap) = Self::apply_gap_filter(all, top_k);
+        // ALG-5: Apply diversity AFTER gap-filter
+        self.apply_diversity_penalty(&mut filtered);
         let gap_pos = if filtered.len() < total.min(top_k) {
             Some(filtered.len())
         } else {
@@ -2539,6 +2554,37 @@ impl ResonanceField {
             gap_size,
         };
         (results.into_iter().take(cut_at).collect(), info)
+    }
+
+    /// ALG-5: Diversity penalty applied AFTER gap-filter.
+    /// Penalizes 4th+ sibling from the same parent in large groups (5+ siblings).
+    /// Re-sorts after penalty so final ranking reflects diversity.
+    fn apply_diversity_penalty(&self, results: &mut [ResonanceResult]) {
+        let mut parent_count: HashMap<u32, u32> = HashMap::new();
+        for r in results.iter() {
+            if let Some(&pid) = self.parent_map.get(&r.node_id) {
+                *parent_count.entry(pid).or_insert(0) += 1;
+            }
+        }
+        let mut parent_seen: HashMap<u32, u32> = HashMap::new();
+        let mut changed = false;
+        for r in results.iter_mut() {
+            if let Some(&pid) = self.parent_map.get(&r.node_id) {
+                let seen = parent_seen.entry(pid).or_insert(0);
+                *seen += 1;
+                if *seen >= 4 && parent_count.get(&pid).copied().unwrap_or(0) >= 5 {
+                    r.amplitude *= 0.85;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            results.sort_by(|a, b| {
+                b.amplitude
+                    .total_cmp(&a.amplitude)
+                    .then_with(|| a.node_id.cmp(&b.node_id))
+            });
+        }
     }
 
     /// Provide feedback about which nodes successfully matched a goal.
@@ -3011,10 +3057,11 @@ impl ResonanceField {
                 idx.update_node(node_id, &old, &new_combined);
             }
         }
-        // OPT-2/3: Invalidate per-query caches since labels/roles changed.
+        // OPT-2/3/P2: Invalidate per-query caches since labels/roles changed.
         self.cached_shape_scores = None;
         self.cached_meta_penalties = None;
         self.cached_site_words = None;
+        self.cached_sorted_ids = None;
     }
 
     /// Add a new node to the field (AJAX-laddat innehåll).
