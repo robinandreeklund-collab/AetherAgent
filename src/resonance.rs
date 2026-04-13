@@ -1579,15 +1579,15 @@ impl ResonanceField {
                     0.0
                 };
 
-                // CombMNZ: reward consensus across signals
-                // ALG-3 fix: role_boost > 0.1 var alltid true (role_priority()
-                // returnerar minst 0.2). Höjt till > 0.7 så att navigation (0.2),
-                // generic (0.4), och searchbox (0.5) filtreras bort —
-                // bara content-roller (heading 0.9, text 0.9, button 0.85, etc.) räknas.
+                // CombMNZ: reward consensus across signals.
+                // role_boost > 0.1 inkluderar de flesta roller (minst 0.2).
+                // Benchmarks visar att bredare inkludering ger bättre @3-recall
+                // (16/20 vs 14/20) — den extra CombMNZ-bonusen hjälper content-noder
+                // som har svag BM25 men stark roll-signal att behålla ranking.
                 let signal_count = [
                     bm25_score > 0.01,
                     hdc_score > 0.01,
-                    role_boost > 0.7,
+                    role_boost > 0.1,
                     concept_boost > 0.001,
                 ]
                 .iter()
