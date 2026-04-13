@@ -347,7 +347,8 @@ pub struct ResonanceField {
     pub total_chars_out: u64,
     /// Latency samples (last 50 propagation times in microseconds) for p95
     #[serde(default)]
-    pub latency_samples: Vec<u64>,
+    // BUG-G fix: VecDeque ist��llet för Vec — pop_front() är O(1) vs remove(0) O(N)
+    pub latency_samples: VecDeque<u64>,
     /// Ordered keys for concept_memory (FIFO eviction order).
     /// BUG-6 fix: HashMap iteration is non-deterministic; this Vec tracks insertion order
     /// so the oldest concept is evicted first rather than an arbitrary one.
@@ -1010,7 +1011,7 @@ impl ResonanceField {
             last_result_count: 0,
             total_chars_in: 0,
             total_chars_out: 0,
-            latency_samples: Vec::new(),
+            latency_samples: VecDeque::new(),
             concept_memory_order: VecDeque::new(),
             answer_zone: AnswerZoneProfile::default(),
             cached_site_words: None,
@@ -1020,7 +1021,7 @@ impl ResonanceField {
         };
 
         // Applicera domain-level priors (warm-start från samma domäns lärande)
-        if let Ok(registry) = DOMAIN_REGISTRY.lock() {
+        if let Ok(registry) = DOMAIN_REGISTRY.read() {
             if let Some(profile) = registry.get(dh) {
                 for (key, &(alpha, beta)) in &profile.stats {
                     field
@@ -1195,11 +1196,7 @@ impl ResonanceField {
         if self.bm25_cache.is_some() {
             return;
         }
-        // #2: Cachad BM25-index (byggs vid första anrop, återanvänds)
-        // #3: Label + values konkateneras per nod (ett dokument per nod).
-        // ARCH-4.6 fix: Value appenderas EN gång (inte dubbelt). Tidigare orsakade
-        // dubblering att value-termer fick 3× TF (en gång i label, två i value-delen)
-        // OCH att doc_len blåstes upp (BM25:s length-normalisering straffade noden).
+        // BM25-index: label + value per nod. Value appenderas en gång.
         let combined: Vec<(u32, String)> = self
             .node_labels
             .iter()
@@ -1844,12 +1841,13 @@ impl ResonanceField {
             .collect();
 
         for nid in value_matched {
-            // Boost siblings
+            // Boost siblings (BUG-F fix: begränsa med adaptive_fan_out)
             if let Some(&pid) = self.parent_map.get(&nid) {
                 if let Some(siblings) = self.children_map.get(&pid) {
+                    let fan = adaptive_fan_out(siblings.len());
                     let amp = self.nodes.get(&nid).map(|s| s.amplitude).unwrap_or(0.0);
-                    let boost = amp * 0.15; // 15% av nodens amplitude
-                    for &sib_id in siblings {
+                    let boost = amp * 0.15;
+                    for &sib_id in &siblings[..fan] {
                         if sib_id != nid {
                             if let Some(sib) = self.nodes.get_mut(&sib_id) {
                                 if boost > sib.amplitude {
@@ -1865,9 +1863,10 @@ impl ResonanceField {
                 // Boost parent's siblings (2-hop)
                 if let Some(&grandparent) = self.parent_map.get(&pid) {
                     if let Some(uncles) = self.children_map.get(&grandparent) {
+                        let uncle_fan = adaptive_fan_out(uncles.len());
                         let amp = self.nodes.get(&nid).map(|s| s.amplitude).unwrap_or(0.0);
-                        let boost = amp * 0.08; // 8% för 2-hop
-                        for &uncle_id in uncles {
+                        let boost = amp * 0.08;
+                        for &uncle_id in &uncles[..uncle_fan] {
                             if uncle_id != pid {
                                 if let Some(uncle) = self.nodes.get_mut(&uncle_id) {
                                     if boost > uncle.amplitude {
@@ -1898,14 +1897,15 @@ impl ResonanceField {
         for (matched_id, parent_id, amp) in &high_amp_nodes {
             if let Some(siblings) = self.children_map.get(parent_id) {
                 if siblings.len() >= 3 {
-                    // Only for groups of 3+ siblings
+                    let sib_fan = adaptive_fan_out(siblings.len());
                     let matched_role = self
                         .nodes
                         .get(matched_id)
                         .map(|s| s.role.clone())
                         .unwrap_or_default();
-                    let boost = amp * 0.1; // 10% of matched node
-                    for &sib_id in siblings {
+                    let boost = amp * 0.1;
+                    // BUG-F fix: begränsa iteration med adaptive_fan_out
+                    for &sib_id in &siblings[..sib_fan] {
                         if sib_id != *matched_id {
                             if let Some(sib) = self.nodes.get_mut(&sib_id) {
                                 // Only boost structurally identical siblings (same role)
@@ -2100,9 +2100,9 @@ impl ResonanceField {
         let elapsed_us = t0.elapsed().as_micros() as u64;
         self.last_propagation_us = elapsed_us;
         self.last_result_count = results.len() as u32;
-        self.latency_samples.push(elapsed_us);
+        self.latency_samples.push_back(elapsed_us);
         if self.latency_samples.len() > 50 {
-            self.latency_samples.remove(0);
+            self.latency_samples.pop_front();
         }
         (results, gap)
     }
@@ -3002,7 +3002,7 @@ impl ResonanceField {
         if self.latency_samples.is_empty() {
             return 0;
         }
-        let mut sorted = self.latency_samples.clone();
+        let mut sorted: Vec<u64> = self.latency_samples.iter().copied().collect();
         sorted.sort_unstable();
         let idx = ((sorted.len() as f64) * 0.95).ceil() as usize;
         sorted[idx.min(sorted.len() - 1)]
@@ -3366,8 +3366,9 @@ impl FieldCacheInner {
     }
 }
 
-static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
-    std::sync::LazyLock::new(|| Mutex::new(FieldCacheInner::new(FIELD_CACHE_CAPACITY)));
+// ARCH-4.1: RwLock istället för Mutex — peek/peek_json kan köra concurrent.
+static FIELD_CACHE: std::sync::LazyLock<std::sync::RwLock<FieldCacheInner>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(FieldCacheInner::new(FIELD_CACHE_CAPACITY)));
 
 // ─── Domain-Level Shared Learning ──────────────────────────────────────────
 
@@ -3469,13 +3470,14 @@ impl DomainRegistry {
     }
 }
 
-static DOMAIN_REGISTRY: std::sync::LazyLock<Mutex<DomainRegistry>> =
+// ARCH-4.1: RwLock — get() is read-only, update() needs write.
+static DOMAIN_REGISTRY: std::sync::LazyLock<std::sync::RwLock<DomainRegistry>> =
     // v18: Increased capacity from 128 to 10,000 domains for production scale
-    std::sync::LazyLock::new(|| Mutex::new(DomainRegistry::new(10_000)));
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(DomainRegistry::new(10_000)));
 
 /// Export all domain profiles for persistence.
 pub fn export_domain_profiles() -> Vec<(u64, DomainProfile)> {
-    let reg = match DOMAIN_REGISTRY.lock() {
+    let reg = match DOMAIN_REGISTRY.read() {
         Ok(r) => r,
         Err(p) => p.into_inner(),
     };
@@ -3484,7 +3486,7 @@ pub fn export_domain_profiles() -> Vec<(u64, DomainProfile)> {
 
 /// Import domain profiles from persistence (at startup).
 pub fn import_domain_profiles(profiles: Vec<(u64, DomainProfile)>) {
-    let mut reg = match DOMAIN_REGISTRY.lock() {
+    let mut reg = match DOMAIN_REGISTRY.write() {
         Ok(r) => r,
         Err(p) => p.into_inner(),
     };
@@ -3495,7 +3497,7 @@ pub fn import_domain_profiles(profiles: Vec<(u64, DomainProfile)>) {
 
 /// Export all cached fields (full data, for checkpoint persistence).
 pub fn export_cached_fields() -> Vec<ResonanceField> {
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(p) => p.into_inner(),
     };
@@ -3508,7 +3510,7 @@ pub fn export_cached_fields() -> Vec<ResonanceField> {
 
 /// Import cached fields from persistence (at startup).
 pub fn import_cached_fields(fields: Vec<ResonanceField>) {
-    let mut cache = match FIELD_CACHE.lock() {
+    let mut cache = match FIELD_CACHE.write() {
         Ok(c) => c,
         Err(p) => p.into_inner(),
     };
@@ -3542,7 +3544,7 @@ pub fn get_field_for_feedback(url: &str, js_variant: bool) -> Option<ResonanceFi
     let url_hash = hash_url(&variant_url);
 
     // Check RAM cache
-    let mut cache = match FIELD_CACHE.lock() {
+    let mut cache = match FIELD_CACHE.write() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3584,7 +3586,7 @@ pub fn get_or_build_field_with_variant(
         url.to_string()
     };
     let url_hash = hash_url(&variant_url);
-    let mut cache = match FIELD_CACHE.lock() {
+    let mut cache = match FIELD_CACHE.write() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3648,14 +3650,14 @@ pub fn get_or_build_field_with_variant(
 
 /// Save a resonance field back to the cache (preserves causal memory).
 pub fn save_field(field: &ResonanceField) {
-    let mut cache = match FIELD_CACHE.lock() {
+    let mut cache = match FIELD_CACHE.write() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
     cache.put(field.url_hash, field.clone());
 
     // Uppdatera domain-profil med inlärda stats
-    if let Ok(mut registry) = DOMAIN_REGISTRY.lock() {
+    if let Ok(mut registry) = DOMAIN_REGISTRY.write() {
         registry.update(field.domain_hash, field);
     }
 
@@ -3664,7 +3666,7 @@ pub fn save_field(field: &ResonanceField) {
     if crate::persist::is_initialized() {
         crate::persist::save_field(field);
         // Spara uppdaterad domain-profil också
-        if let Ok(reg) = DOMAIN_REGISTRY.lock() {
+        if let Ok(reg) = DOMAIN_REGISTRY.read() {
             if let Some(profile) = reg.get(field.domain_hash) {
                 crate::persist::save_domain_profile(field.domain_hash, profile);
             }
@@ -3676,7 +3678,7 @@ pub fn save_field(field: &ResonanceField) {
 /// Used by crfr_save to export without destroying the cache entry.
 pub fn peek_field(url: &str) -> Option<ResonanceField> {
     let url_hash = hash_url(url);
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3687,7 +3689,7 @@ pub fn peek_field(url: &str) -> Option<ResonanceField> {
 
     // Prova JS-variant
     let js_hash = hash_url(&format!("{url}#__js_eval"));
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3699,7 +3701,7 @@ pub fn peek_field(url: &str) -> Option<ResonanceField> {
 pub fn peek_field_json(url: &str) -> Option<String> {
     let url_hash = hash_url(url);
     {
-        let cache = match FIELD_CACHE.lock() {
+        let cache = match FIELD_CACHE.read() {
             Ok(c) => c,
             Err(poisoned) => poisoned.into_inner(),
         };
@@ -3709,7 +3711,7 @@ pub fn peek_field_json(url: &str) -> Option<String> {
     }
     // Prova JS-variant
     let js_hash = hash_url(&format!("{url}#__js_eval"));
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3718,7 +3720,7 @@ pub fn peek_field_json(url: &str) -> Option<String> {
 
 /// Get cache statistics (entries, capacity).
 pub fn cache_stats() -> (usize, usize) {
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3753,7 +3755,7 @@ pub struct FieldSummary {
 
 /// List summaries of all cached resonance fields (non-destructive peek).
 pub fn list_cached_fields() -> Vec<FieldSummary> {
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3938,7 +3940,7 @@ pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence
     };
 
     // Nivå 1: Answer Zones — aggregera från domain profile
-    let answer_zones = if let Ok(registry) = DOMAIN_REGISTRY.lock() {
+    let answer_zones = if let Ok(registry) = DOMAIN_REGISTRY.read() {
         if let Some(profile) = registry.get(target_domain_hash) {
             profile
                 .answer_zone
@@ -4026,7 +4028,7 @@ pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence
     query_clusters.sort_by(|a, b| b.edge_count.cmp(&a.edge_count));
 
     // Nivå 4: Node leaderboard — samla noder med causal memory
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(p) => p.into_inner(),
     };

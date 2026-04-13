@@ -161,19 +161,19 @@ pub fn save_field(field: &ResonanceField) {
 }
 
 /// Load a resonance field by URL hash (uses reader connection from pool).
+/// BUG-H fix: Släpper DB-låset INNAN deserialisering. Tidigare hölls Mutex
+/// under hela serde_json::from_slice() som kan ta 1-5ms för stora fält,
+/// blockerande alla andra DB-operationer.
 pub fn load_field(url_hash: u64) -> Option<ResonanceField> {
-    let pool = DB.lock().ok()?;
-
-    // Try reader first (non-blocking for other readers)
-    let conn = pool.readers.first().or(pool.writer.as_ref())?;
-
-    let mut stmt = conn
-        .prepare("SELECT data FROM resonance_fields WHERE url_hash = ?1")
-        .ok()?;
-
-    let data: Vec<u8> = stmt
-        .query_row(params![url_hash as i64], |row| row.get(0))
-        .ok()?;
+    let data: Vec<u8> = {
+        let pool = DB.lock().ok()?;
+        let conn = pool.readers.first().or(pool.writer.as_ref())?;
+        let mut stmt = conn
+            .prepare("SELECT data FROM resonance_fields WHERE url_hash = ?1")
+            .ok()?;
+        stmt.query_row(params![url_hash as i64], |row| row.get(0))
+            .ok()?
+    }; // Lock released here
 
     serde_json::from_slice(&data).ok()
 }

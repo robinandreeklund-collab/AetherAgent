@@ -102,6 +102,73 @@ impl TfIdfIndex {
         }
     }
 
+    /// CP-3: Bygg BM25-index med per-nod TF-vikt (tag-weighted BM25).
+    /// `nodes` är en lista av `(node_id, label, tf_weight)`.
+    /// tf_weight > 1.0 boostar TF (t.ex. headings), < 1.0 dämpar (t.ex. navigation).
+    /// doc_len beräknas från original-label (inte viktad) för korrekt length-normalisering.
+    pub fn build_weighted(nodes: &[(u32, &str, f32)]) -> Self {
+        let n = nodes.len();
+        if n == 0 {
+            return TfIdfIndex {
+                postings: HashMap::new(),
+                df: HashMap::new(),
+                doc_len: HashMap::new(),
+                avg_dl: 0.0,
+                node_count: 0,
+                sorted_terms: Vec::new(),
+            };
+        }
+
+        let mut df: HashMap<String, usize> = HashMap::new();
+        let mut postings: HashMap<String, Vec<(u32, f32)>> = HashMap::new();
+        let mut doc_len: HashMap<u32, f32> = HashMap::new();
+        let mut total_terms: f32 = 0.0;
+
+        for &(node_id, label, tf_weight) in nodes {
+            let terms = tokenize(label);
+            if terms.is_empty() {
+                continue;
+            }
+
+            let dl = terms.len() as f32;
+            doc_len.insert(node_id, dl);
+            total_terms += dl;
+
+            let mut tf: HashMap<String, f32> = HashMap::new();
+            for term in &terms {
+                *tf.entry(term.clone()).or_insert(0.0) += 1.0;
+            }
+
+            let unique_terms: HashSet<&String> = tf.keys().collect();
+            for term in unique_terms {
+                *df.entry(term.clone()).or_insert(0) += 1;
+            }
+
+            // Applicera tf_weight på TF-värden (inte på doc_len)
+            for (term, freq) in tf {
+                postings
+                    .entry(term)
+                    .or_default()
+                    .push((node_id, freq * tf_weight));
+            }
+        }
+
+        let docs_with_terms = doc_len.len().max(1) as f32;
+        let avg_dl = total_terms / docs_with_terms;
+
+        let mut sorted_terms: Vec<String> = postings.keys().cloned().collect();
+        sorted_terms.sort_unstable();
+
+        TfIdfIndex {
+            postings,
+            df,
+            doc_len,
+            avg_dl,
+            node_count: n,
+            sorted_terms,
+        }
+    }
+
     /// BM25 query: returnerar node_ids rankade efter BM25-score.
     ///
     /// Steg 1: exakt token-match med BM25-scoring.
