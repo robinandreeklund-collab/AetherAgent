@@ -400,22 +400,26 @@ BASELINE (94e988f, pre-ändringar):
   CRFR:     @1=10/20  @3=16/20  @10=17/20  @20=17/20  Avg=17538µs  11.8 noder
   Pipeline: @1= 7/20  @3=17/20  @10=19/20  @20=19/20  Avg=16500µs  11.0 noder
 
-EFTER P0+P1+P2 (b0582d8):
-  CRFR:     @1=11/20  @3=17/20  @10=17/20  @20=17/20  Avg=17473µs  12.9 noder
-  Pipeline: @1= 7/20  @3=17/20  @10=19/20  @20=19/20  Avg=16418µs  11.7 noder
+EFTER ALLA ÄNDRINGAR (31e37c6, 3 körningar):
+  CRFR:     @1=9-10/20  @3=16-17/20  @10=17/20  @20=17/20  Avg=17600-18000µs
+  Pipeline: @1= 7/20    @3=17/20     @10=19/20  @20=19/20
 
-DELTA:
-  CRFR @1:  +1 (10→11)  — DI ekonomi nytillkommen @1-hit
-  CRFR @3:  +1 (16→17)  — DI ekonomi nytillkommen @3-hit
+DELTA (medianvärde):
+  CRFR @1:  ±0  (10 → 9-10, inom varians pga global kluster-state)
+  CRFR @3:  ±0  (16 → 16-17, inom varians)
   CRFR @10: ±0
   CRFR @20: ±0
-  Latens:   -65µs (17538→17473, -0.4%)
+  Latens:   ±0  (varierar 17500-18000, felmarginal ~500µs)
   Regressioner: 0
 ```
 
-**Notering**: ALG-3 (CombMNZ threshold höjt till 0.7) orsakade regression @3: 16→14.
-Återställdes till original (0.1) efter benchmark-validering. Bred CombMNZ-inkludering
-hjälper content-noder med svag BM25 men stark roll att behålla ranking.
+**Rollbacks** (benchmark-validerade):
+- ALG-3: CombMNZ threshold 0.7 → regression @3: 16→14. Återställd till 0.1.
+- CP-3: Tag-weighted BM25 (heading 2.5×) → regression @1: 11→9. Headings med
+  generiska nyckelord ("Nyheter") fick orimligt hög BM25. Rollback. API:t `build_weighted()` behålls.
+
+**Varians-analys**: Benchmarks varierar ±1 på @1/@3 mellan körningar pga
+`GOAL_CLUSTERS` static state som ackumuleras. Baseline-körningen hade "ren" state.
 
 ---
 
@@ -447,22 +451,22 @@ hjälper content-noder med svag BM25 men stark roll att behålla ranking.
 |---|-----|-----|-------------|--------|--------|
 | 11 | ALG | 4 | Chebyshev flat top-500 → top-200 + 1-hop grannar (föräldrar + barn) | ✅ | `859761e` |
 | 12 | ALG | 5 | Diversity-penalty flyttad till EFTER gap-filter (apply_diversity_penalty) | ✅ | `859761e` |
-| 13 | CP | 2 | Head-peek pre-scoring (64KB / `</head>`) | ❌ EJ PÅBÖRJAD | |
-| 14 | CP | 3 | Tag-weighted BM25 (h1: 3×, nav: 0.5×) | ❌ EJ PÅBÖRJAD | |
-| 15 | ARCH | 4.1 | Global Mutex → RwLock | ❌ EJ PÅBÖRJAD | |
-| 16 | ARCH | 4.5 | Temporal decay per domän | ❌ EJ PÅBÖRJAD | |
+| 13 | CP | 2 | Head-peek pre-scoring (64KB / `</head>`) | ❌ SKJUTEN | L3 är URL-baserad, kräver ej page-fetch |
+| 14 | CP | 3 | Tag-weighted BM25 (heading 2.5×, nav 0.4×) | ⏪ ROLLBACK | Benchmark: @1 11→9. Headings med generiska keywords får orimlig BM25. `build_weighted()` API behålls. `31e37c6` |
+| 15 | ARCH | 4.1 | FIELD_CACHE/DOMAIN_REGISTRY Mutex → RwLock | ✅ | `31e37c6` |
+| 16 | ARCH | 4.5 | Temporal decay per domän | ❌ BACKLOG | Kräver DomainProfile-utökning + content_hash-frekvens-tracking |
 | 17 | BUG | E | `is_multiple_of()` — redan stable i Rust 1.94 | ✅ EJ BUGG | |
 | 18 | OPT | P2 | Sorterad nod-lista cachad (cached_sorted_ids, invalideras vid mutation) | ✅ | `859761e` |
-| 19 | OPT | D1 | ConnectionPool readers round-robin | ❌ EJ PÅBÖRJAD | |
+| 19 | OPT | D1 | ConnectionPool readers round-robin | ❌ BACKLOG | Kräver AtomicUsize + take/return-mönster |
 | 20 | ARCH | 4.6 | BM25F value dubblering → appenderas en gång (korrekt doc_len) | ✅ | `859761e` |
 
-### P3 — Låg prioritet (backlog, ej påbörjad)
+### P3 — Låg prioritet
 
-| # | Typ | Ref | Beskrivning |
-|---|-----|-----|-------------|
-| 21 | BUG | F | adaptive_fan_out saknas i sibling-boost |
-| 22 | BUG | G | latency_samples.remove(0) O(N) → VecDeque |
-| 23 | BUG | H | persist load_field håller lock under deserialisering |
+| # | Typ | Ref | Beskrivning | Status | Commit |
+|---|-----|-----|-------------|--------|--------|
+| 21 | BUG | F | adaptive_fan_out i sibling-boost (value-match, uncle, sibling-pattern) | ✅ | `31e37c6` |
+| 22 | BUG | G | latency_samples Vec → VecDeque (pop_front O(1)) | ✅ | `31e37c6` |
+| 23 | BUG | H | persist load_field lock scope (släpper lock före deserialisering) | ✅ | `31e37c6` |
 | 24 | OPT | P3 | to_lowercase() per nod per query → pre-lowercase |
 | 25 | OPT | P4 | Chebyshev HashMap-alloc → Vec<f32> med index |
 | 26 | OPT | S2 | Dubbel HDC-build (ResonanceField + HdcTree) |
@@ -476,15 +480,30 @@ hjälper content-noder med svag BM25 men stark roll att behålla ranking.
 
 ### Sammanfattning
 
-| Prioritet | Totalt | Integrerat | Rollback | Skjutet | Kvar |
-|-----------|--------|-----------|----------|---------|------|
+| Prioritet | Totalt | Integrerat | Rollback | Skjutet/Backlog | Kvar |
+|-----------|--------|-----------|----------|-----------------|------|
 | P0 | 4 | 3 | 1 | 0 | 0 |
 | P1 | 6 | 4 | 0 | 2 | 0 |
-| P2 | 10 | 5 | 0 | 0 | 5 |
-| P3 | 13 | 0 | 0 | 0 | 13 |
-| **Totalt** | **33** | **12** | **1** | **2** | **18** |
+| P2 | 10 | 6 | 1 | 3 | 0 |
+| P3 | 13 | 3 | 0 | 0 | 10 |
+| **Totalt** | **33** | **16** | **2** | **5** | **10** |
+
+### Kvarvarande backlog (10 poster)
+
+| # | Typ | Ref | Beskrivning |
+|---|-----|-----|-------------|
+| 8 | OPT | M1 | 6 HashMaps per fält → konsoliderad struct |
+| 9 | CP | 1 | Anti-bot detection (3-tier från crawl4ai) |
+| 16 | ARCH | 4.5 | Temporal decay per domän |
+| 19 | OPT | D1 | ConnectionPool readers round-robin |
+| 24 | OPT | P3 | to_lowercase() per nod per query → pre-lowercase |
+| 25 | OPT | P4 | Chebyshev HashMap-alloc → Vec<f32> med index |
+| 26 | OPT | S2 | Dubbel HDC-build (ResonanceField + HdcTree) |
+| 27 | OPT | M2 | HvData JSON → base64 serialisering |
+| 28 | ALG | 2 | HDC bundle SNR-degradering vid 15+ komponenter |
+| 29 | ALG | 6 | answer_type_boost hardkodad → inlärd profil |
 
 ---
 
-*Genererat av CRFR Pipeline Audit, 2026-04-12. Uppdaterad 2026-04-13 med integrationsstatus.*
+*Genererat av CRFR Pipeline Audit, 2026-04-12. Uppdaterad 2026-04-13 med slutgiltig integrationsstatus.*
 
