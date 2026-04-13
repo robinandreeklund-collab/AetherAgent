@@ -390,44 +390,73 @@ Crawl4ai detekterar virtual scroll containers genom att skilja på append (redan
 
 ---
 
-## 6. Prioriterad Åtgärdslista
+## 6. Benchmark-Resultat (före/efter)
 
-### P0 — Kritiska (fixas omedelbart)
+Kört mot 20 riktiga sajter (Books.toscrape, HN, Apple, GitHub, Expressen, DI, + 12 fixtures).  
+Benchmark: `cargo run --release --bin aether-final-bench`
 
-| # | Typ | Ref | Beskrivning | Estimerad effekt |
-|---|-----|-----|-------------|-----------------|
-| 1 | BUG | B | Suppression query_count räknar alla noder, inte bara returnerade | Förhindrar falsk suppression av relevanta noder |
-| 2 | BUG | C | PPR restart använder bm25_scores istället för seed_signal | +5-10% ranking-kvalitet (alla signaler bidrar till restart) |
-| 3 | ALG | 1 | Goal-clustering för grovkornig — ingen cross-goal learning | Löser det dokumenterade BBC/NPR 0-boost-problemet |
-| 4 | ALG | 3 | CombMNZ role_boost > 0.1 alltid true — meningslös signal | Korrekt CombMNZ-differentiering |
+```
+BASELINE (94e988f, pre-ändringar):
+  CRFR:     @1=10/20  @3=16/20  @10=17/20  @20=17/20  Avg=17538µs  11.8 noder
+  Pipeline: @1= 7/20  @3=17/20  @10=19/20  @20=19/20  Avg=16500µs  11.0 noder
 
-### P1 — Högt prioriterade (nästa sprint)
+EFTER P0+P1+P2 (b0582d8):
+  CRFR:     @1=11/20  @3=17/20  @10=17/20  @20=17/20  Avg=17473µs  12.9 noder
+  Pipeline: @1= 7/20  @3=17/20  @10=19/20  @20=19/20  Avg=16418µs  11.7 noder
 
-| # | Typ | Ref | Beskrivning | Estimerad effekt |
-|---|-----|-----|-------------|-----------------|
-| 5 | OPT | P1 | 12 HashMap-allokeringar per query (villkora trace) | -30% alloc overhead |
-| 6 | OPT | P5 | down_keys/up_keys allokerar N strängar per query | -50KB heap churn/query |
-| 7 | OPT | S1 | BM25 prefix-fallback O(N) → O(log N) via sorterad term-lista | -10× latens vid prefix-fallback |
-| 8 | OPT | M1 | 6 HashMaps per fält → konsoliderad Vec<NodeEntry> | -60% memory overhead |
-| 9 | CP | 1 | Anti-bot detection (3-tier från crawl4ai) | Förhindrar learning poisoning |
-| 10 | BUG | D | concept_memory_order synkas inte vid migration | Korrekt FIFO eviction |
+DELTA:
+  CRFR @1:  +1 (10→11)  — DI ekonomi nytillkommen @1-hit
+  CRFR @3:  +1 (16→17)  — DI ekonomi nytillkommen @3-hit
+  CRFR @10: ±0
+  CRFR @20: ±0
+  Latens:   -65µs (17538→17473, -0.4%)
+  Regressioner: 0
+```
 
-### P2 — Medelprioritet (planera in)
+**Notering**: ALG-3 (CombMNZ threshold höjt till 0.7) orsakade regression @3: 16→14.
+Återställdes till original (0.1) efter benchmark-validering. Bred CombMNZ-inkludering
+hjälper content-noder med svag BM25 men stark roll att behålla ranking.
 
-| # | Typ | Ref | Beskrivning | Estimerad effekt |
-|---|-----|-----|-------------|-----------------|
-| 11 | ALG | 4 | Chebyshev top-500 → top-200 + 1-hop grannar | Bättre propagation på stora DOM:ar |
-| 12 | ALG | 5 | Diversity-penalty före gap-filter skapar artificiella gaps | Stabilare gap-detection |
-| 13 | CP | 2 | Head-peek pre-scoring (64KB / `</head>`) | ~95% snabbare firewall L3 |
-| 14 | CP | 3 | Tag-weighted BM25 (h1: 3×, nav: 0.5×) | Bättre structural awareness |
-| 15 | ARCH | 4.1 | Global Mutex → RwLock för FIELD_CACHE/DOMAIN_REGISTRY | Bättre concurrent throughput |
-| 16 | ARCH | 4.5 | Temporal decay per domän istället för global konstant | Anpassad inlärning per site-typ |
-| 17 | BUG | E | `is_multiple_of()` nightly-only | Stable Rust-kompatibilitet |
-| 18 | OPT | P2 | Sorterad nod-lista cachad (invalideras vid mutation) | -1µs/query |
-| 19 | OPT | D1 | ConnectionPool readers round-robin | Faktisk concurrent DB-reads |
-| 20 | ARCH | 4.6 | BM25F riktig implementation istället för strängkonkatenering | Korrekt field-weighted scoring |
+---
 
-### P3 — Låg prioritet (backlog)
+## 7. Prioriterad Åtgärdslista
+
+### P0 — Kritiska ✅ INTEGRERAT
+
+| # | Typ | Ref | Beskrivning | Status | Commit |
+|---|-----|-----|-------------|--------|--------|
+| 1 | BUG | B | Suppression query_count räknar alla noder → nu bara top-50 | ✅ | `329fca7` |
+| 2 | BUG | C | PPR restart använde bm25_scores → nu seed_signal (alla 7 signaler) | ✅ | `329fca7` |
+| 3 | ALG | 1 | Goal-clustering top-3-ord → ordöverlapp Jaccard med dynamisk kluster-registry | ✅ | `329fca7` |
+| 4 | ALG | 3 | CombMNZ role_boost > 0.1 alltid true | ⏪ ROLLBACK | Benchmark visade regression @3: 16→14. Behålls som 0.1. `b0582d8` |
+
+### P1 — Högt prioriterade ✅ INTEGRERAT
+
+| # | Typ | Ref | Beskrivning | Status | Commit |
+|---|-----|-----|-------------|--------|--------|
+| 5 | OPT | P1 | 12 trace-HashMaps allokeras oavsett → villkorad på capture_trace + with_capacity(200) | ✅ | `b70a00b` |
+| 6 | OPT | P5 | down_keys/up_keys default capacity → with_capacity(N) | ✅ | `b70a00b` |
+| 7 | OPT | S1 | BM25 prefix-fallback O(N) → O(log N) via sorterad term-lista + binary_search | ✅ | `b70a00b` |
+| 8 | OPT | M1 | 6 HashMaps per fält → konsoliderad struct | ❌ SKJUTEN | Stor refactor, kräver egen sprint |
+| 9 | CP | 1 | Anti-bot detection (3-tier från crawl4ai) | ❌ SKJUTEN | Ny modul krävs, kräver egen sprint |
+| 10 | BUG | D | concept_memory_order synkas inte vid migration | ✅ | `b70a00b` |
+
+### P2 — Medelprioritet ✅ INTEGRERAT
+
+| # | Typ | Ref | Beskrivning | Status | Commit |
+|---|-----|-----|-------------|--------|--------|
+| 11 | ALG | 4 | Chebyshev flat top-500 → top-200 + 1-hop grannar (föräldrar + barn) | ✅ | `859761e` |
+| 12 | ALG | 5 | Diversity-penalty flyttad till EFTER gap-filter (apply_diversity_penalty) | ✅ | `859761e` |
+| 13 | CP | 2 | Head-peek pre-scoring (64KB / `</head>`) | ❌ EJ PÅBÖRJAD | |
+| 14 | CP | 3 | Tag-weighted BM25 (h1: 3×, nav: 0.5×) | ❌ EJ PÅBÖRJAD | |
+| 15 | ARCH | 4.1 | Global Mutex → RwLock | ❌ EJ PÅBÖRJAD | |
+| 16 | ARCH | 4.5 | Temporal decay per domän | ❌ EJ PÅBÖRJAD | |
+| 17 | BUG | E | `is_multiple_of()` — redan stable i Rust 1.94 | ✅ EJ BUGG | |
+| 18 | OPT | P2 | Sorterad nod-lista cachad (cached_sorted_ids, invalideras vid mutation) | ✅ | `859761e` |
+| 19 | OPT | D1 | ConnectionPool readers round-robin | ❌ EJ PÅBÖRJAD | |
+| 20 | ARCH | 4.6 | BM25F value dubblering → appenderas en gång (korrekt doc_len) | ✅ | `859761e` |
+
+### P3 — Låg prioritet (backlog, ej påbörjad)
 
 | # | Typ | Ref | Beskrivning |
 |---|-----|-----|-------------|
@@ -445,7 +474,17 @@ Crawl4ai detekterar virtual scroll containers genom att skilja på append (redan
 | 32 | ARCH | 4.2 | resonance.rs 4692 LOC → modul-uppdelning |
 | 33 | ARCH | 4.3 | Attention-baserad implicit feedback |
 
+### Sammanfattning
+
+| Prioritet | Totalt | Integrerat | Rollback | Skjutet | Kvar |
+|-----------|--------|-----------|----------|---------|------|
+| P0 | 4 | 3 | 1 | 0 | 0 |
+| P1 | 6 | 4 | 0 | 2 | 0 |
+| P2 | 10 | 5 | 0 | 0 | 5 |
+| P3 | 13 | 0 | 0 | 0 | 13 |
+| **Totalt** | **33** | **12** | **1** | **2** | **18** |
+
 ---
 
-*Genererat av CRFR Pipeline Audit, 2026-04-12*
+*Genererat av CRFR Pipeline Audit, 2026-04-12. Uppdaterad 2026-04-13 med integrationsstatus.*
 
