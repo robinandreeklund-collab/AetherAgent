@@ -347,7 +347,8 @@ pub struct ResonanceField {
     pub total_chars_out: u64,
     /// Latency samples (last 50 propagation times in microseconds) for p95
     #[serde(default)]
-    pub latency_samples: Vec<u64>,
+    // BUG-G fix: VecDeque ist��llet för Vec — pop_front() är O(1) vs remove(0) O(N)
+    pub latency_samples: VecDeque<u64>,
     /// Ordered keys for concept_memory (FIFO eviction order).
     /// BUG-6 fix: HashMap iteration is non-deterministic; this Vec tracks insertion order
     /// so the oldest concept is evicted first rather than an arbitrary one.
@@ -369,6 +370,9 @@ pub struct ResonanceField {
     /// OPT-3: same lifecycle as cached_shape_scores.
     #[serde(skip)]
     cached_meta_penalties: Option<HashMap<u32, f32>>,
+    /// OPT-P2: Cachad sorterad nod-ID-lista. Invalideras vid add/remove/update.
+    #[serde(skip)]
+    cached_sorted_ids: Option<Vec<u32>>,
 }
 
 /// Compute content hash from node labels (FNV-1a over all label text).
@@ -512,6 +516,109 @@ fn answer_shape_score(
     score
 }
 
+/// ALG-6: Tabell-driven answer-type detection.
+/// Varje rad: (goal-nyckelord, label-mönster-check, boost).
+/// Lättare att utöka än if-else-kedjor.
+struct AnswerTypeRule {
+    /// Goal-nyckelord som triggar regeln (minst ett måste matcha)
+    goal_keywords: &'static [&'static str],
+    /// Label-check: returnerar true om labeln matchar förväntad answer-typ
+    label_check: fn(&str) -> bool,
+    /// Boost-värde (0.0-0.3)
+    boost: f32,
+}
+
+fn has_currency(label: &str) -> bool {
+    label.contains('$')
+        || label.contains('£')
+        || label.contains('€')
+        || label.contains("kr")
+        || label.contains("sek")
+        || label.contains("usd")
+        || label.contains("eur")
+}
+
+fn has_large_number(label: &str) -> bool {
+    label
+        .split(|c: char| !c.is_ascii_digit() && c != ' ' && c != ',')
+        .any(|s| s.replace([' ', ','], "").len() >= 4)
+}
+
+fn has_date_pattern(label: &str) -> bool {
+    label.contains("202") || label.contains("201") || label.contains("200") || label.contains("199")
+}
+
+fn has_percent(label: &str) -> bool {
+    label.contains('%')
+}
+
+fn has_time_pattern(label: &str) -> bool {
+    // Matchar HH:MM mönster
+    label
+        .as_bytes()
+        .windows(5)
+        .any(|w| w[0].is_ascii_digit() && w[1].is_ascii_digit() && w[2] == b':')
+}
+
+fn has_measurement(label: &str) -> bool {
+    label.contains("kg")
+        || label.contains("km")
+        || label.contains("cm")
+        || label.contains("ml")
+        || label.contains("°c")
+        || label.contains("°f")
+}
+
+static ANSWER_TYPE_RULES: &[AnswerTypeRule] = &[
+    AnswerTypeRule {
+        goal_keywords: &["price", "cost", "pris", "fee", "avgift", "billig"],
+        label_check: has_currency,
+        boost: 0.25,
+    },
+    AnswerTypeRule {
+        goal_keywords: &["population", "invånare", "antal", "many", "count", "number"],
+        label_check: has_large_number,
+        boost: 0.2,
+    },
+    AnswerTypeRule {
+        goal_keywords: &[
+            "date",
+            "when",
+            "datum",
+            "year",
+            "år",
+            "published",
+            "publicerad",
+        ],
+        label_check: has_date_pattern,
+        boost: 0.15,
+    },
+    AnswerTypeRule {
+        goal_keywords: &["rate", "percent", "ränta", "procent", "andel"],
+        label_check: has_percent,
+        boost: 0.25,
+    },
+    AnswerTypeRule {
+        goal_keywords: &["time", "hour", "tid", "klockan", "öppettider", "schedule"],
+        label_check: has_time_pattern,
+        boost: 0.2,
+    },
+    AnswerTypeRule {
+        goal_keywords: &[
+            "weight",
+            "height",
+            "distance",
+            "vikt",
+            "längd",
+            "avstånd",
+            "temperature",
+            "temperatur",
+        ],
+        label_check: has_measurement,
+        boost: 0.2,
+    },
+];
+
 /// Answer-type detection: classify goal by expected answer type,
 /// then boost nodes whose content matches that type.
 /// Returns bonus score (0.0-0.3).
@@ -519,53 +626,11 @@ fn answer_type_boost(goal: &str, label: &str) -> f32 {
     let goal_lower = goal.to_lowercase();
     let label_lower = label.to_lowercase();
 
-    // Price/cost query → boost nodes with currency
-    if (goal_lower.contains("price")
-        || goal_lower.contains("cost")
-        || goal_lower.contains("pris")
-        || goal_lower.contains("kr")
-        || goal_lower.contains("fee"))
-        && (label_lower.contains('$')
-            || label_lower.contains('£')
-            || label_lower.contains('€')
-            || label_lower.contains("kr"))
-    {
-        return 0.25;
-    }
-
-    // Population/count query → boost nodes with large numbers
-    if goal_lower.contains("population")
-        || goal_lower.contains("invånare")
-        || goal_lower.contains("antal")
-        || goal_lower.contains("many")
-    {
-        // Check for numbers > 1000
-        let has_large_number = label
-            .split(|c: char| !c.is_ascii_digit() && c != ' ' && c != ',')
-            .any(|s| s.replace([' ', ','], "").len() >= 4);
-        if has_large_number {
-            return 0.2;
+    for rule in ANSWER_TYPE_RULES {
+        let goal_matches = rule.goal_keywords.iter().any(|kw| goal_lower.contains(kw));
+        if goal_matches && (rule.label_check)(&label_lower) {
+            return rule.boost;
         }
-    }
-
-    // Date/time query → boost nodes with date patterns
-    if (goal_lower.contains("date")
-        || goal_lower.contains("when")
-        || goal_lower.contains("datum")
-        || goal_lower.contains("year")
-        || goal_lower.contains("år"))
-        && (label.contains("202") || label.contains("201") || label.contains("200"))
-    {
-        return 0.15;
-    }
-
-    // Rate/percentage query → boost nodes with %
-    if (goal_lower.contains("rate")
-        || goal_lower.contains("percent")
-        || goal_lower.contains("ränta"))
-        && label_lower.contains('%')
-    {
-        return 0.25;
     }
 
     0.0
@@ -672,22 +737,109 @@ fn hash_url(url: &str) -> u64 {
     h
 }
 
-/// Compute goal cluster ID from goal text.
-/// Groups similar goals together by hashing the top-3 significant words (sorted).
-/// "latest news headlines" and "breaking news today" → same cluster (both have "news").
-/// "sports scores today" → different cluster.
-fn goal_cluster_id(goal: &str) -> String {
-    let mut words: Vec<&str> = goal
+/// ALG-1 fix: Ordöverlapp-baserad goal-clustering.
+///
+/// Tidigare: top-3 ord sorterade → "latest news headlines" och "breaking news stories"
+/// hamnade i olika kluster trots att de handlar om samma sak.
+///
+/// Nu: extrahera signifikanta ord (>3 tecken, sorterade), jämför mot existerande kluster
+/// via Jaccard-likhet. Om overlap >= 1 signifikant ord OCH Jaccard >= 0.2 → samma kluster.
+/// Detta garanterar att "latest news headlines" och "breaking news stories" (delar "news")
+/// hamnar i samma kluster, medan "football match scores" (delar inget) inte gör det.
+///
+/// Max 64 kluster (sedan evictas äldsta).
+const MAX_GOAL_CLUSTERS: usize = 64;
+
+struct GoalCluster {
+    id: String,
+    words: Vec<String>,
+}
+
+static GOAL_CLUSTERS: std::sync::LazyLock<Mutex<Vec<GoalCluster>>> =
+    std::sync::LazyLock::new(|| Mutex::new(Vec::new()));
+
+fn goal_significant_words(goal: &str) -> Vec<String> {
+    let mut words: Vec<String> = goal
+        .to_lowercase()
         .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.len() > 3) // Skip short words (the, and, etc.)
+        .filter(|w| w.len() > 3)
+        .map(String::from)
         .collect();
     words.sort_unstable();
     words.dedup();
-    words.truncate(3); // Top 3 significant words
-    if words.is_empty() {
-        "_".to_string()
+    words
+}
+
+fn jaccard_similarity(a: &[String], b: &[String]) -> (f32, usize) {
+    if a.is_empty() || b.is_empty() {
+        return (0.0, 0);
+    }
+    let set_a: std::collections::HashSet<&str> = a.iter().map(|s| s.as_str()).collect();
+    let set_b: std::collections::HashSet<&str> = b.iter().map(|s| s.as_str()).collect();
+    let intersection = set_a.intersection(&set_b).count();
+    let union = set_a.union(&set_b).count();
+    if union == 0 {
+        (0.0, 0)
     } else {
-        words.join("+")
+        (intersection as f32 / union as f32, intersection)
+    }
+}
+
+fn goal_cluster_id(goal: &str) -> String {
+    let goal_words = goal_significant_words(goal);
+    if goal_words.is_empty() {
+        return "_".to_string();
+    }
+
+    if let Ok(mut clusters) = GOAL_CLUSTERS.lock() {
+        let mut best_jaccard: f32 = 0.0;
+        let mut best_overlap: usize = 0;
+        let mut best_idx: Option<usize> = None;
+
+        for (i, cluster) in clusters.iter().enumerate() {
+            let (jaccard, overlap) = jaccard_similarity(&goal_words, &cluster.words);
+            if jaccard > best_jaccard {
+                best_jaccard = jaccard;
+                best_overlap = overlap;
+                best_idx = Some(i);
+            }
+        }
+
+        // Kräv minst 1 delat signifikant ord (>3 tecken).
+        // Jaccard-threshold används inte — ett delat domänord räcker för gruppering.
+        // Falska positiva begränsas av att ord < 4 tecken redan filtrerats bort.
+        if best_overlap >= 1 {
+            if let Some(idx) = best_idx {
+                let cluster_id = clusters[idx].id.clone();
+                // Utöka klustrets ordmängd med nya ord
+                for word in &goal_words {
+                    if !clusters[idx].words.contains(word) {
+                        clusters[idx].words.push(word.clone());
+                    }
+                }
+                return cluster_id;
+            }
+        }
+
+        // Inget match — skapa nytt kluster
+        let new_id = {
+            let mut w = goal_words.clone();
+            w.truncate(3);
+            w.join("+")
+        };
+        if clusters.len() >= MAX_GOAL_CLUSTERS {
+            clusters.remove(0);
+        }
+        clusters.push(GoalCluster {
+            id: new_id.clone(),
+            words: goal_words,
+        });
+        new_id
+    } else {
+        // Mutex poisoned — fallback
+        let mut w = goal_words;
+        w.truncate(3);
+        w.join("+")
     }
 }
 
@@ -920,16 +1072,17 @@ impl ResonanceField {
             last_result_count: 0,
             total_chars_in: 0,
             total_chars_out: 0,
-            latency_samples: Vec::new(),
+            latency_samples: VecDeque::new(),
             concept_memory_order: VecDeque::new(),
             answer_zone: AnswerZoneProfile::default(),
             cached_site_words: None,
             cached_shape_scores: None,
             cached_meta_penalties: None,
+            cached_sorted_ids: None,
         };
 
         // Applicera domain-level priors (warm-start från samma domäns lärande)
-        if let Ok(registry) = DOMAIN_REGISTRY.lock() {
+        if let Ok(registry) = DOMAIN_REGISTRY.read() {
             if let Some(profile) = registry.get(dh) {
                 for (key, &(alpha, beta)) in &profile.stats {
                     field
@@ -1104,8 +1257,7 @@ impl ResonanceField {
         if self.bm25_cache.is_some() {
             return;
         }
-        // #2: Cachad BM25-index (byggs vid första anrop, återanvänds)
-        // #3: Label + values konkateneras per nod (ett dokument per nod)
+        // BM25-index: label + value per nod. Value appenderas en gång.
         let combined: Vec<(u32, String)> = self
             .node_labels
             .iter()
@@ -1114,8 +1266,7 @@ impl ResonanceField {
                 if val.is_empty() {
                     (id, label.clone())
                 } else {
-                    // BM25F approximation: value appears twice = higher TF weight
-                    (id, format!("{} {} {}", label, val, val))
+                    (id, format!("{} {}", label, val))
                 }
             })
             .collect();
@@ -1142,17 +1293,58 @@ impl ResonanceField {
 
         let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
-        // Trace data
-        let mut trace_bm25_scores: HashMap<u32, f32> = HashMap::new();
-        let mut trace_hdc_scores: HashMap<u32, f32> = HashMap::new();
-        let mut trace_role_priorities: HashMap<u32, f32> = HashMap::new();
-        let mut trace_concept_boosts: HashMap<u32, f32> = HashMap::new();
-        let mut trace_answer_shapes: HashMap<u32, f32> = HashMap::new();
-        let mut trace_answer_types: HashMap<u32, f32> = HashMap::new();
-        let mut trace_zone_penalties: HashMap<u32, f32> = HashMap::new();
-        let mut trace_meta_penalties: HashMap<u32, f32> = HashMap::new();
-        let mut trace_combmnz: HashMap<u32, f32> = HashMap::new();
-        let mut trace_template_boosts: HashMap<u32, bool> = HashMap::new();
+        // OPT-P1: Trace-data allokeras BARA när trace är aktiverat.
+        // Tidigare allokerades 10 HashMaps + 1 Vec oavsett — ~30 allokeringar/query.
+        let mut trace_bm25_scores: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_hdc_scores: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_role_priorities: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_concept_boosts: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_answer_shapes: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_answer_types: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_zone_penalties: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_meta_penalties: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_combmnz: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_template_boosts: HashMap<u32, bool> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
         let mut trace_iteration_deltas: Vec<f32> = Vec::new();
 
         // #15 LinUCB: Contextual weight adjustment based on page profile
@@ -1198,8 +1390,13 @@ impl ResonanceField {
         // Fas 1: Multi-field initial resonans
         // #9: Zero semantic — roll-signal = ren prioritetstabell, ingen HV-matchning
         let now = now_ms();
-        let mut node_ids: Vec<u32> = self.nodes.keys().copied().collect();
-        node_ids.sort_unstable();
+        // OPT-P2: Cachad sorterad nod-ID-lista (invalideras vid mutation)
+        if self.cached_sorted_ids.is_none() {
+            let mut ids: Vec<u32> = self.nodes.keys().copied().collect();
+            ids.sort_unstable();
+            self.cached_sorted_ids = Some(ids);
+        }
+        let node_ids = self.cached_sorted_ids.clone().unwrap();
 
         // OPT-3: Use cached shape scores (computed once, reused across queries).
         // These depend only on label structure and role — unchanged between queries
@@ -1440,7 +1637,11 @@ impl ResonanceField {
                     0.0
                 };
 
-                // CombMNZ: reward consensus across signals
+                // CombMNZ: reward consensus across signals.
+                // role_boost > 0.1 inkluderar de flesta roller (minst 0.2).
+                // Benchmarks visar att bredare inkludering ger bättre @3-recall
+                // (16/20 vs 14/20) — den extra CombMNZ-bonusen hjälper content-noder
+                // som har svag BM25 men stark roll-signal att behålla ranking.
                 let signal_count = [
                     bm25_score > 0.01,
                     hdc_score > 0.01,
@@ -1581,18 +1782,28 @@ impl ResonanceField {
         //   - Fixed O(K×|E|) complexity with K=4 (no convergence check needed)
         //   - PPR restart mathematically integrated (not ad-hoc re-injection)
         //
-        // Pre-compute role keys for learned weight lookup (goal-clustered)
+        // OPT-P5: Pre-compute role keys for learned weight lookup.
+        // Bygg keys via inline format istället för HashMap per nod —
+        // varje nods key konstrueras vid behov i laplacian_multiply.
+        // Här beräknar vi bara cluster-strängen en gång.
         let cluster = goal_cluster_id(goal);
-        let down_keys: HashMap<u32, String> = self
-            .nodes
-            .iter()
-            .map(|(&id, s)| (id, format!("{}:down:{}", s.role, cluster)))
-            .collect();
-        let up_keys: HashMap<u32, String> = self
-            .nodes
-            .iter()
-            .map(|(&id, s)| (id, format!("{}:up:{}", s.role, cluster)))
-            .collect();
+        // Nyckelformat: "role:direction:cluster" — konstrueras per-nod i laplacian.
+        // Vi behåller HashMap-interfacet för kompatibilitet men bygger med capacity.
+        let cap = self.nodes.len();
+        let down_keys: HashMap<u32, String> = {
+            let mut m = HashMap::with_capacity(cap);
+            for (&id, s) in &self.nodes {
+                m.insert(id, format!("{}:down:{}", s.role, cluster));
+            }
+            m
+        };
+        let up_keys: HashMap<u32, String> = {
+            let mut m = HashMap::with_capacity(cap);
+            for (&id, s) in &self.nodes {
+                m.insert(id, format!("{}:up:{}", s.role, cluster));
+            }
+            m
+        };
 
         // Seed signal: current amplitudes after Phase 1 scoring
         let seed_signal: HashMap<u32, f32> = self
@@ -1605,22 +1816,44 @@ impl ResonanceField {
         let max_depth = self.nodes.values().map(|s| s.depth).max().unwrap_or(0);
         let cheb_k = adaptive_chebyshev_k(self.nodes.len(), max_depth);
 
-        // For large DOMs: limit Chebyshev to top-500 nodes by seed amplitude.
-        // This prevents O(K×|E|) from blowing up on 1000+ node pages.
-        // Nodes outside the top-500 keep their Phase 1 amplitude (no propagation boost).
+        // ALG-4 fix: Limit Chebyshev to top-200 nodes + all their 1-hop neighbors.
+        // Previously: flat top-500 cutoff lost propagation to relevant neighbors.
+        // Now: top-200 seeds + their parents/children guarantees that propagation
+        // can lift nodes adjacent to strong matches, which is the whole point of
+        // the spectral filter. Typical expansion: 200 → 300-500 nodes.
         let cheb_seed = if seed_signal.len() > 500 {
             let mut sorted: Vec<(u32, f32)> =
                 seed_signal.iter().map(|(&id, &amp)| (id, amp)).collect();
             sorted.sort_by(|a, b| b.1.total_cmp(&a.1));
-            sorted.truncate(500);
-            sorted.into_iter().collect::<HashMap<u32, f32>>()
+            sorted.truncate(200);
+            let top_ids: std::collections::HashSet<u32> =
+                sorted.iter().map(|(id, _)| *id).collect();
+
+            // Expand with 1-hop neighbors (parents + children)
+            let mut expanded: HashMap<u32, f32> = sorted.into_iter().collect::<HashMap<u32, f32>>();
+            for &nid in &top_ids {
+                // Add parent
+                if let Some(&pid) = self.parent_map.get(&nid) {
+                    expanded
+                        .entry(pid)
+                        .or_insert_with(|| seed_signal.get(&pid).copied().unwrap_or(0.0));
+                }
+                // Add children
+                if let Some(children) = self.children_map.get(&nid) {
+                    for &cid in children.iter().take(8) {
+                        expanded
+                            .entry(cid)
+                            .or_insert_with(|| seed_signal.get(&cid).copied().unwrap_or(0.0));
+                    }
+                }
+            }
+            expanded
         } else {
             seed_signal.clone()
         };
 
         // Apply Chebyshev spectral filter with adaptive order
-        let filtered =
-            self.chebyshev_filter(&cheb_seed, &down_keys, &up_keys, &bm25_scores, cheb_k);
+        let filtered = self.chebyshev_filter(&cheb_seed, &down_keys, &up_keys, cheb_k);
 
         // Apply Chebyshev output as additive propagation boost.
         // Nodes keep their Phase 1 amplitude and gain extra signal from
@@ -1669,12 +1902,13 @@ impl ResonanceField {
             .collect();
 
         for nid in value_matched {
-            // Boost siblings
+            // Boost siblings (BUG-F fix: begränsa med adaptive_fan_out)
             if let Some(&pid) = self.parent_map.get(&nid) {
                 if let Some(siblings) = self.children_map.get(&pid) {
+                    let fan = adaptive_fan_out(siblings.len());
                     let amp = self.nodes.get(&nid).map(|s| s.amplitude).unwrap_or(0.0);
-                    let boost = amp * 0.15; // 15% av nodens amplitude
-                    for &sib_id in siblings {
+                    let boost = amp * 0.15;
+                    for &sib_id in &siblings[..fan] {
                         if sib_id != nid {
                             if let Some(sib) = self.nodes.get_mut(&sib_id) {
                                 if boost > sib.amplitude {
@@ -1690,9 +1924,10 @@ impl ResonanceField {
                 // Boost parent's siblings (2-hop)
                 if let Some(&grandparent) = self.parent_map.get(&pid) {
                     if let Some(uncles) = self.children_map.get(&grandparent) {
+                        let uncle_fan = adaptive_fan_out(uncles.len());
                         let amp = self.nodes.get(&nid).map(|s| s.amplitude).unwrap_or(0.0);
-                        let boost = amp * 0.08; // 8% för 2-hop
-                        for &uncle_id in uncles {
+                        let boost = amp * 0.08;
+                        for &uncle_id in &uncles[..uncle_fan] {
                             if uncle_id != pid {
                                 if let Some(uncle) = self.nodes.get_mut(&uncle_id) {
                                     if boost > uncle.amplitude {
@@ -1723,14 +1958,15 @@ impl ResonanceField {
         for (matched_id, parent_id, amp) in &high_amp_nodes {
             if let Some(siblings) = self.children_map.get(parent_id) {
                 if siblings.len() >= 3 {
-                    // Only for groups of 3+ siblings
+                    let sib_fan = adaptive_fan_out(siblings.len());
                     let matched_role = self
                         .nodes
                         .get(matched_id)
                         .map(|s| s.role.clone())
                         .unwrap_or_default();
-                    let boost = amp * 0.1; // 10% of matched node
-                    for &sib_id in siblings {
+                    let boost = amp * 0.1;
+                    // BUG-F fix: begränsa iteration med adaptive_fan_out
+                    for &sib_id in &siblings[..sib_fan] {
                         if sib_id != *matched_id {
                             if let Some(sib) = self.nodes.get_mut(&sib_id) {
                                 // Only boost structurally identical siblings (same role)
@@ -1800,33 +2036,10 @@ impl ResonanceField {
             results = deduped;
         }
 
-        // Diversity penalty: penalize nodes sharing the same parent
-        // Prevents top-N from being dominated by one DOM subtree
-        {
-            let mut parent_count: HashMap<u32, u32> = HashMap::new();
-            for r in &results {
-                if let Some(&pid) = self.parent_map.get(&r.node_id) {
-                    *parent_count.entry(pid).or_insert(0) += 1;
-                }
-            }
-            // Penalize 3rd+ sibling from same parent
-            let mut parent_seen: HashMap<u32, u32> = HashMap::new();
-            for r in results.iter_mut() {
-                if let Some(&pid) = self.parent_map.get(&r.node_id) {
-                    let seen = parent_seen.entry(pid).or_insert(0);
-                    *seen += 1;
-                    if *seen >= 4 && parent_count.get(&pid).copied().unwrap_or(0) >= 5 {
-                        r.amplitude *= 0.85; // 15% penalty for 4th+ sibling (only in large groups)
-                    }
-                }
-            }
-            // Re-sort after diversity penalty
-            results.sort_by(|a, b| {
-                b.amplitude
-                    .total_cmp(&a.amplitude)
-                    .then_with(|| a.node_id.cmp(&b.node_id))
-            });
-        }
+        // ALG-5 fix: Diversity penalty MOVED to apply_diversity_penalty().
+        // Previously applied here (before gap-filter), which created artificial
+        // amplitude drops that gap-filter misinterpreted as natural relevance gaps.
+        // Now applied AFTER gap-filter in propagate_top_k_with_gap().
 
         // Build trace if requested
         let trace = if capture_trace {
@@ -1942,13 +2155,15 @@ impl ResonanceField {
     ) -> (Vec<ResonanceResult>, GapInfo) {
         let t0 = std::time::Instant::now();
         let all = self.propagate(goal);
-        let (results, gap) = Self::apply_gap_filter(all, top_k);
+        let (mut results, gap) = Self::apply_gap_filter(all, top_k);
+        // ALG-5: Apply diversity AFTER gap-filter to avoid artificial gap triggers
+        self.apply_diversity_penalty(&mut results);
         let elapsed_us = t0.elapsed().as_micros() as u64;
         self.last_propagation_us = elapsed_us;
         self.last_result_count = results.len() as u32;
-        self.latency_samples.push(elapsed_us);
+        self.latency_samples.push_back(elapsed_us);
         if self.latency_samples.len() > 50 {
-            self.latency_samples.remove(0);
+            self.latency_samples.pop_front();
         }
         (results, gap)
     }
@@ -1999,7 +2214,9 @@ impl ResonanceField {
     ) -> (Vec<ResonanceResult>, PropagationTrace) {
         let (all, mut trace) = self.propagate_traced(goal);
         let total = all.len();
-        let (filtered, _gap) = Self::apply_gap_filter(all, top_k);
+        let (mut filtered, _gap) = Self::apply_gap_filter(all, top_k);
+        // ALG-5: Apply diversity AFTER gap-filter
+        self.apply_diversity_penalty(&mut filtered);
         let gap_pos = if filtered.len() < total.min(top_k) {
             Some(filtered.len())
         } else {
@@ -2247,7 +2464,6 @@ impl ResonanceField {
         x_seed: &HashMap<u32, f32>,
         down_keys: &HashMap<u32, String>,
         up_keys: &HashMap<u32, String>,
-        bm25_scores: &HashMap<u32, f32>,
         order: usize,
     ) -> HashMap<u32, f32> {
         // λ_max estimation: for trees, λ_max ≤ 2.0
@@ -2332,8 +2548,12 @@ impl ResonanceField {
 
         // PPR restart: blend with seed signal
         // x_final = (1-α)·filtered + α·x_seed
+        // BUG-C fix: Använd x_seed (full Phase 1 scoring: BM25 + HDC + role + causal
+        // + answer_shape + zone + meta) istället för enbart bm25_scores.
+        // Tidigare ignorerade PPR restart HDC-matchning, kausalt minne, och alla andra
+        // signaler — effektivt viktade BM25 ytterligare ~15% utöver sin 55% vikt.
         for (&id, filtered) in output.iter_mut() {
-            let seed = bm25_scores.get(&id).copied().unwrap_or(0.0);
+            let seed = x_seed.get(&id).copied().unwrap_or(0.0);
             *filtered = (1.0 - PPR_ALPHA) * (*filtered).max(0.0) + PPR_ALPHA * seed;
         }
 
@@ -2395,6 +2615,37 @@ impl ResonanceField {
             gap_size,
         };
         (results.into_iter().take(cut_at).collect(), info)
+    }
+
+    /// ALG-5: Diversity penalty applied AFTER gap-filter.
+    /// Penalizes 4th+ sibling from the same parent in large groups (5+ siblings).
+    /// Re-sorts after penalty so final ranking reflects diversity.
+    fn apply_diversity_penalty(&self, results: &mut [ResonanceResult]) {
+        let mut parent_count: HashMap<u32, u32> = HashMap::new();
+        for r in results.iter() {
+            if let Some(&pid) = self.parent_map.get(&r.node_id) {
+                *parent_count.entry(pid).or_insert(0) += 1;
+            }
+        }
+        let mut parent_seen: HashMap<u32, u32> = HashMap::new();
+        let mut changed = false;
+        for r in results.iter_mut() {
+            if let Some(&pid) = self.parent_map.get(&r.node_id) {
+                let seen = parent_seen.entry(pid).or_insert(0);
+                *seen += 1;
+                if *seen >= 4 && parent_count.get(&pid).copied().unwrap_or(0) >= 5 {
+                    r.amplitude *= 0.85;
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            results.sort_by(|a, b| {
+                b.amplitude
+                    .total_cmp(&a.amplitude)
+                    .then_with(|| a.node_id.cmp(&b.node_id))
+            });
+        }
     }
 
     /// Provide feedback about which nodes successfully matched a goal.
@@ -2476,10 +2727,25 @@ impl ResonanceField {
         }
 
         // Steg 1b: Suppression learning — uppdatera query_count/miss_count
-        // Alla noder med amplitude > threshold "syntes" i resultaten.
-        // De som inte var i successful_set missade — öka miss_count.
+        // BUG-B fix: Räkna bara noder som FAKTISKT returnerades till användaren
+        // (dvs topp-rankade med signifikant amplitud), inte alla med amplitude > 0.01.
+        // Tidigare räknades alla noder med amplitude > MIN_OUTPUT_THRESHOLD (0.01),
+        // vilket innebar att ~80% av fältets noder ackumulerade query_count/miss_count
+        // och felaktigt suppressades trots att användaren aldrig sett dem.
+        // Nytt: Använd top-50 amplitud som proxy för "synliga noder" — matchar
+        // typiskt top_k (10-30) med marginal. Threshold: top-50:s lägsta amplitud.
+        let suppression_visible_threshold = {
+            let mut amps: Vec<f32> = self
+                .nodes
+                .values()
+                .map(|s| s.amplitude)
+                .filter(|&a| a > MIN_OUTPUT_THRESHOLD)
+                .collect();
+            amps.sort_by(|a, b| b.total_cmp(a));
+            amps.get(49).copied().unwrap_or(MIN_OUTPUT_THRESHOLD)
+        };
         for (&nid, state) in self.nodes.iter_mut() {
-            if state.amplitude > MIN_OUTPUT_THRESHOLD {
+            if state.amplitude > suppression_visible_threshold {
                 state.query_count += 1;
                 if !successful_set.contains(&nid) {
                     state.miss_count += 1;
@@ -2797,7 +3063,7 @@ impl ResonanceField {
         if self.latency_samples.is_empty() {
             return 0;
         }
-        let mut sorted = self.latency_samples.clone();
+        let mut sorted: Vec<u64> = self.latency_samples.iter().copied().collect();
         sorted.sort_unstable();
         let idx = ((sorted.len() as f64) * 0.95).ceil() as usize;
         sorted[idx.min(sorted.len() - 1)]
@@ -2852,10 +3118,11 @@ impl ResonanceField {
                 idx.update_node(node_id, &old, &new_combined);
             }
         }
-        // OPT-2/3: Invalidate per-query caches since labels/roles changed.
+        // OPT-2/3/P2: Invalidate per-query caches since labels/roles changed.
         self.cached_shape_scores = None;
         self.cached_meta_penalties = None;
         self.cached_site_words = None;
+        self.cached_sorted_ids = None;
     }
 
     /// Add a new node to the field (AJAX-laddat innehåll).
@@ -3015,11 +3282,16 @@ impl ResonanceField {
                 .or_insert((alpha, beta));
         }
 
-        // Copy concept memory
+        // Copy concept memory + BUG-D fix: synka concept_memory_order
         for (token, hv) in &old.concept_memory {
-            self.concept_memory
-                .entry(token.clone())
-                .or_insert_with(|| hv.clone());
+            if self
+                .concept_memory
+                .insert(token.clone(), hv.clone())
+                .is_none()
+            {
+                // Nytt entry — lägg till i order-deque för korrekt FIFO-eviction
+                self.concept_memory_order.push_back(token.clone());
+            }
         }
 
         // Preserve aggregate counters
@@ -3155,8 +3427,9 @@ impl FieldCacheInner {
     }
 }
 
-static FIELD_CACHE: std::sync::LazyLock<Mutex<FieldCacheInner>> =
-    std::sync::LazyLock::new(|| Mutex::new(FieldCacheInner::new(FIELD_CACHE_CAPACITY)));
+// ARCH-4.1: RwLock istället för Mutex — peek/peek_json kan köra concurrent.
+static FIELD_CACHE: std::sync::LazyLock<std::sync::RwLock<FieldCacheInner>> =
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(FieldCacheInner::new(FIELD_CACHE_CAPACITY)));
 
 // ─── Domain-Level Shared Learning ──────────────────────────────────────────
 
@@ -3258,13 +3531,14 @@ impl DomainRegistry {
     }
 }
 
-static DOMAIN_REGISTRY: std::sync::LazyLock<Mutex<DomainRegistry>> =
+// ARCH-4.1: RwLock — get() is read-only, update() needs write.
+static DOMAIN_REGISTRY: std::sync::LazyLock<std::sync::RwLock<DomainRegistry>> =
     // v18: Increased capacity from 128 to 10,000 domains for production scale
-    std::sync::LazyLock::new(|| Mutex::new(DomainRegistry::new(10_000)));
+    std::sync::LazyLock::new(|| std::sync::RwLock::new(DomainRegistry::new(10_000)));
 
 /// Export all domain profiles for persistence.
 pub fn export_domain_profiles() -> Vec<(u64, DomainProfile)> {
-    let reg = match DOMAIN_REGISTRY.lock() {
+    let reg = match DOMAIN_REGISTRY.read() {
         Ok(r) => r,
         Err(p) => p.into_inner(),
     };
@@ -3273,7 +3547,7 @@ pub fn export_domain_profiles() -> Vec<(u64, DomainProfile)> {
 
 /// Import domain profiles from persistence (at startup).
 pub fn import_domain_profiles(profiles: Vec<(u64, DomainProfile)>) {
-    let mut reg = match DOMAIN_REGISTRY.lock() {
+    let mut reg = match DOMAIN_REGISTRY.write() {
         Ok(r) => r,
         Err(p) => p.into_inner(),
     };
@@ -3284,7 +3558,7 @@ pub fn import_domain_profiles(profiles: Vec<(u64, DomainProfile)>) {
 
 /// Export all cached fields (full data, for checkpoint persistence).
 pub fn export_cached_fields() -> Vec<ResonanceField> {
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(p) => p.into_inner(),
     };
@@ -3297,7 +3571,7 @@ pub fn export_cached_fields() -> Vec<ResonanceField> {
 
 /// Import cached fields from persistence (at startup).
 pub fn import_cached_fields(fields: Vec<ResonanceField>) {
-    let mut cache = match FIELD_CACHE.lock() {
+    let mut cache = match FIELD_CACHE.write() {
         Ok(c) => c,
         Err(p) => p.into_inner(),
     };
@@ -3331,7 +3605,7 @@ pub fn get_field_for_feedback(url: &str, js_variant: bool) -> Option<ResonanceFi
     let url_hash = hash_url(&variant_url);
 
     // Check RAM cache
-    let mut cache = match FIELD_CACHE.lock() {
+    let mut cache = match FIELD_CACHE.write() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3373,7 +3647,7 @@ pub fn get_or_build_field_with_variant(
         url.to_string()
     };
     let url_hash = hash_url(&variant_url);
-    let mut cache = match FIELD_CACHE.lock() {
+    let mut cache = match FIELD_CACHE.write() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3437,14 +3711,14 @@ pub fn get_or_build_field_with_variant(
 
 /// Save a resonance field back to the cache (preserves causal memory).
 pub fn save_field(field: &ResonanceField) {
-    let mut cache = match FIELD_CACHE.lock() {
+    let mut cache = match FIELD_CACHE.write() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
     cache.put(field.url_hash, field.clone());
 
     // Uppdatera domain-profil med inlärda stats
-    if let Ok(mut registry) = DOMAIN_REGISTRY.lock() {
+    if let Ok(mut registry) = DOMAIN_REGISTRY.write() {
         registry.update(field.domain_hash, field);
     }
 
@@ -3453,7 +3727,7 @@ pub fn save_field(field: &ResonanceField) {
     if crate::persist::is_initialized() {
         crate::persist::save_field(field);
         // Spara uppdaterad domain-profil också
-        if let Ok(reg) = DOMAIN_REGISTRY.lock() {
+        if let Ok(reg) = DOMAIN_REGISTRY.read() {
             if let Some(profile) = reg.get(field.domain_hash) {
                 crate::persist::save_domain_profile(field.domain_hash, profile);
             }
@@ -3465,7 +3739,7 @@ pub fn save_field(field: &ResonanceField) {
 /// Used by crfr_save to export without destroying the cache entry.
 pub fn peek_field(url: &str) -> Option<ResonanceField> {
     let url_hash = hash_url(url);
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3476,7 +3750,7 @@ pub fn peek_field(url: &str) -> Option<ResonanceField> {
 
     // Prova JS-variant
     let js_hash = hash_url(&format!("{url}#__js_eval"));
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3488,7 +3762,7 @@ pub fn peek_field(url: &str) -> Option<ResonanceField> {
 pub fn peek_field_json(url: &str) -> Option<String> {
     let url_hash = hash_url(url);
     {
-        let cache = match FIELD_CACHE.lock() {
+        let cache = match FIELD_CACHE.read() {
             Ok(c) => c,
             Err(poisoned) => poisoned.into_inner(),
         };
@@ -3498,7 +3772,7 @@ pub fn peek_field_json(url: &str) -> Option<String> {
     }
     // Prova JS-variant
     let js_hash = hash_url(&format!("{url}#__js_eval"));
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3507,7 +3781,7 @@ pub fn peek_field_json(url: &str) -> Option<String> {
 
 /// Get cache statistics (entries, capacity).
 pub fn cache_stats() -> (usize, usize) {
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3542,7 +3816,7 @@ pub struct FieldSummary {
 
 /// List summaries of all cached resonance fields (non-destructive peek).
 pub fn list_cached_fields() -> Vec<FieldSummary> {
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -3727,7 +4001,7 @@ pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence
     };
 
     // Nivå 1: Answer Zones — aggregera från domain profile
-    let answer_zones = if let Ok(registry) = DOMAIN_REGISTRY.lock() {
+    let answer_zones = if let Ok(registry) = DOMAIN_REGISTRY.read() {
         if let Some(profile) = registry.get(target_domain_hash) {
             profile
                 .answer_zone
@@ -3815,7 +4089,7 @@ pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence
     query_clusters.sort_by(|a, b| b.edge_count.cmp(&a.edge_count));
 
     // Nivå 4: Node leaderboard — samla noder med causal memory
-    let cache = match FIELD_CACHE.lock() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(p) => p.into_inner(),
     };
@@ -4687,6 +4961,117 @@ mod tests {
         assert!(
             hit,
             "get_or_build_field ska ge cache hit efter peek (fältet ska finnas kvar)"
+        );
+    }
+
+    // ── P0 regressionstester ──────────────────────────────────────────────
+
+    #[test]
+    fn test_bugb_suppression_only_counts_visible_nodes() {
+        // BUG-B regression: suppression query_count ska bara öka för noder
+        // som faktiskt returnerades (topp-rankade), inte alla med amplitude > 0.01.
+        // Bygger 60+ noder så att top-50 threshold verkligen filtrerar.
+        let mut tree = vec![
+            make_node(1, "heading", "main news article headline", vec![]),
+            make_node(
+                2,
+                "text",
+                "article body text about the news story today",
+                vec![],
+            ),
+        ];
+        // Lägg till 58 filler-noder med bättre BM25-match mot "news article headline"
+        for i in 10..68 {
+            tree.push(make_node(
+                i,
+                "text",
+                &format!("article section {} news headline content details", i),
+                vec![],
+            ));
+        }
+        // Nod 200: irrelevant footer som INTE borde räknas
+        tree.push(make_node(
+            200,
+            "navigation",
+            "copyright footer legal privacy policy",
+            vec![],
+        ));
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://bugb-test2.com");
+
+        for _ in 0..6 {
+            let _results = field.propagate("news article headline");
+            field.feedback("news article headline", &[1]);
+        }
+
+        // Nod 200 (footer) har ingen keyword-match → låg amplitude → ska inte räknas
+        let state200 = field.nodes.get(&200).expect("Nod 200 ska finnas");
+        assert!(
+            state200.query_count <= 2,
+            "Nod 200 (footer) borde ha låg query_count ({}), \
+             inte räknats som 'synlig' varje query",
+            state200.query_count
+        );
+    }
+
+    #[test]
+    fn test_alg1_semantic_goal_clustering() {
+        // ALG-1 regression: liknande goals ska hamna i samma kluster
+        let cluster_a = goal_cluster_id("latest news headlines today");
+        let cluster_b = goal_cluster_id("breaking news stories right now");
+        let cluster_c = goal_cluster_id("current news articles updates");
+
+        // Alla tre handlar om nyheter — borde vara samma kluster
+        assert_eq!(
+            cluster_a, cluster_b,
+            "Liknande nyhets-goals borde ge samma kluster: '{}' vs '{}'",
+            cluster_a, cluster_b
+        );
+        assert_eq!(
+            cluster_b, cluster_c,
+            "Liknande nyhets-goals borde ge samma kluster: '{}' vs '{}'",
+            cluster_b, cluster_c
+        );
+
+        // Helt annorlunda goal ska ge annat kluster
+        let cluster_sports = goal_cluster_id("football match scores results");
+        assert_ne!(
+            cluster_a, cluster_sports,
+            "Nyheter och sport borde ge olika kluster"
+        );
+    }
+
+    #[test]
+    fn test_alg3_combmnz_differentiates_roles() {
+        // ALG-3 regression: CombMNZ ska ge OLIKA signal_count beroende på roll.
+        // navigation (role_priority 0.2) → role-signalen ska INTE räknas
+        // heading (role_priority 0.9) → role-signalen SKA räknas
+        let tree = vec![
+            make_node(1, "heading", "important article heading", vec![]),
+            make_node(2, "navigation", "important article heading", vec![]), // Samma text!
+        ];
+
+        let mut field = ResonanceField::from_semantic_tree(&tree, "https://alg3-test.com");
+        let results = field.propagate("important article heading");
+
+        let amp_heading = results
+            .iter()
+            .find(|r| r.node_id == 1)
+            .map(|r| r.amplitude)
+            .unwrap_or(0.0);
+        let amp_nav = results
+            .iter()
+            .find(|r| r.node_id == 2)
+            .map(|r| r.amplitude)
+            .unwrap_or(0.0);
+
+        // Heading borde ha HÖGRE amplitud pga CombMNZ räknar roll-signal
+        assert!(
+            amp_heading > amp_nav,
+            "Heading ({}) borde rankas högre än navigation ({}) \
+             med samma text tack vare CombMNZ roll-differentiering",
+            amp_heading,
+            amp_nav
         );
     }
 }

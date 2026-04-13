@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Demo — Concept 5: Resonance Field</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--accent:#3b82f6;--muted:#888;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+body{background:var(--bg);color:#f5f5f5;font-family:var(--font);overflow-x:hidden}
+
+/* ── HEADER ── */
+header{position:fixed;top:0;left:0;right:0;z-index:100;height:64px}
+#header-field{position:absolute;top:0;left:0;width:100%;height:100%}
+.nav-overlay{position:relative;z-index:2;display:flex;align-items:center;height:64px;padding:0 2rem}
+.wordmark{font-size:1.2rem;font-weight:700;letter-spacing:-0.02em;color:#fff;font-family:var(--mono);margin-right:auto;cursor:default;position:relative;z-index:3}
+.wordmark .slash{color:var(--accent);font-weight:800}
+.nav-nodes{display:flex;gap:2.5rem;align-items:center;position:relative}
+.nav-node{position:relative;color:var(--muted);text-decoration:none;font-weight:500;font-size:.85rem;padding:.3rem 0;transition:color .3s;cursor:pointer}
+.nav-node:hover{color:#fff}
+.nav-node.active{color:#fff}
+/* Node dot indicator */
+.nav-node::before{content:'';position:absolute;left:50%;top:-8px;width:6px;height:6px;margin-left:-3px;border-radius:50%;background:rgba(59,130,246,0.3);transition:all .4s cubic-bezier(0.16,1,0.3,1)}
+.nav-node.active::before{background:var(--accent);box-shadow:0 0 8px rgba(59,130,246,0.5);width:8px;height:8px;margin-left:-4px}
+.nav-node:hover::before{background:var(--accent);transform:scale(1.5);box-shadow:0 0 12px rgba(59,130,246,0.4)}
+.btn-accent{background:var(--accent);color:#fff;padding:.45rem 1.1rem;border-radius:8px;font-size:.78rem;font-weight:600;transition:all .25s;text-decoration:none}
+.btn-accent:hover{background:#2563eb;transform:translateY(-1px)}
+.btn-accent::before{display:none}
+
+/* ── FOOTER FIELD (zoomed out, many weak nodes) ── */
+footer{position:relative;border-top:1px solid rgba(255,255,255,0.04);margin-top:80vh}
+#footer-field{width:100%;height:120px;display:block}
+.footer-inner{max-width:800px;margin:0 auto;padding:1.5rem 2rem;display:flex;justify-content:space-between;align-items:center;font-size:.8rem}
+.footer-logo{font-family:var(--mono);font-size:1.1rem;font-weight:700;color:#fff}
+.footer-logo .slash{color:var(--accent)}
+.footer-links a{color:#444;text-decoration:none;margin-left:1.5rem;transition:color .2s}
+.footer-links a:hover{color:var(--accent)}
+.footer-bottom{text-align:center;padding:.5rem 2rem 1.5rem;font-size:.55rem;color:#1a1a1a;font-family:var(--mono);letter-spacing:.1em}
+
+/* ── DEMO ── */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem}
+.hero h1{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#666);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.hero p{color:var(--muted);font-size:1.1rem;max-width:520px}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <canvas id="header-field"></canvas>
+  <div class="nav-overlay">
+    <div class="wordmark">sl<span class="slash">/</span>sh</div>
+    <div class="nav-nodes" id="nav-nodes">
+      <a class="nav-node active" href="#" data-idx="0">Mission</a>
+      <a class="nav-node" href="#" data-idx="1">Timeline</a>
+      <a class="nav-node" href="#" data-idx="2">Live</a>
+      <a class="nav-node" href="#" data-idx="3">Docs</a>
+      <a class="btn-accent" href="#">Try alpha</a>
+    </div>
+  </div>
+</header>
+
+<div class="hero">
+  <h1>Resonance Field</h1>
+  <p>Header is a live CRFR visualization. Nav links are nodes. Hover to propagate waves. Footer shows the "unslashed" raw web — hundreds of dim nodes.</p>
+</div>
+
+<footer>
+  <canvas id="footer-field"></canvas>
+  <div class="footer-inner">
+    <div class="footer-logo">sl<span class="slash">/</span>sh</div>
+    <div class="footer-links">
+      <a href="#">Mission</a>
+      <a href="#">Timeline</a>
+      <a href="#">Docs</a>
+    </div>
+  </div>
+  <div class="footer-bottom">distilled from 10,000 nodes to 5</div>
+</footer>
+
+<script>
+// ── SHARED: node + edge rendering ──
+function drawNode(ctx, x, y, r, amp, color){
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  if(amp > 0.3){
+    ctx.beginPath();
+    ctx.arc(x, y, r + amp * 8, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(59,130,246,${amp * 0.15})`;
+    ctx.fill();
+  }
+}
+function drawEdge(ctx, x1, y1, x2, y2, strength){
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.lineTo(x2, y2);
+  ctx.strokeStyle = `rgba(59,130,246,${strength * 0.3})`;
+  ctx.lineWidth = strength * 2;
+  ctx.stroke();
+}
+
+// ── HEADER FIELD ──
+(function(){
+  const canvas = document.getElementById('header-field');
+  const ctx = canvas.getContext('2d');
+  let W, H, time = 0;
+
+  // Nav node positions (will be calculated from DOM)
+  const navLinks = document.querySelectorAll('.nav-node');
+  const navNodes = []; // {x, y, amp, targetAmp}
+
+  // Background ambient nodes
+  const bgNodes = [];
+  for(let i = 0; i < 25; i++){
+    bgNodes.push({
+      x: 0.05 + Math.random() * 0.9,
+      y: 0.15 + Math.random() * 0.7,
+      r: 1 + Math.random() * 1.5,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.3 + Math.random() * 0.5
+    });
+  }
+
+  // Edges between bg nodes (nearest neighbors)
+  const bgEdges = [];
+
+  function buildEdges(){
+    bgEdges.length = 0;
+    for(let i = 0; i < bgNodes.length; i++){
+      let nearest = -1, nearDist = 999;
+      for(let j = 0; j < bgNodes.length; j++){
+        if(i === j) continue;
+        const dx = bgNodes[i].x - bgNodes[j].x;
+        const dy = bgNodes[i].y - bgNodes[j].y;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if(d < nearDist){ nearDist = d; nearest = j; }
+      }
+      if(nearest >= 0 && nearDist < 0.25){
+        bgEdges.push([i, nearest, nearDist]);
+      }
+    }
+  }
+
+  let hoverIdx = -1;
+  let propagation = []; // [{nodeIdx, amp, startTime}]
+
+  navLinks.forEach((link, i) => {
+    link.addEventListener('mouseenter', () => {
+      hoverIdx = i;
+      // Trigger propagation wave from this node
+      propagation.push({src: i, startTime: time, amp: 1});
+    });
+    link.addEventListener('mouseleave', () => {
+      if(hoverIdx === i) hoverIdx = -1;
+    });
+  });
+
+  function resize(){
+    const dpr = devicePixelRatio || 1;
+    W = canvas.offsetWidth;
+    H = canvas.offsetHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Update nav node positions from DOM
+    navNodes.length = 0;
+    navLinks.forEach(link => {
+      const r = link.getBoundingClientRect();
+      navNodes.push({
+        x: (r.left + r.width / 2) / W,
+        y: 0.4,
+        amp: link.classList.contains('active') ? 0.8 : 0.2,
+        targetAmp: link.classList.contains('active') ? 0.8 : 0.2
+      });
+    });
+    buildEdges();
+  }
+
+  function draw(){
+    time += 0.016;
+    ctx.clearRect(0, 0, W, H);
+
+    // Update propagation
+    for(const p of propagation){
+      const elapsed = time - p.startTime;
+      p.amp = Math.max(0, 1 - elapsed * 1.5);
+    }
+    propagation = propagation.filter(p => p.amp > 0.01);
+
+    // Draw bg edges
+    for(const [i, j, d] of bgEdges){
+      const a = bgNodes[i], b = bgNodes[j];
+      const pulse = 0.3 + 0.2 * Math.sin(time * a.speed + a.phase);
+      drawEdge(ctx, a.x * W, a.y * H, b.x * W, b.y * H, pulse * 0.3);
+    }
+
+    // Draw edges from nav nodes to nearest bg nodes
+    for(let ni = 0; ni < navNodes.length; ni++){
+      const nn = navNodes[ni];
+      // Connect to 2 nearest bg nodes
+      let sorted = bgNodes.map((b, bi) => ({bi, d: Math.hypot(b.x - nn.x, b.y - nn.y)}))
+        .sort((a, b) => a.d - b.d);
+      for(let k = 0; k < 2 && k < sorted.length; k++){
+        const bg = bgNodes[sorted[k].bi];
+        let strength = nn.amp * 0.4;
+        // Propagation boost
+        for(const p of propagation){
+          if(p.src === ni){
+            const dist = sorted[k].d;
+            strength += p.amp * 0.6 * Math.exp(-dist * dist * 20);
+          }
+        }
+        drawEdge(ctx, nn.x * W, nn.y * H, bg.x * W, bg.y * H, strength);
+      }
+    }
+
+    // Draw bg nodes
+    for(const n of bgNodes){
+      const pulse = 0.15 + 0.1 * Math.sin(time * n.speed + n.phase);
+      // Check proximity to propagation source
+      let boost = 0;
+      for(const p of propagation){
+        const src = navNodes[p.src];
+        if(src){
+          const d = Math.hypot(n.x - src.x, n.y - src.y);
+          boost += p.amp * Math.exp(-d * d * 15) * 0.5;
+        }
+      }
+      const amp = pulse + boost;
+      const col = amp > 0.3
+        ? `rgba(59,130,246,${0.3 + amp * 0.5})`
+        : `rgba(255,255,255,${0.08 + amp * 0.15})`;
+      drawNode(ctx, n.x * W, n.y * H, n.r + boost * 3, amp, col);
+    }
+
+    // Draw nav nodes (larger, brighter)
+    for(let i = 0; i < navNodes.length; i++){
+      const nn = navNodes[i];
+      // Animate amp toward target
+      const target = (hoverIdx === i) ? 1 : (navLinks[i].classList.contains('active') ? 0.8 : 0.2);
+      nn.amp += (target - nn.amp) * 0.1;
+
+      const r = 3 + nn.amp * 4;
+      const col = `rgba(59,130,246,${0.4 + nn.amp * 0.6})`;
+      drawNode(ctx, nn.x * W, nn.y * H, r, nn.amp, col);
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  draw();
+})();
+
+// ── FOOTER FIELD (many dim nodes = "raw web") ──
+(function(){
+  const canvas = document.getElementById('footer-field');
+  const ctx = canvas.getContext('2d');
+  let W, H, time = 0;
+
+  // Many dim nodes
+  const nodes = [];
+  for(let i = 0; i < 120; i++){
+    nodes.push({
+      x: Math.random(),
+      y: 0.1 + Math.random() * 0.8,
+      r: 0.5 + Math.random() * 1.5,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.2 + Math.random() * 0.4,
+      connected: Math.random() < 0.4 ? Math.floor(Math.random() * 120) : -1
+    });
+  }
+
+  function resize(){
+    const dpr = devicePixelRatio || 1;
+    W = canvas.offsetWidth;
+    H = canvas.offsetHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function draw(){
+    time += 0.01;
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw edges (very faint)
+    for(const n of nodes){
+      if(n.connected >= 0 && n.connected < nodes.length){
+        const t = nodes[n.connected];
+        drawEdge(ctx, n.x * W, n.y * H, t.x * W, t.y * H, 0.08);
+      }
+    }
+
+    // Draw nodes (very dim, barely visible)
+    for(const n of nodes){
+      const pulse = 0.05 + 0.03 * Math.sin(time * n.speed + n.phase);
+      const col = `rgba(255,255,255,${pulse})`;
+      ctx.beginPath();
+      ctx.arc(n.x * W, n.y * H, n.r, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+    }
+
+    // Occasionally "slash" a random node (flash red then disappear)
+    if(Math.random() < 0.005){
+      const idx = Math.floor(Math.random() * nodes.length);
+      const n = nodes[idx];
+      // Flash
+      ctx.beginPath();
+      ctx.arc(n.x * W, n.y * H, 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(239,68,68,0.6)';
+      ctx.fill();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  draw();
+})();
+</script>
+</body>
+</html>

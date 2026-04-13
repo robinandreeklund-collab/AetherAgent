@@ -602,6 +602,8 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
 
       var bar=document.createElement('div');
       bar.className='cookie-bar';
+      bar.setAttribute('role','dialog');
+      bar.setAttribute('aria-label','Cookie consent');
       bar.innerHTML=`
 <div class="cb-inner">
   <div class="cb-text">
@@ -638,11 +640,11 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
       document.getElementById('cb-accept').addEventListener('click',function(){
         localStorage.setItem('slaash-cookies','accepted');
         dismiss();
-      });
+      },{once:true});
       document.getElementById('cb-reject').addEventListener('click',function(){
         localStorage.setItem('slaash-cookies','rejected');
         dismiss();
-      });
+      },{once:true});
     },1500);
   }
 })();

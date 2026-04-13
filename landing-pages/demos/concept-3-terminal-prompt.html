@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Demo — Concept 3: Terminal Prompt</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--accent:#3b82f6;--green:#22c55e;--muted:#888;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+body{background:var(--bg);color:#f5f5f5;font-family:var(--font);overflow-x:hidden}
+
+/* ── HEADER ── */
+header{position:fixed;top:0;left:0;right:0;z-index:100;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.7);border-bottom:1px solid rgba(255,255,255,0.06)}
+.term-bar{display:flex;align-items:center;height:48px;padding:0 2rem;font-family:var(--mono);font-size:.85rem;gap:.5rem}
+.prompt{color:#666;user-select:none}
+.prompt-cmd{color:#fff;font-weight:600}
+.prompt-cmd .slash{color:var(--accent)}
+.cursor{display:inline-block;width:8px;height:16px;background:var(--accent);margin-left:2px;animation:blink 1s step-end infinite;vertical-align:text-bottom}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.term-flags{display:flex;gap:0;margin-left:2rem;align-items:center}
+.flag{color:#555;text-decoration:none;font-family:var(--mono);font-size:.82rem;padding:.3rem .8rem;border-radius:4px;transition:all .2s;position:relative;cursor:pointer;border:1px solid transparent}
+.flag:hover{color:var(--accent);background:rgba(59,130,246,0.08);border-color:rgba(59,130,246,0.15)}
+.flag.active{color:var(--green)}
+.flag.active::before{content:'\\2713 ';color:var(--green)}
+/* Hover response */
+.flag-response{position:absolute;top:100%;left:0;font-size:.7rem;color:var(--accent);white-space:nowrap;opacity:0;transform:translateY(-4px);transition:all .3s;pointer-events:none;padding-top:4px}
+.flag:hover .flag-response{opacity:1;transform:translateY(0)}
+.term-try{margin-left:auto}
+.term-try a{background:var(--accent);color:#fff;padding:.35rem 1rem;border-radius:6px;font-size:.75rem;font-weight:600;text-decoration:none;font-family:var(--mono);transition:all .25s}
+.term-try a:hover{background:#2563eb;transform:translateY(-1px)}
+
+/* COMPACT: collapsed to $ sl/sh > */
+header.compact .term-flags{max-width:0;overflow:hidden;opacity:0;transition:all .4s}
+header.compact .expand-btn{display:inline-flex}
+.expand-btn{display:none;color:var(--muted);background:none;border:1px solid rgba(255,255,255,0.08);padding:.15rem .5rem;border-radius:4px;font-family:var(--mono);font-size:.8rem;cursor:pointer;margin-left:.5rem;transition:all .2s}
+.expand-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── FOOTER TERMINAL LOG ── */
+footer{border-top:1px solid rgba(255,255,255,0.06);margin-top:50vh}
+.term-log{max-width:700px;margin:0 auto;padding:3rem 2rem 2rem;font-family:var(--mono);font-size:.78rem;line-height:2}
+.log-line{opacity:0;transform:translateY(6px);transition:all .5s cubic-bezier(0.16,1,0.3,1)}
+.log-line.visible{opacity:1;transform:translateY(0)}
+.log-ok{color:var(--green)}
+.log-dim{color:#333}
+.log-val{color:var(--accent)}
+.log-warn{color:#f59e0b}
+.log-cursor{display:inline-block;width:7px;height:14px;background:var(--accent);animation:blink 1s step-end infinite;vertical-align:text-bottom;margin-left:2px}
+.footer-end{text-align:center;padding:1rem 2rem 2rem;font-size:.55rem;color:#1a1a1a;font-family:var(--mono);letter-spacing:.1em}
+
+/* ── DEMO CONTENT ── */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem}
+.hero h1{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#666);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.hero p{color:var(--muted);font-size:1.1rem;max-width:500px}
+.spacer{height:60vh;display:flex;align-items:center;justify-content:center;color:#333}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header id="header">
+  <div class="term-bar">
+    <span class="prompt">$</span>
+    <span class="prompt-cmd">sl<span class="slash">/</span>sh</span>
+    <span class="cursor" id="main-cursor"></span>
+    <div class="term-flags" id="term-flags">
+      <a class="flag active" href="#">--mission<span class="flag-response">loading mission...</span></a>
+      <a class="flag" href="#">--timeline<span class="flag-response">loading timeline...</span></a>
+      <a class="flag" href="#">--live<span class="flag-response">connecting to live...</span></a>
+      <a class="flag" href="#">--docs<span class="flag-response">loading docs...</span></a>
+    </div>
+    <button class="expand-btn" id="expand-btn" onclick="toggleMenu()">&#9654;</button>
+    <div class="term-try"><a href="#">--try</a></div>
+  </div>
+</header>
+
+<div class="hero">
+  <h1>Terminal Prompt</h1>
+  <p>Navigation as CLI flags. Hover for typewriter response. Scroll for compact mode.</p>
+</div>
+
+<div class="spacer">Scroll down for footer terminal log</div>
+
+<footer>
+  <div class="term-log" id="term-log">
+    <div class="log-line"><span class="log-ok">[ok]</span> <span class="log-val">22,431</span> tokens <span class="log-dim">&rarr;</span> <span class="log-val">187</span> tokens <span class="log-dim">(99.2% reduced)</span></div>
+    <div class="log-line"><span class="log-ok">[ok]</span> <span class="log-val">3</span> injections blocked <span class="log-dim">(prompt injection shield active)</span></div>
+    <div class="log-line"><span class="log-ok">[ok]</span> causal memory: <span class="log-val">47</span> patterns learned</div>
+    <div class="log-line"><span class="log-ok">[ok]</span> latency: <span class="log-val">0.4ms</span> cached <span class="log-dim">|</span> <span class="log-val">12ms</span> cold</div>
+    <div class="log-line"><span class="log-warn">[warn]</span> 1 OG metadata tag suppressed <span class="log-dim">(outranked by content)</span></div>
+    <div class="log-line"><span class="log-ok">[ok]</span> field saved to disk <span class="log-dim">(SQLite WAL mode)</span></div>
+    <div class="log-line"><span class="prompt">$</span> <span class="log-cursor"></span></div>
+  </div>
+  <div class="footer-end">process exited with code 0</div>
+</footer>
+
+<script>
+// ── SCROLL COMPACT ──
+(function(){
+  const header = document.getElementById('header');
+  window.addEventListener('scroll', () => {
+    header.classList.toggle('compact', window.scrollY > 80);
+  }, {passive: true});
+})();
+
+function toggleMenu(){
+  const flags = document.getElementById('term-flags');
+  const btn = document.getElementById('expand-btn');
+  const isHidden = flags.style.maxWidth === '0px' || flags.style.maxWidth === '';
+  if(isHidden){
+    flags.style.maxWidth = '600px';
+    flags.style.opacity = '1';
+    btn.innerHTML = '&#9664;';
+  } else {
+    flags.style.maxWidth = '0px';
+    flags.style.opacity = '0';
+    btn.innerHTML = '&#9654;';
+  }
+}
+
+// ── FOOTER LOG ANIMATION (IntersectionObserver) ──
+(function(){
+  const lines = document.querySelectorAll('.log-line');
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if(entry.isIntersecting){
+        // Animate lines sequentially
+        const idx = Array.from(lines).indexOf(entry.target);
+        setTimeout(() => {
+          entry.target.classList.add('visible');
+        }, idx * 250);
+        obs.unobserve(entry.target);
+      }
+    });
+  }, {threshold: 0.3});
+
+  lines.forEach(line => obs.observe(line));
+})();
+
+// ── FLAG CLICK → ACTIVE ──
+document.querySelectorAll('.flag').forEach(f => {
+  f.addEventListener('click', e => {
+    e.preventDefault();
+    document.querySelectorAll('.flag').forEach(x => x.classList.remove('active'));
+    f.classList.add('active');
+  });
+});
+</script>
+</body>
+</html>

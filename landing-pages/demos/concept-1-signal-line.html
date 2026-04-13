@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Demo — Concept 1: The Signal Line</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--accent:#3b82f6;--muted:#888;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+body{background:var(--bg);color:#f5f5f5;font-family:var(--font);overflow-x:hidden}
+
+/* ── HEADER ── */
+header{position:fixed;top:0;left:0;right:0;z-index:100;height:56px;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.6)}
+.signal-canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
+.nav-inner{position:relative;z-index:2;display:flex;align-items:center;height:56px;padding:0 2rem}
+.wordmark{font-size:1.2rem;font-weight:700;letter-spacing:-0.02em;color:#fff;font-family:var(--mono);margin-right:3rem;cursor:default}
+.wordmark .slash{color:var(--accent);font-weight:800}
+.nav-links{display:flex;gap:2rem;align-items:center;font-size:.85rem}
+.nav-links a{color:var(--muted);text-decoration:none;font-weight:500;transition:color .25s;position:relative;padding:.25rem 0}
+.nav-links a:hover{color:#fff}
+.nav-links a.active{color:#fff}
+.nav-links .btn-accent{background:var(--accent);color:#fff;padding:.45rem 1.1rem;border-radius:8px;font-size:.78rem;font-weight:600;transition:all .25s}
+.nav-links .btn-accent:hover{background:#2563eb;transform:translateY(-1px)}
+
+/* ── FOOTER ── */
+footer{position:relative;border-top:1px solid rgba(255,255,255,0.06);margin-top:100vh}
+.footer-signal-canvas{width:100%;height:40px;display:block}
+.footer-inner{max-width:900px;margin:0 auto;padding:2rem;display:flex;justify-content:space-between;align-items:center;font-size:.8rem;color:#444}
+.footer-inner a{color:#555;text-decoration:none;transition:color .2s}
+.footer-inner a:hover{color:var(--accent)}
+.footer-logo{font-family:var(--mono);font-size:1.1rem;font-weight:700;color:#fff}
+.footer-logo .slash{color:var(--accent)}
+.footer-eot{font-family:var(--mono);font-size:.6rem;color:#2a2a2a;text-align:center;padding-bottom:1.5rem;letter-spacing:.15em}
+
+/* ── DEMO CONTENT ── */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem}
+.hero h1{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#666);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.hero p{color:var(--muted);font-size:1.1rem;max-width:500px}
+.content{max-width:700px;margin:0 auto;padding:4rem 2rem}
+.content h2{font-size:1.5rem;font-weight:600;margin-bottom:1rem}
+.content p{color:var(--muted);line-height:1.7;margin-bottom:1.5rem}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header>
+  <canvas class="signal-canvas" id="header-signal"></canvas>
+  <div class="nav-inner">
+    <div class="wordmark">sl<span class="slash">/</span>sh</div>
+    <div class="nav-links" id="nav-links">
+      <a href="#" data-idx="0" class="active">Mission</a>
+      <a href="#" data-idx="1">Timeline</a>
+      <a href="#" data-idx="2">Live</a>
+      <a href="#" data-idx="3">Docs</a>
+      <a href="#" class="btn-accent">Try alpha</a>
+    </div>
+  </div>
+</header>
+
+<div class="hero">
+  <h1>The Signal Line</h1>
+  <p>Header IS the signal. Hover nav links to trigger resonance bursts.</p>
+</div>
+
+<div class="content">
+  <h2>Scroll down to see footer</h2>
+  <p>The header signal reacts to your scroll position — amplitude increases as you move through content. Each nav link is a node in the signal path.</p>
+  <p>The footer signal decays — representing "end of transmission". The further you scroll, the weaker the signal becomes until it flatlines.</p>
+  <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam.</p>
+  <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.</p>
+</div>
+
+<footer>
+  <canvas class="footer-signal-canvas" id="footer-signal"></canvas>
+  <div class="footer-inner">
+    <div class="footer-logo">sl<span class="slash">/</span>sh</div>
+    <div>
+      <a href="#">Mission</a> &middot;
+      <a href="#">Timeline</a> &middot;
+      <a href="#">Docs</a>
+    </div>
+    <div style="color:#333">Built in Rust. Zero GPU.</div>
+  </div>
+  <div class="footer-eot">[ END OF TRANSMISSION ]</div>
+</footer>
+
+<script>
+// ── HEADER SIGNAL ──
+(function(){
+  const canvas = document.getElementById('header-signal');
+  const ctx = canvas.getContext('2d');
+  let W, H, time = 0;
+  let hoverX = -1, hoverAmp = 0, hoverDecay = 0;
+  let scrollAmp = 0;
+
+  // Nav link positions (fraction of width)
+  const links = document.querySelectorAll('#nav-links a:not(.btn-accent)');
+  const linkPositions = [];
+
+  function resize(){
+    const dpr = devicePixelRatio || 1;
+    W = canvas.offsetWidth;
+    H = canvas.offsetHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Recalculate link positions
+    linkPositions.length = 0;
+    links.forEach(a => {
+      const r = a.getBoundingClientRect();
+      linkPositions.push((r.left + r.width/2) / W);
+    });
+  }
+
+  links.forEach(a => {
+    a.addEventListener('mouseenter', () => {
+      const r = a.getBoundingClientRect();
+      hoverX = (r.left + r.width/2) / W;
+      hoverAmp = 1;
+      hoverDecay = 0;
+    });
+    a.addEventListener('mouseleave', () => {
+      hoverDecay = 1;
+    });
+  });
+
+  window.addEventListener('scroll', () => {
+    const maxScroll = document.body.scrollHeight - window.innerHeight;
+    scrollAmp = maxScroll > 0 ? Math.min(window.scrollY / maxScroll, 1) : 0;
+  }, {passive: true});
+
+  function draw(){
+    time += 0.02;
+    ctx.clearRect(0, 0, W, H);
+
+    // Decay hover
+    if(hoverDecay > 0){
+      hoverAmp *= 0.92;
+      if(hoverAmp < 0.01){ hoverAmp = 0; hoverX = -1; hoverDecay = 0; }
+    }
+
+    const baseY = H - 1;
+    const baseAmp = 1 + scrollAmp * 3;
+
+    ctx.beginPath();
+    ctx.moveTo(0, baseY);
+
+    for(let x = 0; x <= W; x += 2){
+      const nx = x / W;
+      // Base noise
+      let y = Math.sin(nx * 12 + time) * baseAmp;
+      y += Math.sin(nx * 23 + time * 1.7) * baseAmp * 0.5;
+
+      // Resonance burst at hovered link
+      if(hoverX >= 0 && hoverAmp > 0.01){
+        const dist = Math.abs(nx - hoverX);
+        const spread = 0.08 + (1 - hoverAmp) * 0.3;
+        const burst = hoverAmp * 18 * Math.exp(-dist * dist / (2 * spread * spread));
+        y += burst * Math.sin(dist * 60 - time * 8);
+      }
+
+      // Small pulses at nav link positions
+      for(const lp of linkPositions){
+        const d = Math.abs(nx - lp);
+        if(d < 0.04){
+          y += Math.sin(time * 3 + lp * 20) * 3 * (1 - d / 0.04);
+        }
+      }
+
+      ctx.lineTo(x, baseY - y);
+    }
+
+    ctx.strokeStyle = 'rgba(59,130,246,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Glow line
+    ctx.beginPath();
+    ctx.moveTo(0, baseY);
+    for(let x = 0; x <= W; x += 4){
+      const nx = x / W;
+      let y = Math.sin(nx * 12 + time) * baseAmp * 0.5;
+      if(hoverX >= 0 && hoverAmp > 0.01){
+        const dist = Math.abs(nx - hoverX);
+        const spread = 0.08 + (1 - hoverAmp) * 0.3;
+        y += hoverAmp * 10 * Math.exp(-dist * dist / (2 * spread * spread)) * Math.sin(dist * 60 - time * 8);
+      }
+      ctx.lineTo(x, baseY - y);
+    }
+    ctx.strokeStyle = 'rgba(59,130,246,0.15)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  draw();
+})();
+
+// ── FOOTER SIGNAL (decaying) ──
+(function(){
+  const canvas = document.getElementById('footer-signal');
+  const ctx = canvas.getContext('2d');
+  let W, H, time = 0;
+
+  function resize(){
+    const dpr = devicePixelRatio || 1;
+    W = canvas.offsetWidth;
+    H = canvas.offsetHeight;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function draw(){
+    time += 0.015;
+    ctx.clearRect(0, 0, W, H);
+
+    const baseY = H / 2;
+    ctx.beginPath();
+    ctx.moveTo(0, baseY);
+
+    for(let x = 0; x <= W; x += 2){
+      const nx = x / W;
+      // Signal decays from left to right
+      const decay = Math.exp(-nx * 3);
+      let y = decay * 12 * Math.sin(nx * 30 + time * 2);
+      y += decay * 5 * Math.sin(nx * 17 + time * 3.1);
+      ctx.lineTo(x, baseY - y);
+    }
+
+    ctx.strokeStyle = 'rgba(59,130,246,0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Faint glow
+    ctx.strokeStyle = 'rgba(59,130,246,0.08)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  draw();
+})();
+</script>
+</body>
+</html>

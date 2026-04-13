@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Demo — Concept 2: Particle Dock</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--accent:#3b82f6;--muted:#888;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+body{background:var(--bg);color:#f5f5f5;font-family:var(--font);overflow-x:hidden}
+
+/* ── HEADER ── */
+header{position:fixed;top:0;left:0;right:0;z-index:100;transition:all .5s cubic-bezier(0.16,1,0.3,1)}
+header .bar{display:flex;align-items:center;height:56px;padding:0 2rem;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.5)}
+header.compact .bar{height:40px}
+header.compact .nav-links a:not(.btn-accent){opacity:0;width:0;padding:0;margin:0;overflow:hidden;transition:all .4s}
+header.compact .glow-line{opacity:1}
+.glow-line{position:absolute;bottom:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent 10%,var(--accent) 50%,transparent 90%);opacity:0;transition:opacity .5s}
+.wordmark{font-size:1.2rem;font-weight:700;letter-spacing:-0.02em;color:#fff;font-family:var(--mono);margin-right:auto;cursor:default}
+.wordmark .slash{color:var(--accent);font-weight:800}
+.nav-links{display:flex;gap:0;align-items:center}
+.nav-links a{color:var(--muted);text-decoration:none;font-weight:500;font-size:.85rem;padding:.25rem 1rem;position:relative;transition:color .25s,opacity .4s,width .4s}
+.nav-links a:hover{color:#fff}
+.nav-links a.active{color:#fff}
+.nav-links .btn-accent{background:var(--accent);color:#fff;padding:.45rem 1.1rem;border-radius:8px;font-size:.78rem;font-weight:600;transition:all .25s}
+.nav-links .btn-accent:hover{background:#2563eb;transform:translateY(-1px)}
+/* Particle container per link */
+.nav-links a .particles{position:absolute;top:-20px;left:50%;width:40px;height:30px;margin-left:-20px;pointer-events:none;overflow:visible}
+.particle{position:absolute;width:3px;height:3px;border-radius:50%;background:var(--accent);opacity:0;pointer-events:none}
+
+/* ── FOOTER DOCK ── */
+.dock{position:relative;border-top:1px solid rgba(255,255,255,0.06);padding:3rem 2rem 2rem;overflow:hidden}
+.dock-reflection{position:absolute;bottom:0;left:0;right:0;height:60px;background:linear-gradient(to bottom,transparent,rgba(59,130,246,0.03));pointer-events:none}
+.dock-items{display:flex;justify-content:center;gap:2.5rem;align-items:flex-end;position:relative;z-index:2}
+.dock-item{display:flex;flex-direction:column;align-items:center;gap:.4rem;cursor:default;transition:transform .3s cubic-bezier(0.34,1.56,0.64,1)}
+.dock-item:hover{transform:translateY(-6px) scale(1.1)}
+.dock-icon{width:40px;height:40px;border-radius:10px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;font-size:1rem;transition:all .3s}
+.dock-item:hover .dock-icon{border-color:var(--accent);background:rgba(59,130,246,0.1);box-shadow:0 4px 20px rgba(59,130,246,0.2)}
+.dock-label{font-size:.65rem;color:#444;font-family:var(--mono);transition:color .3s}
+.dock-item:hover .dock-label{color:var(--muted)}
+/* Reflection effect */
+.dock-item::after{content:'';position:absolute;bottom:-20px;left:50%;width:30px;height:15px;margin-left:-15px;background:radial-gradient(ellipse,rgba(59,130,246,0.08),transparent);opacity:0;transition:opacity .3s}
+.dock-item:hover::after{opacity:1}
+.footer-bottom{text-align:center;padding:1.5rem 2rem 1rem;font-size:.55rem;color:#2a2a2a;letter-spacing:.05em;font-family:var(--mono)}
+
+/* ── DEMO CONTENT ── */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem}
+.hero h1{font-size:clamp(2.5rem,5vw,4rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#666);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+.hero p{color:var(--muted);font-size:1.1rem;max-width:500px}
+.spacer{height:80vh;display:flex;align-items:center;justify-content:center;color:#333;font-size:1rem}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<header id="header">
+  <div class="bar">
+    <div class="wordmark">sl<span class="slash">/</span>sh</div>
+    <div class="nav-links" id="nav-links">
+      <a href="#" class="active">Mission<span class="particles"></span></a>
+      <a href="#">Timeline<span class="particles"></span></a>
+      <a href="#">Live<span class="particles"></span></a>
+      <a href="#">Docs<span class="particles"></span></a>
+      <a href="#" class="btn-accent">Try alpha</a>
+    </div>
+  </div>
+  <div class="glow-line"></div>
+</header>
+
+<div class="hero">
+  <h1>Particle Dock</h1>
+  <p>Hover nav links — particles rise and get absorbed. Scroll down to see compact mode + footer dock.</p>
+</div>
+
+<div class="spacer">Scroll to see footer dock</div>
+
+<div class="dock">
+  <div class="dock-reflection"></div>
+  <div class="dock-items">
+    <div class="dock-item"><div class="dock-icon">M</div><div class="dock-label">Mission</div></div>
+    <div class="dock-item"><div class="dock-icon">T</div><div class="dock-label">Timeline</div></div>
+    <div class="dock-item"><div class="dock-icon">L</div><div class="dock-label">Live</div></div>
+    <div class="dock-item"><div class="dock-icon">D</div><div class="dock-label">Docs</div></div>
+    <div class="dock-item"><div class="dock-icon" style="font-size:.7rem">sl/sh</div><div class="dock-label">Home</div></div>
+  </div>
+  <div class="footer-bottom">Built in Rust. No GPU. No model files. Just signal.</div>
+</div>
+
+<script>
+// ── HEADER COMPACT ON SCROLL ──
+(function(){
+  const header = document.getElementById('header');
+  let last = 0;
+  window.addEventListener('scroll', () => {
+    const y = window.scrollY;
+    header.classList.toggle('compact', y > 100);
+    last = y;
+  }, {passive: true});
+})();
+
+// ── PARTICLE SYSTEM ──
+(function(){
+  const links = document.querySelectorAll('#nav-links a:not(.btn-accent)');
+  const activeLink = document.querySelector('#nav-links a.active');
+
+  links.forEach(link => {
+    link.addEventListener('mouseenter', () => {
+      const container = link.querySelector('.particles');
+      if(!container) return;
+
+      // Spawn 5 particles
+      for(let i = 0; i < 5; i++){
+        const p = document.createElement('span');
+        p.className = 'particle';
+        const startX = -8 + Math.random() * 16;
+        const startY = 0;
+        p.style.left = (20 + startX) + 'px';
+        p.style.top = startY + 'px';
+        container.appendChild(p);
+
+        // Animate: rise up, then get sucked toward active link
+        const riseY = -15 - Math.random() * 20;
+        const duration = 400 + Math.random() * 300;
+        const delay = i * 60;
+
+        p.animate([
+          { opacity: 0, transform: 'translateY(0) scale(0.5)' },
+          { opacity: 1, transform: `translateY(${riseY}px) scale(1)`, offset: 0.4 },
+          { opacity: 0.6, transform: `translateY(${riseY - 5}px) scale(0.8)`, offset: 0.7 },
+          { opacity: 0, transform: `translateY(${riseY + 10}px) scale(0.3)` }
+        ], {
+          duration: duration,
+          delay: delay,
+          easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+          fill: 'forwards'
+        }).onfinish = () => p.remove();
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

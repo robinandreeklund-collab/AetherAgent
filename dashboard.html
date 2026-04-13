@@ -78,10 +78,10 @@
 <div class="header">
   <h1>AetherAgent Live Dashboard</h1>
   <div class="status"><span class="dot"></span><span id="conn-status">Connecting</span></div>
-  <button class="refresh-btn" onclick="refreshAll()">Refresh</button>
+  <button class="refresh-btn" onclick="refreshAll()" aria-label="Refresh dashboard data">Refresh</button>
 </div>
 
-<div class="stats-row" id="stats-row">
+<div class="stats-row" id="stats-row" aria-live="polite" aria-label="Server statistics">
   <div class="stat-card"><div class="label">RSS Memory</div><div class="value" id="st-rss">--</div><div class="sub" id="st-rss-sub">peak --</div></div>
   <div class="stat-card"><div class="label">Threads</div><div class="value" id="st-threads">--</div><div class="sub">active</div></div>
   <div class="stat-card"><div class="label">CRFR Cache</div><div class="value" id="st-cache">--</div><div class="sub" id="st-cache-sub">of -- capacity</div></div>
@@ -96,9 +96,9 @@
     <div class="panel-header"><h2>CRFR Query Explorer</h2><span class="badge">Pipeline Trace</span></div>
     <div class="panel-body">
       <div class="explore-form">
-        <input id="ex-url" placeholder="URL (e.g. https://svt.se)" value="">
-        <input id="ex-goal" placeholder="Goal (e.g. hitta senaste nyheterna)" value="">
-        <button onclick="runExplore()">Explore CRFR</button>
+        <input id="ex-url" placeholder="URL (e.g. https://svt.se)" value="" aria-label="URL to explore">
+        <input id="ex-goal" placeholder="Goal (e.g. hitta senaste nyheterna)" value="" aria-label="Search goal">
+        <button id="ex-btn" onclick="runExplore()" aria-label="Run CRFR exploration">Explore CRFR</button>
       </div>
       <div id="explore-body"><div class="empty">Enter a URL and goal above to trace the full CRFR pipeline</div></div>
     </div>
@@ -147,6 +147,8 @@
 const API = window.location.origin;
 async function fetchJson(path) { try { const r = await fetch(API + path); return r.ok ? await r.json() : null; } catch { return null; } }
 async function postJson(path, body) { try { const r = await fetch(API + path, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) }); return r.ok ? await r.json() : null; } catch { return null; } }
+// Sanitize text for safe HTML insertion (prevent XSS)
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function fmtNum(n) { return n != null ? n.toLocaleString() : '--'; }
 function fmtPct(n) { return n != null ? n.toFixed(1) + '%' : '--'; }
 function fmtMs(n) { return n != null ? (n < 1000 ? n + 'ms' : (n/1000).toFixed(1) + 's') : '--'; }
@@ -156,11 +158,13 @@ function truncUrl(u, n) { return u && u.length > n ? u.substring(0, n) + '...' :
 
 function renderSnapshot(snap) {
   if (!snap) return;
-  document.getElementById('st-rss').textContent = snap.memory_stats.rss_mb || '0';
-  document.getElementById('st-rss-sub').textContent = `peak ${snap.memory_stats.peak_rss_mb || 0} MB`;
-  document.getElementById('st-threads').textContent = snap.memory_stats.threads || '0';
-  document.getElementById('st-cache').textContent = snap.crfr_cache.total_entries;
-  document.getElementById('st-cache-sub').textContent = `of ${snap.crfr_cache.capacity} (TTL ${snap.crfr_cache.ttl_ms/1000}s)`;
+  const mem = snap.memory_stats || {};
+  document.getElementById('st-rss').textContent = mem.rss_mb || '0';
+  document.getElementById('st-rss-sub').textContent = `peak ${mem.peak_rss_mb || 0} MB`;
+  document.getElementById('st-threads').textContent = mem.threads || '0';
+  const cc = snap.crfr_cache || {};
+  document.getElementById('st-cache').textContent = cc.total_entries || 0;
+  document.getElementById('st-cache-sub').textContent = `of ${cc.capacity || 0} (TTL ${(cc.ttl_ms || 0)/1000}s)`;
   document.getElementById('st-endpoints').textContent = snap.endpoint_count;
   document.getElementById('st-vision').textContent = snap.vision_available ? 'Loaded' : 'Off';
   document.getElementById('st-phases').textContent = snap.engine ? snap.engine.phases_completed : '--';
@@ -185,13 +189,13 @@ function renderCrfrCache(cache) {
   for (const e of cache.entries) {
     const ttlPct = cache.ttl_ms > 0 ? (e.ttl_remaining_ms / cache.ttl_ms * 100) : 0;
     html += `<tr>
-      <td style="color:var(--cyan);font-size:11px" title="${e.url}">${truncUrl(e.url, 35) || e.url_hash}</td>
+      <td style="color:var(--cyan);font-size:11px" title="${esc(e.url)}">${esc(truncUrl(e.url, 35) || String(e.url_hash))}</td>
       <td>${fmtNum(e.node_count)}</td>
       <td>${e.total_queries}</td>
       <td>${e.propagation_weight_count}<span style="color:var(--text3)">w</span> ${e.concept_memory_count}<span style="color:var(--text3)">c</span></td>
       <td style="color:var(--text2)">${e.max_depth}</td>
       <td><div class="progress-bar" style="width:50px;display:inline-block;vertical-align:middle"><div class="progress-fill ${ttlPct > 50 ? 'fill-green' : ttlPct > 20 ? 'fill-yellow' : 'fill-red'}" style="width:${ttlPct}%"></div></div> <span style="color:var(--text3);font-size:10px">${(e.ttl_remaining_ms/1000).toFixed(0)}s</span></td>
-      <td><button onclick="loadWeights('${e.url_hash}')" style="background:none;border:1px solid var(--border2);color:var(--blue);padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;font-family:inherit">Inspect</button></td>
+      <td><button onclick="loadWeights('${esc(String(e.url_hash))}')" style="background:none;border:1px solid var(--border2);color:var(--blue);padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;font-family:inherit">Inspect</button></td>
     </tr>`;
   }
   html += '</table>';
@@ -321,15 +325,19 @@ async function runExplore() {
   const url = document.getElementById('ex-url').value.trim();
   const goal = document.getElementById('ex-goal').value.trim();
   const body = document.getElementById('explore-body');
+  const btn = document.getElementById('ex-btn');
   if (!url || !goal) { body.innerHTML = '<div class="empty">Enter both URL and goal</div>'; return; }
+  btn.disabled = true; btn.textContent = 'Running...';
   body.innerHTML = '<div class="loading">Fetching page &amp; running CRFR pipeline</div>';
-  // Step 1: fetch HTML
-  const fetchRes = await postJson('/api/fetch', {url});
-  if (!fetchRes || !fetchRes.body) { body.innerHTML = '<div class="empty">Failed to fetch URL</div>'; return; }
-  // Step 2: explore CRFR (pass Set-Cookie headers for JS cookie bridge)
-  const data = await postJson('/api/dashboard/explore', {html: fetchRes.body, goal, url: fetchRes.final_url || url, top_n: 20, set_cookie_headers: fetchRes.set_cookie_headers || []});
-  if (!data || data.error) { body.innerHTML = `<div class="empty">${data?.error || 'Explore failed'}</div>`; return; }
-  renderExplore(data);
+  try {
+    const fetchRes = await postJson('/api/fetch', {url});
+    if (!fetchRes || !fetchRes.body) { body.innerHTML = '<div class="empty">Failed to fetch URL</div>'; return; }
+    const data = await postJson('/api/dashboard/explore', {html: fetchRes.body, goal, url: fetchRes.final_url || url, top_n: 20, set_cookie_headers: fetchRes.set_cookie_headers || []});
+    if (!data || data.error) { body.innerHTML = `<div class="empty">${esc(data?.error || 'Explore failed')}</div>`; return; }
+    renderExplore(data);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Explore CRFR';
+  }
 }
 
 function renderExplore(d) {
@@ -471,7 +479,8 @@ async function refreshAll() {
 }
 
 refreshAll();
-setInterval(refreshAll, 5000);
+const _refreshInterval = setInterval(refreshAll, 5000);
+window.addEventListener('beforeunload', () => clearInterval(_refreshInterval));
 </script>
 </body>
 </html>

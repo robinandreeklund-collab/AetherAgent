@@ -10,6 +10,7 @@
 <meta name="robots" content="index, follow">
 <meta property="og:title" content="Try Slaash — Live AI Web Extraction">
 <meta property="og:description" content="Enter any URL and a question. Get back only the answer. Try it live.">
+<meta property="og:image" content="https://www.slaash.ai/og-image.png">
 <link rel="canonical" href="https://www.slaash.ai/try">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -79,7 +80,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 .loading.visible{display:block}
 .loading-text{color:var(--muted);font-size:.85rem}
 .candle-wrapper{position:relative;width:250px;height:150px;margin:0 auto;transform:scale(0.5);transform-origin:center bottom}
-.candle-wrapper .floor{position:absolute;left:50%;top:50%;width:350px;height:5px;background:#3b82f6;transform:translate(-50%,-50%);box-shadow:0px 2px 5px #111;z-index:2}
+.candle-wrapper .floor{position:absolute;left:50%;top:50%;width:min(350px,90vw);height:5px;background:#3b82f6;transform:translate(-50%,-50%);box-shadow:0px 2px 5px #111;z-index:2}
 .candles{position:absolute;left:50%;top:50%;width:250px;height:150px;transform:translate(-50%,-100%);z-index:1}
 .candle1{position:absolute;left:50%;top:50%;width:35px;height:100px;background:var(--surface,#111);border:3px solid #3b82f6;border-bottom:0px;border-radius:3px;transform-origin:center right;transform:translate(60%,-25%);box-shadow:-2px 0px 0px #1e3a5f inset;animation:expand-body 3s infinite linear}
 .candle1__stick,.candle2__stick{position:absolute;left:50%;top:0%;width:3px;height:15px;background:#3b82f6;border-radius:8px;transform:translate(-50%,-100%)}
@@ -460,7 +461,7 @@ h1{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.25rem
 
 <script>
 // Nav scroll
-(function(){var n=document.querySelector('nav');if(!n)return;var t=false;window.addEventListener('scroll',function(){if(!t){requestAnimationFrame(function(){n.classList.toggle('scrolled',window.scrollY>40);t=false});t=true}})})();
+(function(){var n=document.querySelector('nav');if(!n)return;var t=false;window.addEventListener('scroll',function(){if(!t){requestAnimationFrame(function(){n.classList.toggle('scrolled',window.scrollY>40);t=false});t=true}},{passive:true})})();
 
 let currentMode = 'distill';
 
