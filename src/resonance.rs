@@ -516,6 +516,109 @@ fn answer_shape_score(
     score
 }
 
+/// ALG-6: Tabell-driven answer-type detection.
+/// Varje rad: (goal-nyckelord, label-mönster-check, boost).
+/// Lättare att utöka än if-else-kedjor.
+struct AnswerTypeRule {
+    /// Goal-nyckelord som triggar regeln (minst ett måste matcha)
+    goal_keywords: &'static [&'static str],
+    /// Label-check: returnerar true om labeln matchar förväntad answer-typ
+    label_check: fn(&str) -> bool,
+    /// Boost-värde (0.0-0.3)
+    boost: f32,
+}
+
+fn has_currency(label: &str) -> bool {
+    label.contains('$')
+        || label.contains('£')
+        || label.contains('€')
+        || label.contains("kr")
+        || label.contains("sek")
+        || label.contains("usd")
+        || label.contains("eur")
+}
+
+fn has_large_number(label: &str) -> bool {
+    label
+        .split(|c: char| !c.is_ascii_digit() && c != ' ' && c != ',')
+        .any(|s| s.replace([' ', ','], "").len() >= 4)
+}
+
+fn has_date_pattern(label: &str) -> bool {
+    label.contains("202") || label.contains("201") || label.contains("200") || label.contains("199")
+}
+
+fn has_percent(label: &str) -> bool {
+    label.contains('%')
+}
+
+fn has_time_pattern(label: &str) -> bool {
+    // Matchar HH:MM mönster
+    label
+        .as_bytes()
+        .windows(5)
+        .any(|w| w[0].is_ascii_digit() && w[1].is_ascii_digit() && w[2] == b':')
+}
+
+fn has_measurement(label: &str) -> bool {
+    label.contains("kg")
+        || label.contains("km")
+        || label.contains("cm")
+        || label.contains("ml")
+        || label.contains("°c")
+        || label.contains("°f")
+}
+
+static ANSWER_TYPE_RULES: &[AnswerTypeRule] = &[
+    AnswerTypeRule {
+        goal_keywords: &["price", "cost", "pris", "fee", "avgift", "billig"],
+        label_check: has_currency,
+        boost: 0.25,
+    },
+    AnswerTypeRule {
+        goal_keywords: &["population", "invånare", "antal", "many", "count", "number"],
+        label_check: has_large_number,
+        boost: 0.2,
+    },
+    AnswerTypeRule {
+        goal_keywords: &[
+            "date",
+            "when",
+            "datum",
+            "year",
+            "år",
+            "published",
+            "publicerad",
+        ],
+        label_check: has_date_pattern,
+        boost: 0.15,
+    },
+    AnswerTypeRule {
+        goal_keywords: &["rate", "percent", "ränta", "procent", "andel"],
+        label_check: has_percent,
+        boost: 0.25,
+    },
+    AnswerTypeRule {
+        goal_keywords: &["time", "hour", "tid", "klockan", "öppettider", "schedule"],
+        label_check: has_time_pattern,
+        boost: 0.2,
+    },
+    AnswerTypeRule {
+        goal_keywords: &[
+            "weight",
+            "height",
+            "distance",
+            "vikt",
+            "längd",
+            "avstånd",
+            "temperature",
+            "temperatur",
+        ],
+        label_check: has_measurement,
+        boost: 0.2,
+    },
+];
+
 /// Answer-type detection: classify goal by expected answer type,
 /// then boost nodes whose content matches that type.
 /// Returns bonus score (0.0-0.3).
@@ -523,53 +626,11 @@ fn answer_type_boost(goal: &str, label: &str) -> f32 {
     let goal_lower = goal.to_lowercase();
     let label_lower = label.to_lowercase();
 
-    // Price/cost query → boost nodes with currency
-    if (goal_lower.contains("price")
-        || goal_lower.contains("cost")
-        || goal_lower.contains("pris")
-        || goal_lower.contains("kr")
-        || goal_lower.contains("fee"))
-        && (label_lower.contains('$')
-            || label_lower.contains('£')
-            || label_lower.contains('€')
-            || label_lower.contains("kr"))
-    {
-        return 0.25;
-    }
-
-    // Population/count query → boost nodes with large numbers
-    if goal_lower.contains("population")
-        || goal_lower.contains("invånare")
-        || goal_lower.contains("antal")
-        || goal_lower.contains("many")
-    {
-        // Check for numbers > 1000
-        let has_large_number = label
-            .split(|c: char| !c.is_ascii_digit() && c != ' ' && c != ',')
-            .any(|s| s.replace([' ', ','], "").len() >= 4);
-        if has_large_number {
-            return 0.2;
+    for rule in ANSWER_TYPE_RULES {
+        let goal_matches = rule.goal_keywords.iter().any(|kw| goal_lower.contains(kw));
+        if goal_matches && (rule.label_check)(&label_lower) {
+            return rule.boost;
         }
-    }
-
-    // Date/time query → boost nodes with date patterns
-    if (goal_lower.contains("date")
-        || goal_lower.contains("when")
-        || goal_lower.contains("datum")
-        || goal_lower.contains("year")
-        || goal_lower.contains("år"))
-        && (label.contains("202") || label.contains("201") || label.contains("200"))
-    {
-        return 0.15;
-    }
-
-    // Rate/percentage query → boost nodes with %
-    if (goal_lower.contains("rate")
-        || goal_lower.contains("percent")
-        || goal_lower.contains("ränta"))
-        && label_lower.contains('%')
-    {
-        return 0.25;
     }
 
     0.0

@@ -6,6 +6,7 @@
 /// v18: ConnectionPool — multiple reader connections + single writer.
 /// SQLite WAL mode allows concurrent reads without blocking writes.
 use rusqlite::{params, Connection};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,6 +24,9 @@ struct ConnectionPool {
     writer: Option<Connection>,
     readers: Vec<Connection>,
     db_path: String,
+    /// OPT-D1: Round-robin counter for reader selection.
+    /// Atomic so it can be incremented without mutable borrow.
+    reader_idx: AtomicUsize,
 }
 
 impl ConnectionPool {
@@ -31,7 +35,18 @@ impl ConnectionPool {
             writer: None,
             readers: Vec::new(),
             db_path: String::new(),
+            reader_idx: AtomicUsize::new(0),
         }
+    }
+
+    /// OPT-D1: Round-robin reader selection. Distributes reads across all
+    /// reader connections instead of always using readers[0].
+    fn next_reader(&self) -> Option<&Connection> {
+        if self.readers.is_empty() {
+            return self.writer.as_ref();
+        }
+        let idx = self.reader_idx.fetch_add(1, Ordering::Relaxed) % self.readers.len();
+        Some(&self.readers[idx])
     }
 
     fn init(&mut self, path: &str) -> Result<(), String> {
@@ -167,7 +182,7 @@ pub fn save_field(field: &ResonanceField) {
 pub fn load_field(url_hash: u64) -> Option<ResonanceField> {
     let data: Vec<u8> = {
         let pool = DB.lock().ok()?;
-        let conn = pool.readers.first().or(pool.writer.as_ref())?;
+        let conn = pool.next_reader()?;
         let mut stmt = conn
             .prepare("SELECT data FROM resonance_fields WHERE url_hash = ?1")
             .ok()?;
@@ -184,7 +199,7 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
         Ok(p) => p,
         Err(_) => return vec![],
     };
-    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
+    let conn = match pool.next_reader() {
         Some(c) => c,
         None => return vec![],
     };
@@ -265,7 +280,7 @@ pub fn list_stored_fields() -> Vec<StoredFieldInfo> {
         Ok(p) => p,
         Err(_) => return vec![],
     };
-    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
+    let conn = match pool.next_reader() {
         Some(c) => c,
         None => return vec![],
     };
@@ -311,7 +326,7 @@ pub fn list_stored_domain_profiles() -> Vec<StoredDomainInfo> {
         Ok(p) => p,
         Err(_) => return vec![],
     };
-    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
+    let conn = match pool.next_reader() {
         Some(c) => c,
         None => return vec![],
     };
@@ -396,7 +411,7 @@ pub fn load_all_domain_profiles() -> Vec<(u64, DomainProfile)> {
         Ok(p) => p,
         Err(_) => return vec![],
     };
-    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
+    let conn = match pool.next_reader() {
         Some(c) => c,
         None => return vec![],
     };
@@ -543,7 +558,7 @@ pub fn load_global_stat(key: &str) -> u64 {
         Ok(p) => p,
         Err(_) => return 0,
     };
-    let conn = match pool.readers.first().or(pool.writer.as_ref()) {
+    let conn = match pool.next_reader() {
         Some(c) => c,
         None => return 0,
     };
