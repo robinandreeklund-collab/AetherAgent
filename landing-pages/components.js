@@ -638,11 +638,11 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
       document.getElementById('cb-accept').addEventListener('click',function(){
         localStorage.setItem('slaash-cookies','accepted');
         dismiss();
-      });
+      },{once:true});
       document.getElementById('cb-reject').addEventListener('click',function(){
         localStorage.setItem('slaash-cookies','rejected');
         dismiss();
-      });
+      },{once:true});
     },1500);
   }
 })();

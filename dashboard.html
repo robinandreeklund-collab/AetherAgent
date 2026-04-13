@@ -147,6 +147,8 @@
 const API = window.location.origin;
 async function fetchJson(path) { try { const r = await fetch(API + path); return r.ok ? await r.json() : null; } catch { return null; } }
 async function postJson(path, body) { try { const r = await fetch(API + path, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body) }); return r.ok ? await r.json() : null; } catch { return null; } }
+// Sanitize text for safe HTML insertion (prevent XSS)
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 function fmtNum(n) { return n != null ? n.toLocaleString() : '--'; }
 function fmtPct(n) { return n != null ? n.toFixed(1) + '%' : '--'; }
 function fmtMs(n) { return n != null ? (n < 1000 ? n + 'ms' : (n/1000).toFixed(1) + 's') : '--'; }
@@ -156,11 +158,13 @@ function truncUrl(u, n) { return u && u.length > n ? u.substring(0, n) + '...' :
 
 function renderSnapshot(snap) {
   if (!snap) return;
-  document.getElementById('st-rss').textContent = snap.memory_stats.rss_mb || '0';
-  document.getElementById('st-rss-sub').textContent = `peak ${snap.memory_stats.peak_rss_mb || 0} MB`;
-  document.getElementById('st-threads').textContent = snap.memory_stats.threads || '0';
-  document.getElementById('st-cache').textContent = snap.crfr_cache.total_entries;
-  document.getElementById('st-cache-sub').textContent = `of ${snap.crfr_cache.capacity} (TTL ${snap.crfr_cache.ttl_ms/1000}s)`;
+  const mem = snap.memory_stats || {};
+  document.getElementById('st-rss').textContent = mem.rss_mb || '0';
+  document.getElementById('st-rss-sub').textContent = `peak ${mem.peak_rss_mb || 0} MB`;
+  document.getElementById('st-threads').textContent = mem.threads || '0';
+  const cc = snap.crfr_cache || {};
+  document.getElementById('st-cache').textContent = cc.total_entries || 0;
+  document.getElementById('st-cache-sub').textContent = `of ${cc.capacity || 0} (TTL ${(cc.ttl_ms || 0)/1000}s)`;
   document.getElementById('st-endpoints').textContent = snap.endpoint_count;
   document.getElementById('st-vision').textContent = snap.vision_available ? 'Loaded' : 'Off';
   document.getElementById('st-phases').textContent = snap.engine ? snap.engine.phases_completed : '--';
@@ -185,13 +189,13 @@ function renderCrfrCache(cache) {
   for (const e of cache.entries) {
     const ttlPct = cache.ttl_ms > 0 ? (e.ttl_remaining_ms / cache.ttl_ms * 100) : 0;
     html += `<tr>
-      <td style="color:var(--cyan);font-size:11px" title="${e.url}">${truncUrl(e.url, 35) || e.url_hash}</td>
+      <td style="color:var(--cyan);font-size:11px" title="${esc(e.url)}">${esc(truncUrl(e.url, 35) || String(e.url_hash))}</td>
       <td>${fmtNum(e.node_count)}</td>
       <td>${e.total_queries}</td>
       <td>${e.propagation_weight_count}<span style="color:var(--text3)">w</span> ${e.concept_memory_count}<span style="color:var(--text3)">c</span></td>
       <td style="color:var(--text2)">${e.max_depth}</td>
       <td><div class="progress-bar" style="width:50px;display:inline-block;vertical-align:middle"><div class="progress-fill ${ttlPct > 50 ? 'fill-green' : ttlPct > 20 ? 'fill-yellow' : 'fill-red'}" style="width:${ttlPct}%"></div></div> <span style="color:var(--text3);font-size:10px">${(e.ttl_remaining_ms/1000).toFixed(0)}s</span></td>
-      <td><button onclick="loadWeights('${e.url_hash}')" style="background:none;border:1px solid var(--border2);color:var(--blue);padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;font-family:inherit">Inspect</button></td>
+      <td><button onclick="loadWeights('${esc(String(e.url_hash))}')" style="background:none;border:1px solid var(--border2);color:var(--blue);padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;font-family:inherit">Inspect</button></td>
     </tr>`;
   }
   html += '</table>';
@@ -471,7 +475,8 @@ async function refreshAll() {
 }
 
 refreshAll();
-setInterval(refreshAll, 5000);
+const _refreshInterval = setInterval(refreshAll, 5000);
+window.addEventListener('beforeunload', () => clearInterval(_refreshInterval));
 </script>
 </body>
 </html>

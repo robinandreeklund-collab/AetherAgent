@@ -51,7 +51,7 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 
 /* HERO */
 .hero{position:relative;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:6rem 2rem 4rem;overflow:hidden}
-#hero-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:0;opacity:.6}
+#hero-canvas{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;z-index:0;opacity:.6}
 .hero-content{position:relative;z-index:2;max-width:720px}
 .hero h1{font-size:clamp(2.75rem,6vw,5rem);font-weight:700;letter-spacing:-0.03em;line-height:1.15;margin-bottom:1rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;-webkit-text-fill-color:transparent;opacity:0;animation:heroFadeUp .8s ease .3s forwards}
 .hero .subtitle{font-size:clamp(.95rem,2vw,1.35rem);color:var(--muted);font-weight:400;margin-bottom:2.5rem;letter-spacing:-0.01em;white-space:nowrap;opacity:0;animation:heroFadeUp .8s ease .6s forwards}
@@ -187,7 +187,7 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 /* CONTACT */
 .contact-box{max-width:600px;margin:0 auto;padding:0 2rem 5rem;text-align:center}
 .contact-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:3rem 2.5rem;position:relative;overflow:hidden;transition:all .4s cubic-bezier(0.25,0.46,0.45,0.94)}
-.contact-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 0%,rgba(59,130,246,0.08) 0%,transparent 60%);opacity:0;transition:opacity .4s ease}
+.contact-card::before{content:'';position:absolute;top:0;right:0;bottom:0;left:0;background:radial-gradient(circle at 50% 0%,rgba(59,130,246,0.08) 0%,transparent 60%);opacity:0;transition:opacity .4s ease}
 .contact-card:hover{border-color:var(--accent);transform:translateY(-4px);box-shadow:0 8px 40px rgba(59,130,246,0.15)}
 .contact-card:hover::before{opacity:1}
 .contact-icon{font-size:1.5rem;margin-bottom:1rem;display:block;opacity:.5;transition:all .4s ease}
@@ -569,8 +569,9 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
     ctx.arc(cx,cy,100,0,Math.PI*2);
     ctx.fill();
 
-    requestAnimationFrame(animate);
+    _heroRafId = requestAnimationFrame(animate);
   }
+  var _heroRafId;
 
   window.addEventListener('resize', ()=>{resize();createParticles()});
   resize(); createParticles(); animate();
