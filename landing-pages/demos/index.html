@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Header/Footer Concept Demos</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a0a;color:#fff;font-family:Inter,system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2rem;padding:2rem}
+h1{font-size:1.5rem;font-weight:600;letter-spacing:-0.02em;color:#888}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.25rem;max-width:900px;width:100%}
+a{display:block;padding:2rem 1.75rem;background:#111;border:1px solid rgba(255,255,255,0.08);border-radius:14px;color:#fff;text-decoration:none;transition:all .25s}
+a:hover{border-color:#3b82f6;transform:translateY(-3px);box-shadow:0 0 30px rgba(59,130,246,0.15)}
+a strong{display:block;font-size:1.05rem;margin-bottom:.5rem}
+a span{display:block;font-size:.82rem;color:#666;line-height:1.5}
+.tag{display:inline-block;font-size:.65rem;font-weight:600;color:#3b82f6;border:1px solid rgba(59,130,246,0.2);padding:.15rem .5rem;border-radius:4px;margin-top:.75rem}
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+<h1>Header/Footer Concept Demos</h1>
+<div class="cards">
+  <a href="concept-1-signal-line.html">
+    <strong>1. The Signal Line</strong>
+    <span>Header IS an oscilloscope trace. Nav links trigger resonance bursts. Footer signal decays to flatline.</span>
+    <div class="tag">Canvas + Wave Physics</div>
+  </a>
+  <a href="concept-2-particle-dock.html">
+    <strong>2. Particle Dock</strong>
+    <span>Particles rise from hovered links. Compact mode on scroll. macOS dock-style footer with reflections.</span>
+    <div class="tag">Web Animations API</div>
+  </a>
+  <a href="concept-3-terminal-prompt.html">
+    <strong>3. Terminal Prompt</strong>
+    <span>Nav as CLI flags (--mission, --timeline). Typewriter hover response. Footer is a live terminal log.</span>
+    <div class="tag">Developer Aesthetic</div>
+  </a>
+  <a href="concept-4-slash-cut.html">
+    <strong>4. Slash Cut</strong>
+    <span>Diagonal clip-path header. Hover splits text diagonally with blue slash line. Footer mirrors the cut.</span>
+    <div class="tag">clip-path + CSS</div>
+  </a>
+  <a href="concept-5-resonance-field.html">
+    <strong>5. Resonance Field</strong>
+    <span>Header is a live CRFR visualization. Nav links are nodes. Hover propagates waves. Footer = raw web noise.</span>
+    <div class="tag">Product-as-UI</div>
+  </a>
+</div>
+</body>
+</html>
