@@ -2008,10 +2008,13 @@ impl ResonanceField {
                 .then_with(|| a.node_id.cmp(&b.node_id))
         });
 
-        // BUG-01: Label-hash deduplication — remove duplicates that waste top_n budget.
-        // Keep lowest DOM depth + highest causal_boost on collision.
+        // BUG-01 + BUG-3 fix: Label-hash deduplication — remove duplicates that waste
+        // top_n budget. Also dedup short labels (previously exempt), since "hide",
+        // "Write", "US news", "News", "政治" etc. dominate results on many sites.
+        // Allow max 2 identical short labels before deduping.
         {
             let mut seen_labels: HashMap<u64, usize> = HashMap::new(); // hash → index
+            let mut short_label_counts: HashMap<u64, u32> = HashMap::new();
             let mut deduped: Vec<ResonanceResult> = Vec::with_capacity(results.len());
             for r in results {
                 let label = self
@@ -2019,10 +2022,15 @@ impl ResonanceField {
                     .get(&r.node_id)
                     .map(|s| s.as_str())
                     .unwrap_or("");
-                let label_hash = hash_url(&label.trim().to_lowercase());
+                let normalized = label.trim().to_lowercase();
+                let label_hash = hash_url(&normalized);
                 if label.len() < 10 {
-                    // Short labels (buttons, numbers) — don't dedup
-                    deduped.push(r);
+                    // Short labels: allow max 2 duplicates (e.g., breadcrumb + footer)
+                    let count = short_label_counts.entry(label_hash).or_insert(0);
+                    if *count < 2 {
+                        *count += 1;
+                        deduped.push(r);
+                    }
                 } else if let Some(&existing_idx) = seen_labels.get(&label_hash) {
                     // Duplicate: keep if this one has higher causal_boost
                     if r.causal_boost > deduped[existing_idx].causal_boost {
@@ -3215,49 +3223,100 @@ impl ResonanceField {
     pub fn transfer_from(&mut self, donor: &ResonanceField, min_similarity: f32) -> u32 {
         let mut transferred = 0u32;
 
-        // Pre-bucket donors by role for O(N) lookup instead of O(N²)
+        // Collect donor nodes with learning (hit_count > 0)
+        let donor_learned: Vec<(&u32, &ResonanceState)> = donor
+            .nodes
+            .iter()
+            .filter(|(_, s)| s.hit_count > 0)
+            .collect();
+
+        if donor_learned.is_empty() {
+            return 0;
+        }
+
+        // BUG-1 fix: Build label-based lookup from donor for exact/prefix matching.
+        // text_hv similarity can fail for non-Latin scripts and short labels,
+        // so we use label text as a more reliable primary matching strategy.
+        let donor_labels: HashMap<u32, &str> = donor_learned
+            .iter()
+            .filter_map(|(&nid, _)| donor.node_labels.get(&nid).map(|l| (nid, l.as_str())))
+            .collect();
+
+        // Pre-bucket donors by role for HV fallback
         let mut donor_by_role: HashMap<&str, Vec<&ResonanceState>> = HashMap::new();
-        for (_, state) in donor.nodes.iter().filter(|(_, s)| s.hit_count > 0) {
+        for (_, state) in &donor_learned {
             donor_by_role
                 .entry(state.role.as_str())
                 .or_default()
                 .push(state);
         }
 
-        if donor_by_role.is_empty() {
-            return 0;
-        }
-
-        for (_recipient_id, recipient) in self.nodes.iter_mut() {
+        for (recipient_id, recipient) in self.nodes.iter_mut() {
             if recipient.hit_count > 0 {
                 continue;
             }
 
-            let Some(donors) = donor_by_role.get(recipient.role.as_str()) else {
-                continue;
-            };
+            let recipient_label = self
+                .node_labels
+                .get(recipient_id)
+                .map(|s| s.as_str())
+                .unwrap_or("");
 
-            let mut best_sim: f32 = min_similarity;
-            let mut best_donor: Option<&ResonanceState> = None;
-
-            for donor_state in donors {
-                let sim = recipient.text_hv.similarity(&donor_state.text_hv);
-                let norm = ((sim + 1.0) / 2.0).clamp(0.0, 1.0);
-                if norm > best_sim {
-                    best_sim = norm;
-                    best_donor = Some(donor_state);
+            // Strategy 1: Exact label match (most reliable, handles all scripts)
+            let mut matched_donor: Option<&ResonanceState> = None;
+            if recipient_label.len() >= 10 {
+                let rl = recipient_label.trim().to_lowercase();
+                for (&dnid, &dlabel) in &donor_labels {
+                    if dlabel.trim().to_lowercase() == rl {
+                        if let Some(ds) = donor.nodes.get(&dnid) {
+                            matched_donor = Some(ds);
+                            break;
+                        }
+                    }
                 }
             }
 
-            if let Some(donor) = best_donor {
-                let transfer_strength = best_sim * 0.5;
-                if transfer_strength > 0.1 {
-                    recipient.causal_memory =
-                        Hypervector::bundle(&[&recipient.causal_memory, &donor.causal_memory]);
-                    recipient.hit_count = 1;
-                    recipient.last_hit_ms = now_ms();
-                    transferred += 1;
+            // Strategy 2: Label prefix match (handles truncated/updated content)
+            if matched_donor.is_none() && recipient_label.len() >= 30 {
+                let rl_prefix = &recipient_label[..recipient_label.len().min(60)].to_lowercase();
+                for (&dnid, &dlabel) in &donor_labels {
+                    if dlabel.len() >= 30 && dlabel.to_lowercase().starts_with(rl_prefix) {
+                        if let Some(ds) = donor.nodes.get(&dnid) {
+                            matched_donor = Some(ds);
+                            break;
+                        }
+                    }
                 }
+            }
+
+            // Strategy 3: HV similarity fallback (original approach, role-gated)
+            if matched_donor.is_none() {
+                if let Some(donors) = donor_by_role.get(recipient.role.as_str()) {
+                    let mut best_sim: f32 = min_similarity;
+                    for donor_state in donors {
+                        let sim = recipient.text_hv.similarity(&donor_state.text_hv);
+                        let norm = ((sim + 1.0) / 2.0).clamp(0.0, 1.0);
+                        if norm > best_sim {
+                            best_sim = norm;
+                            matched_donor = Some(donor_state);
+                        }
+                    }
+                    // Require minimum transfer strength for HV-only matches
+                    if matched_donor.is_some() {
+                        let transfer_strength = best_sim * 0.5;
+                        if transfer_strength <= 0.1 {
+                            matched_donor = None;
+                        }
+                    }
+                }
+            }
+
+            if let Some(donor_state) = matched_donor {
+                recipient.causal_memory =
+                    Hypervector::bundle(&[&recipient.causal_memory, &donor_state.causal_memory]);
+                recipient.hit_count = 1;
+                recipient.last_hit_ms = now_ms();
+                transferred += 1;
             }
         }
 

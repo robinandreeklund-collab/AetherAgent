@@ -470,15 +470,104 @@ fn count_content_chars(nodes: &[types::SemanticNode]) -> usize {
 }
 
 /// Truncate label to max_len characters, respecting UTF-8 boundaries.
+/// BUG-L4 fix: Resolve relative URLs to absolute using the page's base URL.
+fn resolve_url(href: &str, base_url: &str) -> String {
+    // Already absolute
+    if href.starts_with("http://") || href.starts_with("https://") {
+        return href.to_string();
+    }
+    // Fragment-only or empty
+    if href.starts_with('#') || href.is_empty() {
+        return href.to_string();
+    }
+    // Protocol-relative
+    if href.starts_with("//") {
+        return format!("https:{href}");
+    }
+    // Extract origin from base_url (e.g., "https://www.svt.se" from "https://www.svt.se/nyheter")
+    let origin = if let Some(pos) = base_url
+        .find("://")
+        .and_then(|s| base_url[s + 3..].find('/').map(|p| s + 3 + p))
+    {
+        &base_url[..pos]
+    } else {
+        base_url.trim_end_matches('/')
+    };
+    if href.starts_with('/') {
+        format!("{origin}{href}")
+    } else {
+        // Relative path — append to base directory
+        let base_dir = if let Some(pos) = base_url.rfind('/') {
+            if base_url[..pos].contains("://") && !base_url[pos + 1..].is_empty() {
+                &base_url[..=pos]
+            } else {
+                base_url
+            }
+        } else {
+            base_url
+        };
+        format!("{base_dir}/{href}")
+    }
+}
+
+/// BUG-6 fix: Decode HTML entities and strip residual tags from labels.
+/// Called before truncation so output is always clean text.
+fn clean_label(label: &str) -> String {
+    // Strip HTML tags (e.g., <p>, <a href="...">, </p>)
+    let mut out = String::with_capacity(label.len());
+    let mut in_tag = false;
+    for ch in label.chars() {
+        if ch == '<' {
+            in_tag = true;
+        } else if ch == '>' && in_tag {
+            in_tag = false;
+        } else if !in_tag {
+            out.push(ch);
+        }
+    }
+
+    // Decode common HTML entities
+    out = out
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&#x2F;", "/")
+        .replace("&nbsp;", " ");
+
+    // Collapse multiple whitespace into single space
+    let mut prev_space = false;
+    out = out
+        .chars()
+        .filter(|&c| {
+            if c.is_whitespace() {
+                if prev_space {
+                    return false;
+                }
+                prev_space = true;
+            } else {
+                prev_space = false;
+            }
+            true
+        })
+        .collect();
+
+    out.trim().to_string()
+}
+
 fn truncate_label(label: &str, max_len: usize) -> String {
-    if label.len() <= max_len {
-        return label.to_string();
+    let cleaned = clean_label(label);
+    if cleaned.len() <= max_len {
+        return cleaned;
     }
     let mut end = max_len;
-    while end > 0 && !label.is_char_boundary(end) {
+    while end > 0 && !cleaned.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}…", &label[..end])
+    format!("{}…", &cleaned[..end])
 }
 
 /// Post-processing filter for CRFR output.
@@ -493,7 +582,7 @@ fn crfr_post_filter<'a>(
             let label = &node.label;
             let lower = label.to_lowercase();
 
-            // 1. OG/meta tags — maskindata, inte content
+            // 1. OG/meta tags + internal metadata — maskindata, inte content
             if let Some(ref name) = node.name {
                 let nl = name.to_lowercase();
                 if nl.starts_with("opengraph.")
@@ -501,8 +590,31 @@ fn crfr_post_filter<'a>(
                     || nl.starts_with("twitter.")
                     || nl.starts_with("fb:")
                     || nl.starts_with("article:")
+                    // BUG-4 fix: filter internal page metadata that ranks as content
+                    || nl.starts_with("bootstrapdata.")
+                    || nl.starts_with("initialtempodata.")
+                    || nl.starts_with("pagecontentqueryssr")
+                    || nl.starts_with("meta.viewport")
+                    || nl.starts_with("meta.robots")
+                    || nl.starts_with("statuscode")
                 {
                     return false;
+                }
+            }
+
+            // BUG-4 fix: filter nodes with role "data" that are JSON-LD schema
+            // or internal config — these are machine-readable, not content
+            if node.role == "data" {
+                if let Some(ref name) = node.name {
+                    let nl = name.to_lowercase();
+                    if nl.starts_with("jsonld.")
+                        || nl.contains("potentialaction")
+                        || nl.contains("@type")
+                        || nl.contains("@context")
+                        || nl.starts_with("meta.")
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -566,12 +678,46 @@ fn crfr_post_filter<'a>(
                 return false;
             }
 
-            // 8. Wikipedia: category/maintenance metadata
+            // 8. Wikipedia: category/maintenance metadata + navigation
             if lower.starts_with("articles with short description")
                 || lower.starts_with("short description is different")
                 || lower.starts_with("category:articles with")
             {
                 return false;
+            }
+
+            // BUG-8 fix: Wikipedia "Help:Category" and similar navigation
+            if let Some(ref v) = node.value {
+                if v.starts_with("/wiki/Help:") || v.starts_with("/wiki/Category:") {
+                    return false;
+                }
+            }
+
+            // BUG-9 fix: Language picker links — these are navigation, not content.
+            // Detect: role=link + short label (2-20 chars) + value contains language path
+            if node.role == "link" && label.len() <= 30 {
+                if let Some(ref v) = node.value {
+                    let vl = v.to_lowercase();
+                    // EU-style language links: /index_bg, /index_fr, etc.
+                    if vl.contains("/index_") && vl.len() < 80 {
+                        return false;
+                    }
+                    // Common language path patterns: /en/, /fr/, /de/, /sv/, etc.
+                    let lang_patterns = [
+                        "/en/", "/fr/", "/de/", "/sv/", "/es/", "/pt/", "/nl/", "/it/", "/pl/",
+                        "/hu/", "/bg/", "/cs/", "/da/", "/fi/", "/el/", "/ro/", "/sk/", "/sl/",
+                        "/hr/", "/lt/", "/lv/", "/et/", "/mt/", "/ga/",
+                    ];
+                    // Only filter if label looks like a language name (one or two words)
+                    let word_count = label.split_whitespace().count();
+                    if word_count <= 2
+                        && lang_patterns.iter().any(|p| vl.contains(p))
+                        && !vl.contains("/news/")
+                        && !vl.contains("/article")
+                    {
+                        return false;
+                    }
+                }
             }
 
             true
@@ -1297,7 +1443,7 @@ pub fn parse_crfr_from_tree_broad(
                     "html_id": node.html_id,
                     "name": node.name,
                     "action": node.action,
-                    "value": node.value,
+                    "value": node.value.as_ref().map(|v| resolve_url(v, url)),
                     "trust": node.trust,
                 })
             })
@@ -1467,7 +1613,7 @@ pub fn parse_crfr_from_tree_js(
                     "html_id": node.html_id,
                     "name": node.name,
                     "action": node.action,
-                    "value": node.value,
+                    "value": node.value.as_ref().map(|v| resolve_url(v, url)),
                     "trust": node.trust,
                 })
             })
