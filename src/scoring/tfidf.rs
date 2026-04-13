@@ -32,6 +32,9 @@ pub struct TfIdfIndex {
     avg_dl: f32,
     /// Antal noder i indexet
     node_count: usize,
+    /// OPT-S1: Sorterad term-lista för O(log N) prefix-sökning.
+    /// Byggs vid index-build, används i prefix-fallback.
+    sorted_terms: Vec<String>,
 }
 
 impl TfIdfIndex {
@@ -45,6 +48,7 @@ impl TfIdfIndex {
                 doc_len: HashMap::new(),
                 avg_dl: 0.0,
                 node_count: 0,
+                sorted_terms: Vec::new(),
             };
         }
 
@@ -84,12 +88,17 @@ impl TfIdfIndex {
         let docs_with_terms = doc_len.len().max(1) as f32;
         let avg_dl = total_terms / docs_with_terms;
 
+        // OPT-S1: Bygg sorterad term-lista för O(log N) prefix-sökning
+        let mut sorted_terms: Vec<String> = postings.keys().cloned().collect();
+        sorted_terms.sort_unstable();
+
         TfIdfIndex {
             postings,
             df,
             doc_len,
             avg_dl,
             node_count: n,
+            sorted_terms,
         }
     }
 
@@ -124,14 +133,34 @@ impl TfIdfIndex {
             }
         }
 
-        // Steg 2: Prefix-match fallback om exakt match ger 0 resultat
+        // Steg 2: Prefix-match fallback om exakt match ger 0 resultat.
+        // OPT-S1: Använder sorterad term-lista + binary_search för O(log N)
+        // prefix-range istället för O(N) iteration över alla postings.
         if scores.is_empty() {
             for token in &tokens {
                 if token.len() >= 3 {
-                    for (index_term, entries) in &self.postings {
-                        if index_term.starts_with(token.as_str())
-                            || token.starts_with(index_term.as_str())
+                    // binary_search ger insert-position → scanna framåt för prefix-matchande termer
+                    let start = self
+                        .sorted_terms
+                        .binary_search_by(|t| t.as_str().cmp(token.as_str()))
+                        .unwrap_or_else(|i| i);
+                    for idx in start..self.sorted_terms.len() {
+                        let index_term = &self.sorted_terms[idx];
+                        // Stoppa när termen inte längre kan matcha (prefix divergerar)
+                        if !index_term.starts_with(token.as_str())
+                            && !token.starts_with(index_term.as_str())
                         {
+                            // Om termen är lexikografiskt bortom prefix-range, avbryt
+                            if index_term.as_str() > token.as_str()
+                                && !token
+                                    .starts_with(&index_term[..token.len().min(index_term.len())])
+                            {
+                                break;
+                            }
+                            continue;
+                        }
+
+                        if let Some(entries) = self.postings.get(index_term) {
                             let doc_freq = *self.df.get(index_term).unwrap_or(&1) as f32;
                             let idf = ((n - doc_freq + 0.5) / (doc_freq + 0.5) + 1.0).ln();
 
@@ -143,6 +172,32 @@ impl TfIdfIndex {
                                             * (1.0 - BM25_B + BM25_B * dl / self.avg_dl.max(1.0)));
                                 // Reducerad score för prefix-match (70%)
                                 *scores.entry(node_id).or_insert(0.0) += idf * tf_component * 0.7;
+                            }
+                        }
+                    }
+                    // Också kolla termer som har token som prefix (token.starts_with(index_term))
+                    // Dessa kan vara kortare och starta FÖRE token i sorterad ordning.
+                    // Vi scannar bakåt från start.
+                    if start > 0 {
+                        for idx in (0..start).rev() {
+                            let index_term = &self.sorted_terms[idx];
+                            if !token.starts_with(index_term.as_str()) {
+                                break;
+                            }
+                            if let Some(entries) = self.postings.get(index_term) {
+                                let doc_freq = *self.df.get(index_term).unwrap_or(&1) as f32;
+                                let idf = ((n - doc_freq + 0.5) / (doc_freq + 0.5) + 1.0).ln();
+
+                                for &(node_id, raw_tf) in entries {
+                                    let dl = self.doc_len.get(&node_id).copied().unwrap_or(1.0);
+                                    let tf_component = (raw_tf * (BM25_K1 + 1.0))
+                                        / (raw_tf
+                                            + BM25_K1
+                                                * (1.0 - BM25_B
+                                                    + BM25_B * dl / self.avg_dl.max(1.0)));
+                                    *scores.entry(node_id).or_insert(0.0) +=
+                                        idf * tf_component * 0.7;
+                                }
                             }
                         }
                     }
@@ -199,6 +254,9 @@ impl TfIdfIndex {
             *self.df.entry(term.clone()).or_insert(0) += 1;
             self.postings.entry(term).or_default().push((node_id, freq));
         }
+        // OPT-S1: Rebuild sorted terms after mutation
+        self.sorted_terms = self.postings.keys().cloned().collect();
+        self.sorted_terms.sort_unstable();
     }
 
     /// Ta bort en nod helt från indexet
@@ -225,6 +283,9 @@ impl TfIdfIndex {
             }
         }
         self.doc_len.remove(&node_id);
+        // OPT-S1: Rebuild sorted terms after removal
+        self.sorted_terms = self.postings.keys().cloned().collect();
+        self.sorted_terms.sort_unstable();
     }
 
     /// Antal noder i indexet

@@ -1229,17 +1229,58 @@ impl ResonanceField {
 
         let mut causal_boosts: HashMap<u32, f32> = HashMap::new();
         let mut resonance_types: HashMap<u32, ResonanceType> = HashMap::new();
-        // Trace data
-        let mut trace_bm25_scores: HashMap<u32, f32> = HashMap::new();
-        let mut trace_hdc_scores: HashMap<u32, f32> = HashMap::new();
-        let mut trace_role_priorities: HashMap<u32, f32> = HashMap::new();
-        let mut trace_concept_boosts: HashMap<u32, f32> = HashMap::new();
-        let mut trace_answer_shapes: HashMap<u32, f32> = HashMap::new();
-        let mut trace_answer_types: HashMap<u32, f32> = HashMap::new();
-        let mut trace_zone_penalties: HashMap<u32, f32> = HashMap::new();
-        let mut trace_meta_penalties: HashMap<u32, f32> = HashMap::new();
-        let mut trace_combmnz: HashMap<u32, f32> = HashMap::new();
-        let mut trace_template_boosts: HashMap<u32, bool> = HashMap::new();
+        // OPT-P1: Trace-data allokeras BARA när trace är aktiverat.
+        // Tidigare allokerades 10 HashMaps + 1 Vec oavsett — ~30 allokeringar/query.
+        let mut trace_bm25_scores: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_hdc_scores: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_role_priorities: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_concept_boosts: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_answer_shapes: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_answer_types: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_zone_penalties: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_meta_penalties: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_combmnz: HashMap<u32, f32> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
+        let mut trace_template_boosts: HashMap<u32, bool> = if capture_trace {
+            HashMap::with_capacity(200)
+        } else {
+            HashMap::new()
+        };
         let mut trace_iteration_deltas: Vec<f32> = Vec::new();
 
         // #15 LinUCB: Contextual weight adjustment based on page profile
@@ -1672,18 +1713,28 @@ impl ResonanceField {
         //   - Fixed O(K×|E|) complexity with K=4 (no convergence check needed)
         //   - PPR restart mathematically integrated (not ad-hoc re-injection)
         //
-        // Pre-compute role keys for learned weight lookup (goal-clustered)
+        // OPT-P5: Pre-compute role keys for learned weight lookup.
+        // Bygg keys via inline format istället för HashMap per nod —
+        // varje nods key konstrueras vid behov i laplacian_multiply.
+        // Här beräknar vi bara cluster-strängen en gång.
         let cluster = goal_cluster_id(goal);
-        let down_keys: HashMap<u32, String> = self
-            .nodes
-            .iter()
-            .map(|(&id, s)| (id, format!("{}:down:{}", s.role, cluster)))
-            .collect();
-        let up_keys: HashMap<u32, String> = self
-            .nodes
-            .iter()
-            .map(|(&id, s)| (id, format!("{}:up:{}", s.role, cluster)))
-            .collect();
+        // Nyckelformat: "role:direction:cluster" — konstrueras per-nod i laplacian.
+        // Vi behåller HashMap-interfacet för kompatibilitet men bygger med capacity.
+        let cap = self.nodes.len();
+        let down_keys: HashMap<u32, String> = {
+            let mut m = HashMap::with_capacity(cap);
+            for (&id, s) in &self.nodes {
+                m.insert(id, format!("{}:down:{}", s.role, cluster));
+            }
+            m
+        };
+        let up_keys: HashMap<u32, String> = {
+            let mut m = HashMap::with_capacity(cap);
+            for (&id, s) in &self.nodes {
+                m.insert(id, format!("{}:up:{}", s.role, cluster));
+            }
+            m
+        };
 
         // Seed signal: current amplitudes after Phase 1 scoring
         let seed_signal: HashMap<u32, f32> = self
@@ -3123,11 +3174,16 @@ impl ResonanceField {
                 .or_insert((alpha, beta));
         }
 
-        // Copy concept memory
+        // Copy concept memory + BUG-D fix: synka concept_memory_order
         for (token, hv) in &old.concept_memory {
-            self.concept_memory
-                .entry(token.clone())
-                .or_insert_with(|| hv.clone());
+            if self
+                .concept_memory
+                .insert(token.clone(), hv.clone())
+                .is_none()
+            {
+                // Nytt entry — lägg till i order-deque för korrekt FIFO-eviction
+                self.concept_memory_order.push_back(token.clone());
+            }
         }
 
         // Preserve aggregate counters
