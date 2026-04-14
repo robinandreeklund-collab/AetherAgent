@@ -1614,14 +1614,69 @@ async fn handle_parse_crfr(
 
         aether_agent::parse_crfr_from_tree_js(&tree, goal, &current_url, top_n, output_format, true)
     } else {
-        aether_agent::parse_crfr(
-            &current_html,
+        // Phase 3.3: XHR → CRFR pipeline — detect XHR URLs and auto-fetch if
+        // the page content is thin (likely SPA that loads data via AJAX).
+        let tree = aether_agent::build_tree_for_crfr(&current_html, goal, &current_url, false);
+        let result_str = aether_agent::parse_crfr_from_tree_js(
+            &tree,
             goal,
             &current_url,
             top_n,
-            false,
             output_format,
-        )
+            false,
+        );
+
+        // Check if results are thin and XHR URLs exist
+        let is_thin = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result_str) {
+            let node_count = parsed
+                .get("node_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            node_count < 3
+        } else {
+            false
+        };
+
+        if is_thin && !tree.pending_fetch_urls.is_empty() {
+            // Auto-fetch top 3 XHR URLs and re-parse with their data
+            let mut api_responses = std::collections::HashMap::new();
+            let config = aether_agent::types::FetchConfig::default();
+            for xhr_url in tree.pending_fetch_urls.iter().take(3) {
+                if aether_agent::fetch::validate_url(xhr_url).is_err() {
+                    continue;
+                }
+                if let Ok(resp) = aether_agent::fetch::fetch_page(xhr_url, &config).await {
+                    api_responses.insert(
+                        xhr_url.clone(),
+                        aether_agent::dom_bridge::FetchResponse {
+                            status: resp.status_code,
+                            body: resp.body,
+                            headers: std::collections::HashMap::new(),
+                        },
+                    );
+                }
+            }
+            if !api_responses.is_empty() {
+                let enriched_tree = aether_agent::build_tree_for_crfr_with_fetch(
+                    &current_html,
+                    goal,
+                    &current_url,
+                    api_responses,
+                );
+                aether_agent::parse_crfr_from_tree_js(
+                    &enriched_tree,
+                    goal,
+                    &current_url,
+                    top_n,
+                    output_format,
+                    true,
+                )
+            } else {
+                result_str
+            }
+        } else {
+            result_str
+        }
     };
 
     // ── Link-following: om relevanta länkar hittades, hämta och merga ──────
@@ -1758,6 +1813,7 @@ async fn follow_relevant_links(
         if let Ok(lp) = serde_json::from_str::<serde_json::Value>(&link_result) {
             if let Some(ln) = lp.get("nodes").and_then(|n| n.as_array()) {
                 let mut content: Vec<serde_json::Value> = Vec::new();
+                let mut successful_ids: Vec<u32> = Vec::new();
                 for node in ln.iter().take(2) {
                     let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
                     let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
@@ -1781,6 +1837,10 @@ async fn follow_relevant_links(
                     {
                         continue;
                     }
+                    // Phase 3.1: Collect successful node IDs for auto-feedback
+                    if let Some(id) = node.get("id").and_then(|v| v.as_u64()) {
+                        successful_ids.push(id as u32);
+                    }
                     let mut n = node.clone();
                     if let Some(obj) = n.as_object_mut() {
                         obj.insert("source".to_string(), serde_json::json!("followed_link"));
@@ -1789,6 +1849,12 @@ async fn follow_relevant_links(
                     content.push(n);
                 }
                 if !content.is_empty() {
+                    // Phase 3.1: Auto-feedback — teach CRFR on the target page that
+                    // these nodes were useful. Improves future queries on same URL.
+                    if !successful_ids.is_empty() {
+                        let ids_json = serde_json::to_string(&successful_ids).unwrap_or_default();
+                        aether_agent::crfr_feedback(&fetched.final_url, goal, &ids_json);
+                    }
                     replacements.insert(*idx, content);
                     followed_urls.push(format!("{}: {}", label, fetch_url));
                 }
@@ -1815,6 +1881,15 @@ async fn follow_relevant_links(
             new_nodes.push(node.clone());
         }
     }
+
+    // Phase 3.2: Cross-page relevance normalization — re-sort all nodes by
+    // relevance so that high-quality content from followed links can outrank
+    // lower-quality content from the original page.
+    new_nodes.sort_by(|a, b| {
+        let ra = a.get("relevance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let rb = b.get("relevance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut merged = parsed.clone();
     if let Some(obj) = merged.as_object_mut() {

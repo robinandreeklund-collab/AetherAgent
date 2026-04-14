@@ -1270,9 +1270,10 @@ pub fn build_tree_with_cookies(
     )
 }
 
-/// BUG-6: Detect bot-blocking/WAF pages (Amazon CloudFront, Cloudflare, etc.)
+/// Detect bot-blocking/WAF pages (Cloudflare, Amazon CloudFront, Akamai, etc.)
+/// Phase 4.2: Extended with Cloudflare challenge detection and Access Denied patterns.
 fn is_bot_blocked(title: &str, total_nodes: usize) -> bool {
-    if total_nodes > 15 {
+    if total_nodes > 20 {
         return false;
     }
     let t = title.to_lowercase();
@@ -1285,6 +1286,15 @@ fn is_bot_blocked(title: &str, total_nodes: usize) -> bool {
         "sorry, you have been blocked",
         "pardon our interruption",
         "access to this page has been denied",
+        // Phase 4.2: Cloudflare challenge
+        "just a moment",
+        "checking your browser",
+        "attention required",
+        "please wait",
+        // Phase 4.2: Access Denied
+        "access denied",
+        "please enable js",
+        "please verify",
     ];
     bot_patterns.iter().any(|p| t.contains(p))
         || (total_nodes <= 5 && (t.contains("page not found") || t.is_empty()))

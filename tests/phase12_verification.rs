@@ -2,7 +2,6 @@
 /// Tests each fix against realistic HTML that reproduces the bugs found in the 50-site test.
 ///
 /// Run: cargo test --test phase12_verification -- --nocapture
-
 use aether_agent::*;
 
 fn parse_crfr_json(html: &str, goal: &str, url: &str, top_n: u32) -> serde_json::Value {
@@ -34,13 +33,22 @@ fn test_phase11_nav_heavy_page_not_classified_as_sufficient() {
         <script>document.getElementById('root').innerHTML = '<h1>Dynamic</h1>';</script>
     </body></html>"##;
 
-    let result = parse_crfr_json(html, "find main content articles", "https://spa.example.com", 10);
+    let result = parse_crfr_json(
+        html,
+        "find main content articles",
+        "https://spa.example.com",
+        10,
+    );
     let nodes = result["nodes"].as_array().expect("ska ha nodes");
 
     // Auto-escalation ska ha kickat in — vi borde se "Dynamic" innehållet
     // eftersom QuickJS kör document.getElementById('root').innerHTML
     let total = result["total_nodes"].as_u64().unwrap_or(0);
-    println!("Phase 1.1: total_nodes={}, node_count={}", total, nodes.len());
+    println!(
+        "Phase 1.1: total_nodes={}, node_count={}",
+        total,
+        nodes.len()
+    );
 
     // Ska inte returnera en sida full med bara nav-items
     let nav_only = nodes.iter().all(|n| {
@@ -66,7 +74,12 @@ fn test_phase13_auto_escalation_js_content() {
         </script>
     </body></html>"##;
 
-    let result = parse_crfr_json(html, "product price buy cost", "https://shop.example.com", 10);
+    let result = parse_crfr_json(
+        html,
+        "product price buy cost",
+        "https://shop.example.com",
+        10,
+    );
     let nodes = result["nodes"].as_array().unwrap();
 
     println!("Phase 1.3: {} nodes returned", nodes.len());
@@ -116,7 +129,12 @@ fn test_phase14_empty_result_fallback() {
         <script type="module" src="/app.bundle.js"></script>
     </body></html>"##;
 
-    let result = parse_crfr_json(html, "dashboard analytics metrics", "https://app.example.com", 10);
+    let result = parse_crfr_json(
+        html,
+        "dashboard analytics metrics",
+        "https://app.example.com",
+        10,
+    );
     let nodes = result["nodes"].as_array().unwrap();
 
     println!("Phase 1.4: {} nodes (fallback test)", nodes.len());
@@ -158,10 +176,7 @@ fn test_phase21_blob_text_split() {
         The currency fell 2% against the dollar in early trading. \
         International observers expressed concern about economic stability.";
 
-    let html = format!(
-        r#"<html><body><p>{}</p></body></html>"#,
-        long_text
-    );
+    let html = format!(r#"<html><body><p>{}</p></body></html>"#, long_text);
 
     let result = parse_crfr_json(
         &html,
@@ -219,7 +234,12 @@ fn test_phase22_nav_links_penalized() {
         </main>
     </body></html>"##;
 
-    let result = parse_crfr_json(html, "economy GDP growth report analysis", "https://news.example.com", 10);
+    let result = parse_crfr_json(
+        html,
+        "economy GDP growth report analysis",
+        "https://news.example.com",
+        10,
+    );
     let nodes = result["nodes"].as_array().unwrap();
 
     println!("Phase 2.2: {} nodes", nodes.len());
@@ -227,7 +247,8 @@ fn test_phase22_nav_links_penalized() {
         println!(
             "  [{}] {:<40} rel={:.3}",
             n["role"].as_str().unwrap_or("?"),
-            n["label"].as_str().unwrap_or("")[..n["label"].as_str().unwrap_or("").len().min(40)].to_string(),
+            n["label"].as_str().unwrap_or("")[..n["label"].as_str().unwrap_or("").len().min(40)]
+                .to_string(),
             n["relevance"].as_f64().unwrap_or(0.0)
         );
     }
@@ -277,7 +298,12 @@ fn test_phase23_ssr_json_enriched_links() {
         </script>
     </body></html>"##;
 
-    let result = parse_crfr_json(html, "news headlines articles parliament science", "https://www.bbc.com", 10);
+    let result = parse_crfr_json(
+        html,
+        "news headlines articles parliament science",
+        "https://www.bbc.com",
+        10,
+    );
     let nodes = result["nodes"].as_array().unwrap();
 
     println!("Phase 2.3: {} nodes from SSR JSON", nodes.len());
@@ -292,7 +318,9 @@ fn test_phase23_ssr_json_enriched_links() {
     // Ska hitta headlines, INTE bara opaka URL:er
     let has_headline = nodes.iter().any(|n| {
         let label = n["label"].as_str().unwrap_or("");
-        label.contains("Parliament") || label.contains("superconductor") || label.contains("trade deal")
+        label.contains("Parliament")
+            || label.contains("superconductor")
+            || label.contains("trade deal")
     });
     assert!(
         has_headline,
@@ -310,7 +338,12 @@ fn test_phase24_label_cleaning() {
         <p><a href="/article">Read the full <b>analysis</b> report</a></p>
     </body></html>"##;
 
-    let result = parse_crfr_json(html, "climate policy government analysis", "https://news.example.com", 10);
+    let result = parse_crfr_json(
+        html,
+        "climate policy government analysis",
+        "https://news.example.com",
+        10,
+    );
     let nodes = result["nodes"].as_array().unwrap();
 
     println!("Phase 2.4: {} nodes", nodes.len());
@@ -418,7 +451,12 @@ fn test_full_pipeline_ecommerce() {
         <footer><p>Copyright 2026 TechShop</p></footer>
     </body></html>"##;
 
-    let result = parse_crfr_json(html, "laptop price buy MacBook cost", "https://techshop.example.com", 10);
+    let result = parse_crfr_json(
+        html,
+        "laptop price buy MacBook cost",
+        "https://techshop.example.com",
+        10,
+    );
     let nodes = result["nodes"].as_array().unwrap();
 
     println!("E2E ecommerce: {} nodes", nodes.len());
