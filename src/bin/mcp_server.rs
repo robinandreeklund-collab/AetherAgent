@@ -1650,6 +1650,7 @@ async fn handle_parse_crfr(
                         xhr_url.clone(),
                         aether_agent::dom_bridge::FetchResponse {
                             status: resp.status_code,
+                            content_type: resp.content_type.clone(),
                             body: resp.body,
                             headers: std::collections::HashMap::new(),
                         },
