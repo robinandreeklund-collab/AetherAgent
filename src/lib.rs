@@ -1194,6 +1194,10 @@ pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> S
     }
 
     // Check if page has JS/SPA markers that suggest content is JS-rendered
+    // Skip auto-escalation on very large pages (>2MB) to avoid OOM/stack overflow
+    if html.len() > 2_000_000 {
+        return tree;
+    }
     let html_lower = html.to_lowercase();
     let has_js_markers = html_lower.contains("<script")
         && (html_lower.contains("document.get")
