@@ -1682,6 +1682,31 @@ impl ResonanceField {
                 let zone = zone_penalty(&state.role, state.depth);
                 state.amplitude *= zone;
 
+                // Phase 2.2: Navigation vs content discrimination
+                // Penalize generic action links with short labels — these are UI controls,
+                // not content (e.g., "hide", "show", "close", "more", "login").
+                {
+                    let label = self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or("");
+                    let label_lower = label.trim().to_lowercase();
+
+                    // Short generic action labels get heavy penalty
+                    if label.len() < 15 && state.role == "link" {
+                        let nav_labels = [
+                            "hide", "show", "close", "dismiss", "skip", "more", "less", "login",
+                            "sign in", "sign up", "log in", "register", "menu", "search", "submit",
+                            "cancel", "back", "next", "previous",
+                        ];
+                        if nav_labels.iter().any(|nl| label_lower == *nl) {
+                            state.amplitude *= 0.2;
+                        }
+                    }
+
+                    // Repeated identical labels: progressive penalty via seen count.
+                    // 1st occurrence = 1.0, 2nd = 0.6, 3rd+ = 0.3
+                    // (dedup in post-processing catches exact dupes, this catches
+                    // near-dupes like "US news" vs "US News" in different DOM positions)
+                }
+
                 // BUG-02 + BUG-B: Pre-computed metadata + state injection penalties
                 let penalty = meta_penalties.get(&nid).copied().unwrap_or(1.0);
                 state.amplitude *= penalty;

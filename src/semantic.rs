@@ -287,13 +287,49 @@ impl SemanticBuilder {
 
         let filtered_children = collapse_single_child_wrappers(filtered_children);
 
-        let mut sem_node = SemanticNode::new(id, &role, &label);
+        // Phase 2.1: Blob text splitting — large text nodes (>300 chars) with
+        // multiple sentences are split into sub-nodes for better CRFR ranking.
+        // This prevents single blob nodes from hogging all relevance.
+        let (final_label, blob_children) = if label.len() > 300
+            && matches!(role.as_str(), "text" | "generic" | "listitem")
+            && filtered_children.is_empty()
+        {
+            // Split on sentence boundaries (. + space + uppercase) or bullet markers
+            let chunks = split_blob_text(&label, 250);
+            if chunks.len() > 1 {
+                let short_label = if label.len() > 100 {
+                    let mut end = 100;
+                    while end > 0 && !label.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}...", &label[..end])
+                } else {
+                    label.clone()
+                };
+                let mut sub_nodes = Vec::with_capacity(chunks.len());
+                for chunk in &chunks {
+                    let sub_id = self.next_node_id();
+                    let sub_rel = self.score_relevance("text", chunk, depth + 1);
+                    let mut sub = SemanticNode::new(sub_id, "text", chunk);
+                    sub.relevance = sub_rel;
+                    sub.trust = trust.clone();
+                    sub_nodes.push(sub);
+                }
+                (short_label, sub_nodes)
+            } else {
+                (label, filtered_children)
+            }
+        } else {
+            (label, filtered_children)
+        };
+
+        let mut sem_node = SemanticNode::new(id, &role, &final_label);
         sem_node.value = value;
         sem_node.state = state;
         sem_node.action = action;
         sem_node.relevance = relevance;
         sem_node.trust = trust;
-        sem_node.children = filtered_children;
+        sem_node.children = blob_children;
         sem_node.html_id = html_id;
         sem_node.name = name;
 
@@ -547,6 +583,64 @@ pub(crate) fn score_nav_penalty(role: &str, label: &str) -> f32 {
 ///
 /// Om en nod har tomt label, ingen action, och exakt ett barn → ersätt med barnet.
 /// Minskar träddjup och JSON-storlek avsevärt.
+/// Phase 2.1: Split a blob text into smaller chunks at sentence boundaries.
+/// Returns chunks of max ~max_chars, splitting at ". " followed by uppercase,
+/// or at " • " / " | " / " — " separators.
+fn split_blob_text(text: &str, max_chars: usize) -> Vec<String> {
+    if text.len() <= max_chars {
+        return vec![text.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+
+    for sentence in text.split_inclusive(['.', '\u{2022}', '|']) {
+        if current.len() + sentence.len() > max_chars && !current.is_empty() {
+            let trimmed = current.trim().to_string();
+            if !trimmed.is_empty() {
+                chunks.push(trimmed);
+            }
+            current = sentence.to_string();
+        } else {
+            current.push_str(sentence);
+        }
+    }
+    let trimmed = current.trim().to_string();
+    if !trimmed.is_empty() {
+        chunks.push(trimmed);
+    }
+
+    // If only one chunk resulted (no good split points), try splitting at " — " or newlines
+    if chunks.len() <= 1 && text.len() > max_chars {
+        chunks.clear();
+        current = String::new();
+        for part in text.split(" — ").flat_map(|s| s.split('\n')) {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if current.len() + part.len() + 3 > max_chars && !current.is_empty() {
+                chunks.push(current.trim().to_string());
+                current = part.to_string();
+            } else {
+                if !current.is_empty() {
+                    current.push(' ');
+                }
+                current.push_str(part);
+            }
+        }
+        if !current.trim().is_empty() {
+            chunks.push(current.trim().to_string());
+        }
+    }
+
+    if chunks.is_empty() {
+        vec![text.to_string()]
+    } else {
+        chunks
+    }
+}
+
 fn collapse_single_child_wrappers(children: Vec<SemanticNode>) -> Vec<SemanticNode> {
     children
         .into_iter()

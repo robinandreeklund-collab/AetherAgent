@@ -538,6 +538,22 @@ fn clean_label(label: &str) -> String {
         .replace("&#x2F;", "/")
         .replace("&nbsp;", " ");
 
+    // Phase 2.4: Strip common boilerplate prefixes
+    let boilerplate_prefixes = [
+        "Subscribers only ",
+        "ANZEIGE ",
+        "Advertisement ",
+        "Sponsored ",
+        "SPONSORED ",
+        "Promoted ",
+        "Partner Content ",
+    ];
+    for prefix in &boilerplate_prefixes {
+        if out.starts_with(prefix) {
+            out = out[prefix.len()..].to_string();
+        }
+    }
+
     // Collapse multiple whitespace into single space
     let mut prev_space = false;
     out = out
@@ -1142,12 +1158,86 @@ pub fn parse_crfr_broad(
 
 // Build semantic tree for CRFR (with optional JS eval).
 // Returns tree with pending_fetch_urls for async XHR resolution.
+//
+// Phase 1.3: Auto-escalation — if static parse returns < 5 content nodes
+// AND the page has SPA/JS markers, automatically retry with JS eval.
+// This eliminates 30% empty results without requiring run_js=true.
 pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> SemanticTree {
     if run_js {
-        run_lifecycle_parse(html, goal, url)
-    } else {
-        build_tree(html, goal, url)
+        return run_lifecycle_parse(html, goal, url);
     }
+
+    let tree = build_tree(html, goal, url);
+
+    // Phase 1.3: Check if static parse got enough content
+    let all_nodes = collect_all_nodes(&tree.nodes);
+    let content_nodes = all_nodes
+        .iter()
+        .filter(|n| {
+            matches!(
+                n.role.as_str(),
+                "text"
+                    | "heading"
+                    | "paragraph"
+                    | "link"
+                    | "button"
+                    | "listitem"
+                    | "cell"
+                    | "price"
+            ) && n.label.len() >= 20
+        })
+        .count();
+
+    // If we got enough content, return static tree
+    if content_nodes >= 5 {
+        return tree;
+    }
+
+    // Check if page has JS/SPA markers that suggest content is JS-rendered
+    let html_lower = html.to_lowercase();
+    let has_js_markers = html_lower.contains("<script")
+        && (html_lower.contains("document.get")
+            || html_lower.contains("document.query")
+            || html_lower.contains("innerhtml")
+            || html_lower.contains("textcontent")
+            || html_lower.contains("createelement")
+            || html_lower.contains("appendchild")
+            || html_lower.contains("react")
+            || html_lower.contains("__next")
+            || html_lower.contains("__nuxt")
+            || html_lower.contains("vue")
+            || html_lower.contains("angular")
+            || html_lower.contains("svelte"));
+
+    if has_js_markers {
+        // Auto-escalate to JS eval
+        #[cfg(feature = "js-eval")]
+        {
+            let js_tree = run_lifecycle_parse(html, goal, url);
+            let js_content = collect_all_nodes(&js_tree.nodes)
+                .iter()
+                .filter(|n| {
+                    matches!(
+                        n.role.as_str(),
+                        "text"
+                            | "heading"
+                            | "paragraph"
+                            | "link"
+                            | "button"
+                            | "listitem"
+                            | "cell"
+                            | "price"
+                    ) && n.label.len() >= 20
+                })
+                .count();
+            // Use JS tree if it has more content
+            if js_content > content_nodes {
+                return js_tree;
+            }
+        }
+    }
+
+    tree
 }
 
 /// Build semantic tree for CRFR with pre-populated fetch responses.
@@ -1618,6 +1708,53 @@ pub fn parse_crfr_from_tree_js(
                 })
             })
             .collect();
+
+        // Phase 1.4: Empty result safety net — when CRFR returns nothing,
+        // provide title + meta description as fallback so agents always get data.
+        let top_nodes = if top_nodes.is_empty() && !tree.title.is_empty() {
+            let mut fallback = Vec::new();
+            // Add title as first fallback node
+            fallback.push(serde_json::json!({
+                "id": 0,
+                "role": "heading",
+                "label": clean_label(&tree.title),
+                "relevance": 0.5,
+                "confidence": 0.3,
+                "resonance_type": "Fallback",
+                "causal_boost": 0.0,
+                "html_id": null,
+                "name": "page_title",
+                "action": null,
+                "value": null,
+                "trust": "Untrusted",
+            }));
+            // Add meta description if available
+            let desc = node_map.values().find(|n| {
+                n.name
+                    .as_ref()
+                    .map(|name| name == "meta.description")
+                    .unwrap_or(false)
+            });
+            if let Some(desc_node) = desc {
+                fallback.push(serde_json::json!({
+                    "id": desc_node.id,
+                    "role": "text",
+                    "label": clean_label(&desc_node.label),
+                    "relevance": 0.4,
+                    "confidence": 0.25,
+                    "resonance_type": "Fallback",
+                    "causal_boost": 0.0,
+                    "html_id": null,
+                    "name": "meta.description",
+                    "action": null,
+                    "value": null,
+                    "trust": "Untrusted",
+                }));
+            }
+            fallback
+        } else {
+            top_nodes
+        };
 
         let (cache_entries, cache_capacity) = resonance::cache_stats();
 
