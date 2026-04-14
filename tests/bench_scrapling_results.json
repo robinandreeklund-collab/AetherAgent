@@ -1,0 +1,55 @@
+{
+  "parse_speed": {
+    "scrapling_median_ms": 15.75,
+    "parsel_median_ms": 18.96,
+    "aether_median_ms": 83.95
+  },
+  "text_extraction": {
+    "scrapling_median_ms": 1.64,
+    "parsel_median_ms": 4.92
+  },
+  "semantic": {
+    "price_extraction": {
+      "time_ms": 3.46,
+      "nodes_found": 8,
+      "top_labels": [
+        "View Details",
+        "$34.99",
+        "$249.00"
+      ],
+      "top_relevance": [
+        1.281,
+        0.983,
+        0.976
+      ]
+    },
+    "action_finding": {
+      "time_ms": 0.82,
+      "nodes_found": 6,
+      "top_labels": [
+        "Add to Cart",
+        "USB-C Hub Adapter $34.99 7-in-1 hub with HDMI, USB 3.0, SD c",
+        "Wireless Headphones $79.99 $159.99 Premium noise-cancelling "
+      ],
+      "top_relevance": [
+        1.46,
+        1.128,
+        1.074
+      ]
+    },
+    "content_finding": {
+      "time_ms": 0.87,
+      "nodes_found": 10,
+      "top_labels": [
+        "View Details",
+        "$249.00",
+        "$34.99"
+      ],
+      "top_relevance": [
+        1.298,
+        0.475,
+        0.473
+      ]
+    }
+  }
+}
