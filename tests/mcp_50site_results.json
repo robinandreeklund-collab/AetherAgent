@@ -1,0 +1,315 @@
+{
+  "timestamp": "2026-04-14 05:18:43",
+  "parse_results": [
+    {
+      "url": "https://www.bbc.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00022125244140625
+    },
+    {
+      "url": "https://www.cnn.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0002002716064453125
+    },
+    {
+      "url": "https://www.svt.se",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00020432472229003906
+    },
+    {
+      "url": "https://www.theguardian.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001780986785888672
+    },
+    {
+      "url": "https://www.nytimes.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00014591217041015625
+    },
+    {
+      "url": "https://www.dn.se",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00014781951904296875
+    },
+    {
+      "url": "https://www.aljazeera.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00013113021850585938
+    },
+    {
+      "url": "https://www.aftonbladet.se",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001327991485595703
+    },
+    {
+      "url": "https://news.ycombinator.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001347064971923828
+    },
+    {
+      "url": "https://www.reuters.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011897087097167969
+    },
+    {
+      "url": "https://www.amazon.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011920928955078125
+    },
+    {
+      "url": "https://www.ebay.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011396408081054688
+    },
+    {
+      "url": "https://www.ikea.com/se/sv/",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00014019012451171875
+    },
+    {
+      "url": "https://www.etsy.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011444091796875
+    },
+    {
+      "url": "https://www.target.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011301040649414062
+    },
+    {
+      "url": "https://www.walmart.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.000118255615234375
+    },
+    {
+      "url": "https://www.newegg.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00013566017150878906
+    },
+    {
+      "url": "https://www.airbnb.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011396408081054688
+    },
+    {
+      "url": "https://www.booking.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011682510375976562
+    },
+    {
+      "url": "https://www.hm.com/sv_se/",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011372566223144531
+    },
+    {
+      "url": "https://docs.python.org/3/",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011467933654785156
+    },
+    {
+      "url": "https://developer.mozilla.org/en-US/",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00013136863708496094
+    },
+    {
+      "url": "https://stackoverflow.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011515617370605469
+    },
+    {
+      "url": "https://github.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001266002655029297
+    },
+    {
+      "url": "https://doc.rust-lang.org/book/",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00017213821411132812
+    },
+    {
+      "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011515617370605469
+    },
+    {
+      "url": "https://www.w3schools.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011396408081054688
+    },
+    {
+      "url": "https://www.reddit.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001361370086669922
+    },
+    {
+      "url": "https://medium.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001163482666015625
+    },
+    {
+      "url": "https://www.linkedin.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011372566223144531
+    },
+    {
+      "url": "https://www.government.se",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00012373924255371094
+    },
+    {
+      "url": "https://www.usa.gov",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00013685226440429688
+    },
+    {
+      "url": "https://europa.eu",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011205673217773438
+    },
+    {
+      "url": "https://www.riksdagen.se",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011277198791503906
+    },
+    {
+      "url": "https://www.gov.uk",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001125335693359375
+    },
+    {
+      "url": "https://www.lemonde.fr",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001125335693359375
+    },
+    {
+      "url": "https://www3.nhk.or.jp/nhkworld/",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011301040649414062
+    },
+    {
+      "url": "https://www.spiegel.de",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011205673217773438
+    },
+    {
+      "url": "https://www.globo.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00012159347534179688
+    },
+    {
+      "url": "https://www.asahi.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001347064971923828
+    },
+    {
+      "url": "https://www.spotify.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001239776611328125
+    },
+    {
+      "url": "https://www.imdb.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011277198791503906
+    },
+    {
+      "url": "https://www.twitch.tv",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011134147644042969
+    },
+    {
+      "url": "https://www.weather.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011610984802246094
+    },
+    {
+      "url": "https://www.tripadvisor.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011014938354492188
+    },
+    {
+      "url": "https://www.nasa.gov",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011348724365234375
+    },
+    {
+      "url": "https://www.who.int",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011706352233886719
+    },
+    {
+      "url": "https://www.apple.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.0001316070556640625
+    },
+    {
+      "url": "https://www.microsoft.com",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00012564659118652344
+    },
+    {
+      "url": "https://www.bbc.co.uk/sport",
+      "status": "ERROR",
+      "error": "Unknown tool: parse_crfr",
+      "elapsed_s": 0.00011467933654785156
+    }
+  ],
+  "feedback_results": [],
+  "summary": {
+    "total_sites": 50,
+    "ok": 0,
+    "issues": 0,
+    "errors": 50,
+    "issue_breakdown": {},
+    "feedback_ok": 0,
+    "feedback_fail": 0
+  }
+}
