@@ -3872,6 +3872,57 @@ pub fn cache_stats() -> (usize, usize) {
     (cache.len(), cache.capacity)
 }
 
+/// Clear a specific URL's cached CRFR field (both RAM and SQLite).
+/// Returns true if a field was found and removed.
+pub fn clear_field(url: &str) -> bool {
+    let url_hash = hash_url(url);
+    let js_hash = hash_url(&format!("{}#__js_eval", url));
+    let mut cleared = false;
+
+    // Clear RAM cache (both variants)
+    {
+        let mut cache = match FIELD_CACHE.write() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if cache.take(url_hash).is_some() {
+            cleared = true;
+        }
+        if cache.take(js_hash).is_some() {
+            cleared = true;
+        }
+    }
+
+    // Clear SQLite persist
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        crate::persist::delete_field(url_hash);
+        crate::persist::delete_field(js_hash);
+    }
+
+    cleared
+}
+
+/// Clear ALL cached CRFR fields (RAM + SQLite). Returns count of cleared entries.
+pub fn clear_all_fields() -> usize {
+    let count;
+    {
+        let mut cache = match FIELD_CACHE.write() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        count = cache.len();
+        cache.entries.clear();
+    }
+
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        crate::persist::clear_all_fields();
+    }
+
+    count
+}
+
 /// Summary info for a cached resonance field (for dashboard).
 pub struct FieldSummary {
     pub url_hash: u64,

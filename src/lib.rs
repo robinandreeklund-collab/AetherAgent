@@ -1927,6 +1927,30 @@ pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> Str
     serde_json::json!({"status": "ok", "url_hash": field.url_hash}).to_string()
 }
 
+/// Clear a specific URL's cached CRFR field (RAM + SQLite).
+/// Use when a cached field is corrupted or you want to force a fresh parse.
+#[wasm_bindgen]
+pub fn crfr_clear(url: &str) -> String {
+    let cleared = resonance::clear_field(url);
+    serde_json::json!({
+        "status": if cleared { "cleared" } else { "not_found" },
+        "url": url,
+    })
+    .to_string()
+}
+
+/// Clear ALL cached CRFR fields. Returns count of entries removed.
+/// Use with caution — all causal learning is lost.
+#[wasm_bindgen]
+pub fn crfr_clear_all() -> String {
+    let count = resonance::clear_all_fields();
+    serde_json::json!({
+        "status": "cleared",
+        "entries_removed": count,
+    })
+    .to_string()
+}
+
 /// Run multiple goal variants through CRFR and merge results.
 /// Goals should be JSON array of strings: ["variant1", "variant2", ...]
 #[wasm_bindgen]

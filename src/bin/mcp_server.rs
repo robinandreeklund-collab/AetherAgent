@@ -150,6 +150,12 @@ struct CrfrFeedbackParams {
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct CrfrClearParams {
+    /// URL to clear cached CRFR field for. Pass "all" to clear all cached fields.
+    url: String,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 struct ClickParams {
     /// Raw HTML string
     html: String,
@@ -725,6 +731,18 @@ impl AetherMcpServer {
         let ids_json =
             serde_json::to_string(&params.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
         aether_agent::crfr_feedback(&params.url, &params.goal, &ids_json)
+    }
+
+    #[tool(
+        name = "crfr_clear",
+        description = "Clear a URL's cached CRFR field (causal memory). Use when:\n- A cached field is corrupted (causing errors)\n- You want to force a completely fresh parse\n- You want to reset learned feedback for a URL\n\nPass url='all' to clear ALL cached fields (use with caution — all causal learning is lost)."
+    )]
+    fn crfr_clear(&self, Parameters(params): Parameters<CrfrClearParams>) -> String {
+        if params.url == "all" {
+            aether_agent::crfr_clear_all()
+        } else {
+            aether_agent::crfr_clear(&params.url)
+        }
     }
 
     #[tool(

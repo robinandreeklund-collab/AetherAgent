@@ -246,6 +246,35 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
     result
 }
 
+/// Delete a specific field by URL hash.
+pub fn delete_field(url_hash: u64) {
+    let pool = match DB.lock() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let conn = match pool.writer.as_ref() {
+        Some(c) => c,
+        None => return,
+    };
+    let _ = conn.execute(
+        "DELETE FROM resonance_fields WHERE url_hash = ?1",
+        params![url_hash as i64],
+    );
+}
+
+/// Delete ALL stored fields.
+pub fn clear_all_fields() {
+    let pool = match DB.lock() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let conn = match pool.writer.as_ref() {
+        Some(c) => c,
+        None => return,
+    };
+    let _ = conn.execute("DELETE FROM resonance_fields", []);
+}
+
 /// Delete old fields (older than max_age_ms).
 pub fn evict_old_fields(max_age_ms: u64) -> usize {
     let pool = match DB.lock() {
