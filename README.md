@@ -44,16 +44,14 @@ llm.send(tree)  # 200 tokens, goal-aware, injection-protected
 
 ## Key Numbers
 
-| | AetherAgent | Scrapling | Playwright | Browser Use | Scrapy |
-|---|:-:|:-:|:-:|:-:|:-:|
-| Startup time | **<1 ms** | ~15 ms | ~2,000 ms | ~3,000 ms | ~50 ms |
-| Memory | **~27 MB** | ~50 MB | ~150 MB | ~200 MB | ~30 MB |
-| Semantic understanding | **Yes** | No | No | Partial | No |
-| Goal-driven ranking | **Yes** | No | No | No | No |
-| Prompt injection protection | **Yes** | No | No | No | No |
-| Anti-bot / TLS fingerprint | No | **Yes** | Partial | Partial | No |
-| Embeddable in WASM | **Yes** | No | No | No | No |
-| Full JS (V8) | No | Via Playwright | Yes | Yes | No |
+| | AetherAgent | Playwright | Browser Use | Scrapy |
+|---|:-:|:-:|:-:|:-:|
+| Startup time | **<1 ms** | ~2,000 ms | ~3,000 ms | ~50 ms |
+| Memory | **~27 MB** | ~150 MB | ~200 MB | ~30 MB |
+| Semantic understanding | **Yes** | No | Partial | No |
+| Prompt injection protection | **Yes** | No | No | No |
+| Embeddable in WASM | **Yes** | No | No | No |
+| Full JS (V8) | No | Yes | Yes | No |
 
 > AetherAgent is not a Chrome replacement. For JS-heavy SPAs, pair it with a headless browser for rendering, then feed the HTML to AetherAgent. For static/SSR pages (~80% with tiered architecture), it works fully standalone.
 
@@ -144,58 +142,6 @@ tree = agent.fetch_parse("https://example.com", goal="buy cheapest flight")
 **427 tests** (256 unit + 30 fixture + 49 integration + 13 benchmarks), all passing.
 
 > Full benchmarks, test breakdown, and live site results: **[docs/testing.md](docs/testing.md)**
-
----
-
-## How Does AetherAgent Compare to Scrapling?
-
-[Scrapling](https://github.com/D4Vinci/Scrapling) (37k+ stars) is the leading Python scraping framework. It's fast, has excellent anti-bot features, and is great at extracting data from known page structures. Here's how it compares:
-
-### Parse Speed (5,000 elements)
-
-| Library | Median | What it does |
-|---------|--------|-------------|
-| **Scrapling** | **15.75 ms** | DOM parse + CSS selector match (lxml) |
-| Parsel/lxml | 18.96 ms | DOM parse + CSS selector match |
-| **AetherAgent CRFR** | **83.95 ms** | DOM parse + semantic roles + BM25/HDC scoring + goal ranking |
-| AetherAgent (cached) | **< 1 ms** | Re-query same page from CRFR field cache |
-
-> AetherAgent is ~5x slower on first parse because it does fundamentally more work: role identification, accessibility labels, relevance scoring, injection detection. On repeat queries, the CRFR cache makes it **15x faster** than Scrapling.
-
-### The Real Difference: Semantic Understanding
-
-```python
-# Scrapling — you must know the CSS selector
-page.css('.price::text')  # What if the class changes?
-
-# AetherAgent — you describe what you want
-parse_crfr(goal="price cost amount $")  # Finds all prices, any site, any structure
-```
-
-Scrapling requires you to **know the page structure**. AetherAgent requires you to **know what you're looking for**. For AI agents encountering unknown websites, this is the difference that matters.
-
-### Feature Comparison
-
-| Capability | Scrapling | AetherAgent |
-|-----------|:---------:|:-----------:|
-| HTML parsing speed | Faster (lxml C) | Slower first, faster cached |
-| Semantic understanding | No | **Yes** — roles, labels, goal-relevance |
-| Goal-driven node ranking | No | **Yes** — "find the price" without selectors |
-| Causal learning | No | **Yes** — improves with `crfr_feedback` |
-| Prompt injection protection | No | **Yes** — Trust Shield (20+ patterns) |
-| Anti-bot / TLS fingerprinting | **Yes** (curl_cffi) | No |
-| JS evaluation | Playwright (external) | **QuickJS** (embedded, sandboxed) |
-| Streaming DOM (token savings) | No | **Yes** — 95–99% savings |
-| WASM / browser-embeddable | No | **Yes** |
-| Vision (screenshot analysis) | No | **Yes** — YOLOv8 (22 UI classes) |
-| MCP tools | 10 | **35+** |
-
-### When to Use Which
-
-- **Scrapling**: You know exactly what data you need, from specific sites, and need anti-bot bypass.
-- **AetherAgent**: Your AI agent needs to understand and act on *any* website it encounters, safely.
-
-> Full analysis with benchmark data: **[dev/scrapling-analysis-benchmark.md](dev/scrapling-analysis-benchmark.md)**
 
 ---
 
