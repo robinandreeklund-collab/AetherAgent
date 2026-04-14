@@ -1,0 +1,460 @@
+{
+  "results": [
+    {
+      "cat": "news",
+      "title": "BBC News",
+      "status": "OK",
+      "nodes": 5,
+      "total": 17,
+      "ms": 3,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "CNN",
+      "status": "OK",
+      "nodes": 6,
+      "total": 17,
+      "ms": 3,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "SVT Nyheter",
+      "status": "OK",
+      "nodes": 6,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "The Guardian",
+      "status": "OK",
+      "nodes": 3,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "Al Jazeera",
+      "status": "OK",
+      "nodes": 2,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "Le Monde",
+      "status": "OK",
+      "nodes": 6,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "Der Spiegel",
+      "status": "OK",
+      "nodes": 5,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "Asahi Shimbun",
+      "status": "OK",
+      "nodes": 6,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "Globo",
+      "status": "OK",
+      "nodes": 4,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "news",
+      "title": "Reuters",
+      "status": "OK",
+      "nodes": 4,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ecommerce",
+      "title": "TechShop",
+      "status": "OK",
+      "nodes": 7,
+      "total": 23,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ecommerce",
+      "title": "FashionStore",
+      "status": "OK",
+      "nodes": 7,
+      "total": 23,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ecommerce",
+      "title": "HomeGoods",
+      "status": "OK",
+      "nodes": 5,
+      "total": 23,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ecommerce",
+      "title": "BookStore",
+      "status": "OK",
+      "nodes": 7,
+      "total": 23,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ecommerce",
+      "title": "SportShop",
+      "status": "OK",
+      "nodes": 8,
+      "total": 23,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "spa",
+      "title": "React Dashboard",
+      "status": "OK",
+      "nodes": 4,
+      "total": 6,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "spa",
+      "title": "Vue Analytics",
+      "status": "OK",
+      "nodes": 4,
+      "total": 6,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "spa",
+      "title": "Angular CRM",
+      "status": "OK",
+      "nodes": 4,
+      "total": 6,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "spa",
+      "title": "Svelte Portfolio",
+      "status": "OK",
+      "nodes": 4,
+      "total": 6,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "spa",
+      "title": "Next.js Blog",
+      "status": "OK",
+      "nodes": 4,
+      "total": 6,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ssr_json",
+      "title": "BBC SSR",
+      "status": "OK",
+      "nodes": 5,
+      "total": 7,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ssr_json",
+      "title": "Next.js News",
+      "status": "OK",
+      "nodes": 5,
+      "total": 7,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ssr_json",
+      "title": "Nuxt Portal",
+      "status": "OK",
+      "nodes": 5,
+      "total": 7,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ssr_json",
+      "title": "Remix App",
+      "status": "OK",
+      "nodes": 5,
+      "total": 7,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "ssr_json",
+      "title": "Gatsby Blog",
+      "status": "OK",
+      "nodes": 5,
+      "total": 7,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "gov",
+      "title": "USA.gov",
+      "status": "OK",
+      "nodes": 6,
+      "total": 14,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "gov",
+      "title": "GOV.UK",
+      "status": "OK",
+      "nodes": 6,
+      "total": 15,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "gov",
+      "title": "Riksdagen",
+      "status": "OK",
+      "nodes": 7,
+      "total": 13,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "gov",
+      "title": "Europa.eu",
+      "status": "OK",
+      "nodes": 6,
+      "total": 13,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "gov",
+      "title": "Government.se",
+      "status": "OK",
+      "nodes": 8,
+      "total": 15,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "blocked",
+      "title": "H&M Blocked",
+      "status": "BLOCK",
+      "nodes": 3,
+      "total": 3,
+      "ms": 0,
+      "issues": [],
+      "blocked": true
+    },
+    {
+      "cat": "blocked",
+      "title": "CF Challenge",
+      "status": "BLOCK",
+      "nodes": 2,
+      "total": 4,
+      "ms": 0,
+      "issues": [],
+      "blocked": true
+    },
+    {
+      "cat": "cookie",
+      "title": "Cookie News",
+      "status": "OK",
+      "nodes": 4,
+      "total": 7,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "blob",
+      "title": "Blob Text",
+      "status": "OK",
+      "nodes": 5,
+      "total": 7,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "nav",
+      "title": "Nav Heavy",
+      "status": "OK",
+      "nodes": 15,
+      "total": 47,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "dedup",
+      "title": "Dedup Test",
+      "status": "OK",
+      "nodes": 15,
+      "total": 104,
+      "ms": 7,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "intl_sv",
+      "title": "SVT Test",
+      "status": "OK",
+      "nodes": 3,
+      "total": 12,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "intl_de",
+      "title": "Spiegel Test",
+      "status": "OK",
+      "nodes": 4,
+      "total": 12,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "intl_jp",
+      "title": "Asahi Test",
+      "status": "OK",
+      "nodes": 3,
+      "total": 12,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "wiki",
+      "title": "Rust Wiki",
+      "status": "OK",
+      "nodes": 7,
+      "total": 17,
+      "ms": 2,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "entity",
+      "title": "Entity Test",
+      "status": "BLOCK",
+      "nodes": 2,
+      "total": 3,
+      "ms": 0,
+      "issues": [],
+      "blocked": true
+    },
+    {
+      "cat": "empty_spa",
+      "title": "Empty SPA",
+      "status": "OK",
+      "nodes": 1,
+      "total": 1,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "doc",
+      "title": "Python Docs",
+      "status": "OK",
+      "nodes": 4,
+      "total": 7,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "doc",
+      "title": "MDN Web Docs",
+      "status": "OK",
+      "nodes": 5,
+      "total": 8,
+      "ms": 0,
+      "issues": [],
+      "blocked": false
+    },
+    {
+      "cat": "travel",
+      "title": "Airbnb",
+      "status": "OK",
+      "nodes": 5,
+      "total": 10,
+      "ms": 1,
+      "issues": [],
+      "blocked": false
+    }
+  ],
+  "summary": {
+    "ok": 42,
+    "issues": 0,
+    "errors": 3,
+    "feedback_ok": 5
+  }
+}
