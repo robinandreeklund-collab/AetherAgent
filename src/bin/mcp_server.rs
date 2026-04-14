@@ -3074,6 +3074,53 @@ fn dispatch_tool_sync(_server: &AetherMcpServer, name: &str, args: &serde_json::
             let height = u32_or("height", 800);
             aether_agent::render_with_js(s("html"), s("js_code"), s("base_url"), width, height)
         }
+        // parse_crfr: synkron med html, async med url
+        "parse_crfr" => {
+            let html = s("html");
+            if html.is_empty() {
+                // Needs async fetch — delegate to async dispatcher
+                String::new()
+            } else {
+                let broad = s("broad_mode");
+                if broad.is_empty() {
+                    aether_agent::parse_crfr(
+                        html,
+                        s("goal"),
+                        s("url"),
+                        u32_or("top_n", 20),
+                        obj.and_then(|o| o.get("run_js"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        s("output_format"),
+                    )
+                } else {
+                    aether_agent::parse_crfr_broad(
+                        html,
+                        s("goal"),
+                        s("url"),
+                        u32_or("top_n", 20),
+                        obj.and_then(|o| o.get("run_js"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        s("output_format"),
+                        broad,
+                    )
+                }
+            }
+        }
+        "parse_crfr_multi" => {
+            let html = s("html");
+            if html.is_empty() {
+                String::new()
+            } else {
+                let goals_json = json_str("goals");
+                aether_agent::parse_crfr_multi(html, &goals_json, s("url"), u32_or("top_n", 20))
+            }
+        }
+        "crfr_feedback" => {
+            let ids_json = json_str("successful_node_ids");
+            aether_agent::crfr_feedback(s("url"), s("goal"), &ids_json)
+        }
         // Async-verktyg hanteras inte här — returnera tom markör
         "fetch_parse" | "fetch_click" | "fetch_extract" | "fetch_stream_parse" | "fetch_search"
         | "fetch_vision" | "vision_parse" | "parse_screenshot" => String::new(),
@@ -3116,6 +3163,10 @@ async fn dispatch_tool_async(
         }
         "vision_parse" | "parse_screenshot" => {
             let result = handle_vision_tool(name, obj, server.vision_model_bytes.as_deref());
+            extract_text_from_call_result(&result)
+        }
+        "parse_crfr" => {
+            let result = handle_parse_crfr(obj).await;
             extract_text_from_call_result(&result)
         }
         _ => format!(r#"{{"error":"Unknown async tool: {}"}}"#, name),
