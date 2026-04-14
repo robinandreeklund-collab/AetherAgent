@@ -1568,161 +1568,173 @@ async fn handle_parse_crfr(
     let mut current_html = html;
     let mut current_url = final_url;
 
-    // Catch panics in the parse pipeline to avoid crashing the server.
-    // Large pages (CNN 3MB+, Spiegel 2MB+) can cause stack overflow in parser.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        if run_js {
-            // Inline externa <script src="..."> INNAN JS-eval
-            // (Anthropic, Next.js etc levererar React-bundles som externa filer)
-            let js_inline =
-                aether_agent::fetch::fetch_and_inline_external_scripts(&current_html, &current_url)
-                    .await;
-            if js_inline.scripts_loaded > 0 {
-                current_html = js_inline.html;
-            }
+    let result = if run_js {
+        // Inline externa <script src="..."> INNAN JS-eval
+        // (Anthropic, Next.js etc levererar React-bundles som externa filer)
+        let js_inline =
+            aether_agent::fetch::fetch_and_inline_external_scripts(&current_html, &current_url)
+                .await;
+        if js_inline.scripts_loaded > 0 {
+            current_html = js_inline.html;
+        }
 
-            let api_responses = aether_agent::prefetch_api_urls_with_auth(
+        let api_responses = aether_agent::prefetch_api_urls_with_auth(
+            &current_html,
+            &current_url,
+            10,
+            3000,
+            &cookies,
+            &extra_headers,
+        )
+        .await;
+        let mut tree = if api_responses.is_empty() {
+            aether_agent::build_tree_for_crfr(&current_html, goal, &current_url, true)
+        } else {
+            aether_agent::build_tree_for_crfr_with_fetch(
                 &current_html,
+                goal,
                 &current_url,
-                10,
-                3000,
-                &cookies,
-                &extra_headers,
+                api_responses,
             )
-            .await;
-            let mut tree = if api_responses.is_empty() {
-                aether_agent::build_tree_for_crfr(&current_html, goal, &current_url, true)
-            } else {
-                aether_agent::build_tree_for_crfr_with_fetch(
+        };
+
+        // Bot challenge re-fetch: JS set cookies → re-fetch with cookies → re-parse
+        if aether_agent::is_likely_bot_challenge(&tree, &tree.js_cookies)
+            && !tree.js_cookies.is_empty()
+        {
+            eprintln!(
+                "[MCP-COOKIE-BRIDGE] Challenge detected on {} — re-fetching",
+                current_url
+            );
+            let mut rc = aether_agent::types::FetchConfig {
+                cookies: tree.js_cookies.clone(),
+                ..Default::default()
+            };
+            for (k, v) in &extra_headers {
+                rc.extra_headers.insert(k.clone(), v.clone());
+            }
+            if let Ok(rr) = aether_agent::fetch::fetch_page(&current_url, &rc).await {
+                eprintln!(
+                    "[MCP-COOKIE-BRIDGE] Re-fetch: {} bytes, status {}",
+                    rr.body.len(),
+                    rr.status_code
+                );
+                current_html = rr.body;
+                current_url = rr.final_url;
+                tree = aether_agent::build_tree_with_cookies(
+                    &current_html,
+                    goal,
+                    &current_url,
+                    &rr.set_cookie_headers,
+                );
+            }
+        }
+
+        aether_agent::parse_crfr_from_tree_js(&tree, goal, &current_url, top_n, output_format, true)
+    } else {
+        // Phase 3.3: XHR → CRFR pipeline — detect XHR URLs and auto-fetch if
+        // the page content is thin (likely SPA that loads data via AJAX).
+        //
+        // Wrap synchronous parse in spawn_blocking + catch_unwind to prevent
+        // panics (from large/malformed pages) from crashing the server task.
+        let parse_html = current_html.clone();
+        let parse_goal = goal.to_string();
+        let parse_url = current_url.clone();
+        let parse_top_n = top_n;
+        let parse_fmt = output_format.to_string();
+
+        let parse_result = tokio::task::spawn_blocking(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let tree =
+                    aether_agent::build_tree_for_crfr(&parse_html, &parse_goal, &parse_url, false);
+                let result_str = aether_agent::parse_crfr_from_tree_js(
+                    &tree,
+                    &parse_goal,
+                    &parse_url,
+                    parse_top_n,
+                    &parse_fmt,
+                    false,
+                );
+                (result_str, tree.pending_fetch_urls)
+            }))
+        })
+        .await;
+
+        let (result_str, pending_urls) = match parse_result {
+            Ok(Ok((r, urls))) => (r, urls),
+            Ok(Err(_panic)) => {
+                let err = serde_json::json!({
+                    "error": format!("parse panicked for {} (page may be too large)", current_url),
+                    "url": current_url,
+                    "html_size": current_html.len(),
+                    "suggested_action": "retry_with_smaller_page",
+                });
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    err.to_string(),
+                )]);
+            }
+            Err(_join_err) => {
+                let err = serde_json::json!({
+                    "error": "parse task failed",
+                    "url": current_url,
+                });
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    err.to_string(),
+                )]);
+            }
+        };
+
+        // Check if results are thin and XHR URLs exist
+        let is_thin = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result_str) {
+            let node_count = parsed
+                .get("node_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            node_count < 3
+        } else {
+            false
+        };
+
+        if is_thin && !pending_urls.is_empty() {
+            // Auto-fetch top 3 XHR URLs and re-parse with their data
+            let mut api_responses = std::collections::HashMap::new();
+            let config = aether_agent::types::FetchConfig::default();
+            for xhr_url in pending_urls.iter().take(3) {
+                if aether_agent::fetch::validate_url(xhr_url).is_err() {
+                    continue;
+                }
+                if let Ok(resp) = aether_agent::fetch::fetch_page(xhr_url, &config).await {
+                    api_responses.insert(
+                        xhr_url.clone(),
+                        aether_agent::dom_bridge::FetchResponse {
+                            status: resp.status_code,
+                            content_type: resp.content_type.clone(),
+                            body: resp.body,
+                            headers: std::collections::HashMap::new(),
+                        },
+                    );
+                }
+            }
+            if !api_responses.is_empty() {
+                let enriched_tree = aether_agent::build_tree_for_crfr_with_fetch(
                     &current_html,
                     goal,
                     &current_url,
                     api_responses,
-                )
-            };
-
-            // Bot challenge re-fetch: JS set cookies → re-fetch with cookies → re-parse
-            if aether_agent::is_likely_bot_challenge(&tree, &tree.js_cookies)
-                && !tree.js_cookies.is_empty()
-            {
-                eprintln!(
-                    "[MCP-COOKIE-BRIDGE] Challenge detected on {} — re-fetching",
-                    current_url
                 );
-                let mut rc = aether_agent::types::FetchConfig {
-                    cookies: tree.js_cookies.clone(),
-                    ..Default::default()
-                };
-                for (k, v) in &extra_headers {
-                    rc.extra_headers.insert(k.clone(), v.clone());
-                }
-                if let Ok(rr) = aether_agent::fetch::fetch_page(&current_url, &rc).await {
-                    eprintln!(
-                        "[MCP-COOKIE-BRIDGE] Re-fetch: {} bytes, status {}",
-                        rr.body.len(),
-                        rr.status_code
-                    );
-                    current_html = rr.body;
-                    current_url = rr.final_url;
-                    tree = aether_agent::build_tree_with_cookies(
-                        &current_html,
-                        goal,
-                        &current_url,
-                        &rr.set_cookie_headers,
-                    );
-                }
-            }
-
-            aether_agent::parse_crfr_from_tree_js(
-                &tree,
-                goal,
-                &current_url,
-                top_n,
-                output_format,
-                true,
-            )
-        } else {
-            // Phase 3.3: XHR → CRFR pipeline — detect XHR URLs and auto-fetch if
-            // the page content is thin (likely SPA that loads data via AJAX).
-            let tree = aether_agent::build_tree_for_crfr(&current_html, goal, &current_url, false);
-            let result_str = aether_agent::parse_crfr_from_tree_js(
-                &tree,
-                goal,
-                &current_url,
-                top_n,
-                output_format,
-                false,
-            );
-
-            // Check if results are thin and XHR URLs exist
-            let is_thin = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result_str)
-            {
-                let node_count = parsed
-                    .get("node_count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
-                node_count < 3
-            } else {
-                false
-            };
-
-            if is_thin && !tree.pending_fetch_urls.is_empty() {
-                // Auto-fetch top 3 XHR URLs and re-parse with their data
-                let mut api_responses = std::collections::HashMap::new();
-                let config = aether_agent::types::FetchConfig::default();
-                for xhr_url in tree.pending_fetch_urls.iter().take(3) {
-                    if aether_agent::fetch::validate_url(xhr_url).is_err() {
-                        continue;
-                    }
-                    if let Ok(resp) = aether_agent::fetch::fetch_page(xhr_url, &config).await {
-                        api_responses.insert(
-                            xhr_url.clone(),
-                            aether_agent::dom_bridge::FetchResponse {
-                                status: resp.status_code,
-                                content_type: resp.content_type.clone(),
-                                body: resp.body,
-                                headers: std::collections::HashMap::new(),
-                            },
-                        );
-                    }
-                }
-                if !api_responses.is_empty() {
-                    let enriched_tree = aether_agent::build_tree_for_crfr_with_fetch(
-                        &current_html,
-                        goal,
-                        &current_url,
-                        api_responses,
-                    );
-                    aether_agent::parse_crfr_from_tree_js(
-                        &enriched_tree,
-                        goal,
-                        &current_url,
-                        top_n,
-                        output_format,
-                        true,
-                    )
-                } else {
-                    result_str
-                }
+                aether_agent::parse_crfr_from_tree_js(
+                    &enriched_tree,
+                    goal,
+                    &current_url,
+                    top_n,
+                    output_format,
+                    true,
+                )
             } else {
                 result_str
             }
-        }
-    })); // end catch_unwind
-
-    let result = match result {
-        Ok(r) => r,
-        Err(_) => {
-            // Parse pipeline panicked — return error instead of crashing server
-            let err = serde_json::json!({
-                "error": format!("parse pipeline panicked for {} (page may be too large or malformed)", current_url),
-                "url": current_url,
-                "html_size": current_html.len(),
-                "suggested_action": "retry_with_smaller_page",
-            });
-            return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
-                err.to_string(),
-            )]);
+        } else {
+            result_str
         }
     };
 
