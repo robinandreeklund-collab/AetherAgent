@@ -2903,9 +2903,23 @@ impl ServerHandler for AetherMcpServer {
                 Ok(result)
             }
             "parse_crfr" => {
-                let args = request.arguments.as_ref();
-                let result = handle_parse_crfr(args).await;
-                Ok(result)
+                let args = request.arguments.as_ref().cloned();
+                // Wrap in AssertUnwindSafe + catch_unwind via spawn to prevent
+                // panics from crashing the server. CNN (3MB+), Spiegel (2MB+)
+                // can cause stack overflow in parser.
+                let handle = tokio::spawn(async move { handle_parse_crfr(args.as_ref()).await });
+                match handle.await {
+                    Ok(result) => Ok(result),
+                    Err(e) => {
+                        let err_msg = format!("parse_crfr panicked: {e}");
+                        eprintln!("[MCP] {}", err_msg);
+                        Ok(rmcp::model::CallToolResult::error(vec![
+                            rmcp::model::Content::text(
+                                serde_json::json!({"error": err_msg}).to_string(),
+                            ),
+                        ]))
+                    }
+                }
             }
             "fetch_parse" => {
                 let args = request.arguments.as_ref();
@@ -3308,8 +3322,14 @@ async fn dispatch_tool_async(
             extract_text_from_call_result(&result)
         }
         "parse_crfr" => {
-            let result = handle_parse_crfr(obj).await;
-            extract_text_from_call_result(&result)
+            let args_owned = obj.cloned();
+            let handle = tokio::spawn(async move { handle_parse_crfr(args_owned.as_ref()).await });
+            match handle.await {
+                Ok(result) => extract_text_from_call_result(&result),
+                Err(e) => {
+                    serde_json::json!({"error": format!("parse_crfr panicked: {e}")}).to_string()
+                }
+            }
         }
         _ => format!(r#"{{"error":"Unknown async tool: {}"}}"#, name),
     }
