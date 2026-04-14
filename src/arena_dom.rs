@@ -592,13 +592,19 @@ impl ArenaDom {
     /// Extrahera all text rekursivt (speglar parser::extract_text)
     pub fn extract_text(&self, key: NodeKey) -> String {
         let mut buf = String::new();
-        self.extract_text_into(key, &mut buf);
+        self.extract_text_into(key, &mut buf, 0);
         buf
     }
 
-    /// Samla text i en delad buffer — zero-alloc per rekursiv nivå
-    fn extract_text_into(&self, key: NodeKey, buf: &mut String) {
+    /// Samla text i en delad buffer — zero-alloc per rekursiv nivå.
+    /// Depth-limited to prevent stack overflow on deeply nested DOM
+    /// (CNN 400+ nested divs, Spiegel 300+ nested sections).
+    fn extract_text_into(&self, key: NodeKey, buf: &mut String, depth: u32) {
         const TEXT_SKIP_TAGS: &[&str] = &["script", "style", "noscript", "template"];
+        const MAX_TEXT_DEPTH: u32 = 128;
+        if depth > MAX_TEXT_DEPTH {
+            return;
+        }
 
         let node = match self.nodes.get(key) {
             Some(n) => n,
@@ -620,13 +626,11 @@ impl ArenaDom {
                         return;
                     }
                 }
-                // Iterera med index — undviker Vec::clone() per nod
                 let num_children = node.children.len();
                 for i in 0..num_children {
-                    // Hämta barn-nyckel via index (säkert: i < num_children)
                     let child_key = self.nodes.get(key).and_then(|n| n.children.get(i).copied());
                     if let Some(ck) = child_key {
-                        self.extract_text_into(ck, buf);
+                        self.extract_text_into(ck, buf, depth + 1);
                     }
                 }
             }
@@ -635,7 +639,7 @@ impl ArenaDom {
                 for i in 0..num_children {
                     let child_key = self.nodes.get(key).and_then(|n| n.children.get(i).copied());
                     if let Some(ck) = child_key {
-                        self.extract_text_into(ck, buf);
+                        self.extract_text_into(ck, buf, depth + 1);
                     }
                 }
             }

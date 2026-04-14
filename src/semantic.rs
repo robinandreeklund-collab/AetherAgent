@@ -119,8 +119,10 @@ impl SemanticBuilder {
         output: &mut Vec<SemanticNode>,
         depth: u32,
     ) {
-        // Skydda mot stack overflow vid djupt nästlad HTML (t.ex. 10000+ nästlade <div>)
-        const MAX_TRAVERSAL_DEPTH: u32 = 512;
+        // Skydda mot stack overflow vid djupt nästlad HTML (CNN, Spiegel, Aftonbladet).
+        // Set to 128 to leave room for extract_text_into (max 128) called per node.
+        // Total worst case: 128 + 128 = 256 recursive frames, ~100KB stack.
+        const MAX_TRAVERSAL_DEPTH: u32 = 128;
         if depth > MAX_TRAVERSAL_DEPTH {
             return;
         }
