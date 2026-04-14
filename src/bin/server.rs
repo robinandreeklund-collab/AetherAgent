@@ -7569,8 +7569,18 @@ fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
     });
 }
 
-#[tokio::main]
-async fn main() {
+// html5ever + ArenaDom recursive parsing needs 8MB stack for deeply nested HTML.
+fn main() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .expect("Failed to build tokio runtime");
+    runtime.block_on(async_main());
+}
+
+async fn async_main() {
     eprintln!("=== AetherAgent Memory Startup Trace ===");
     log_rss("1. process start");
 

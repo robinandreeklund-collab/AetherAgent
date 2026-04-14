@@ -3481,8 +3481,19 @@ async fn handle_mcp_ws(mut socket: axum::extract::ws::WebSocket, server: Arc<Aet
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+// html5ever + ArenaDom recursive parsing requires deep stack for
+// heavily nested HTML (CNN 400+ divs, Spiegel 300+ sections).
+// Default tokio worker stack is 2MB which overflows. Set to 8MB.
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .thread_stack_size(8 * 1024 * 1024) // 8MB stack per worker
+        .enable_all()
+        .build()?;
+    runtime.block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // Tolka kommandoradsargument: --ws / --websocket aktiverar WebSocket-läge
     let args: Vec<String> = std::env::args().collect();
     let use_ws = args.iter().any(|a| a == "--ws" || a == "--websocket")
