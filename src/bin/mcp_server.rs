@@ -3243,6 +3243,14 @@ fn dispatch_tool_sync(_server: &AetherMcpServer, name: &str, args: &serde_json::
             let ids_json = json_str("successful_node_ids");
             aether_agent::crfr_feedback(s("url"), s("goal"), &ids_json)
         }
+        "crfr_clear" => {
+            let url = s("url");
+            if url == "all" {
+                aether_agent::crfr_clear_all()
+            } else {
+                aether_agent::crfr_clear(&url)
+            }
+        }
         // Async-verktyg hanteras inte här — returnera tom markör
         "fetch_parse" | "fetch_click" | "fetch_extract" | "fetch_stream_parse" | "fetch_search"
         | "fetch_vision" | "vision_parse" | "parse_screenshot" => String::new(),
@@ -3470,7 +3478,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
     eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
     eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision,");
-    eprintln!("        tiered_screenshot, tier_stats, search, fetch_search, render_with_js");
+    eprintln!("        tiered_screenshot, tier_stats, search, fetch_search, render_with_js,");
+    eprintln!("        crfr_clear, crfr_feedback, crfr_save, crfr_load, crfr_transfer");
 
     if use_ws {
         use axum::{extract::WebSocketUpgrade, routing::get, Router};
