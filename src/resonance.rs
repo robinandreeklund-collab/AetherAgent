@@ -1396,7 +1396,7 @@ impl ResonanceField {
             ids.sort_unstable();
             self.cached_sorted_ids = Some(ids);
         }
-        let node_ids = self.cached_sorted_ids.clone().unwrap();
+        let node_ids = self.cached_sorted_ids.clone().unwrap_or_default();
 
         // OPT-3: Use cached shape scores (computed once, reused across queries).
         // These depend only on label structure and role — unchanged between queries
@@ -1457,7 +1457,7 @@ impl ResonanceField {
         // .take() moves the HashMap out of self, making it an owned value so the
         // hot loop can simultaneously hold state = self.nodes.get_mut() without
         // violating borrow rules.  We restore it at the end of propagate_inner.
-        let shape_scores = self.cached_shape_scores.take().unwrap();
+        let shape_scores = self.cached_shape_scores.take().unwrap_or_default();
 
         // OPT-3: Use cached meta penalties (same lifecycle as shape scores).
         if self.cached_meta_penalties.is_none() {
@@ -1470,7 +1470,7 @@ impl ResonanceField {
                     .collect(),
             );
         }
-        let meta_penalties = self.cached_meta_penalties.take().unwrap();
+        let meta_penalties = self.cached_meta_penalties.take().unwrap_or_default();
 
         // OPT-2: Use cached site-name words for nav-artifact penalization.
         if self.cached_site_words.is_none() {
@@ -1489,7 +1489,7 @@ impl ResonanceField {
                     .collect(),
             );
         }
-        let site_words = self.cached_site_words.take().unwrap();
+        let site_words = self.cached_site_words.take().unwrap_or_default();
 
         // CASCADE Stage 1: BM25-only fast pre-filter (all N nodes → top 100)
         // Only nodes with BM25 > 0 proceed to expensive scoring
