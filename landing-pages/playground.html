@@ -111,6 +111,39 @@ a:hover{color:var(--text)}
   .split{flex-direction:column}
   .panel-left{border-right:none;border-bottom:1px solid var(--border)}
 }
+
+/* CUSTOM SCROLLBARS — dark, minimal */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+
+/* CUSTOM SELECT/DROPDOWN — modern dark */
+.field select{appearance:none;-webkit-appearance:none;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right .85rem center;background-size:10px 6px;padding-right:2.2rem;cursor:pointer}
+.field select:focus{border-color:var(--accent);outline:none}
+.field select option{background:var(--surface);color:var(--text);padding:.5rem}
+
+/* WELCOME PANEL */
+.welcome{position:absolute;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:2rem}
+.welcome.hidden{display:none}
+.welcome-inner{max-width:680px;text-align:center}
+.welcome-inner h1{font-size:clamp(1.8rem,4vw,2.5rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:.75rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.welcome-inner .sub{color:var(--muted);font-size:1rem;margin-bottom:2rem;line-height:1.6}
+.welcome-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem;text-align:left}
+.welcome-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem;transition:all .2s}
+.welcome-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.welcome-card h3{font-size:.85rem;font-weight:600;margin-bottom:.3rem}
+.welcome-card p{font-size:.75rem;color:var(--muted);line-height:1.5}
+.welcome-card .icon{font-size:1.3rem;margin-bottom:.5rem}
+.welcome-limits{display:flex;gap:2rem;justify-content:center;margin-bottom:2rem;font-size:.78rem;color:var(--muted)}
+.welcome-limits .limit{display:flex;align-items:center;gap:.4rem}
+.welcome-limits .limit-val{color:var(--accent);font-weight:600;font-family:var(--mono)}
+.btn-start{padding:.85rem 2.5rem;border-radius:10px;font-size:1rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s}
+.btn-start:hover{background:#2563eb;transform:translateY(-2px)}
+.btn-outline{padding:.65rem 1.5rem;border-radius:8px;font-size:.85rem;font-weight:500;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .2s;margin-left:.75rem}
+.btn-outline:hover{border-color:var(--accent);color:var(--text)}
+@media(max-width:700px){.welcome-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -155,6 +188,60 @@ a:hover{color:var(--text)}
 
   <!-- MAIN -->
   <div class="main" style="position:relative">
+    <!-- WELCOME LANDING -->
+    <div class="welcome" id="welcome-panel">
+      <div class="welcome-inner">
+        <h1>Slaash API Playground</h1>
+        <p class="sub">12 agent primitives. One API. Try them live — no signup required.</p>
+
+        <div class="welcome-grid">
+          <div class="welcome-card">
+            <div class="icon">&#9889;</div>
+            <h3>Extract</h3>
+            <p>URL + question = answer. 99% token reduction vs raw HTML.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon">&#128269;</div>
+            <h3>Search</h3>
+            <p>Web search + deep parse. Structured results with snippets.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon">&#128279;</div>
+            <h3>Crawl</h3>
+            <p>Multi-page intelligent crawl. Thompson Sampling link selection.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon">&#9654;</div>
+            <h3>Act</h3>
+            <p>Click buttons, fill forms, extract structured data.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon">&#128203;</div>
+            <h3>Plan</h3>
+            <p>Decompose goals into step-by-step action plans.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon">&#9776;</div>
+            <h3>Stream</h3>
+            <p>Token-efficient streaming for massive pages. 95-99% savings.</p>
+          </div>
+        </div>
+
+        <div class="welcome-limits">
+          <div class="limit"><span class="limit-val">10</span> requests/min (anonymous)</div>
+          <div class="limit"><span class="limit-val">50</span> requests/day</div>
+          <div class="limit"><span class="limit-val">3</span> output formats (JSON, Markdown, TOON)</div>
+        </div>
+
+        <div>
+          <button class="btn-start" onclick="startPlayground()">Start building &#8594;</button>
+          <button class="btn-outline" onclick="alert('Coming soon: Sign up for unlimited access + API key')">Get API Key</button>
+        </div>
+
+        <p style="font-size:.72rem;color:#555;margin-top:1.5rem">Sign up for an API key to unlock 1,000 req/day, all primitives, and a usage dashboard.</p>
+      </div>
+    </div>
+
     <div class="loading-bar" id="loading-bar"></div>
     <div class="toolbar">
       <h2 id="toolbar-title">slaash.extract</h2>
@@ -832,6 +919,10 @@ async function sendFeedback() {
   } catch(e) {
     document.getElementById('feedback-msg').textContent = 'Feedback failed: ' + e.message;
   }
+}
+
+function startPlayground() {
+  document.getElementById('welcome-panel').classList.add('hidden');
 }
 
 // Init
