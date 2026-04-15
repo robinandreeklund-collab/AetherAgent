@@ -507,15 +507,6 @@ fn format_toon(
             _ => 'G',
         };
         let label = clean_label(&node.label);
-        let label = if label.len() > 500 {
-            let mut e = 500;
-            while e > 0 && !label.is_char_boundary(e) {
-                e -= 1;
-            }
-            format!("{}..", &label[..e])
-        } else {
-            label
-        };
         let boost = if res.causal_boost > 0.01 {
             format!("*{:.1}", res.causal_boost)
         } else {
