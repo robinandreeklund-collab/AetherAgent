@@ -3282,7 +3282,7 @@ async fn handle_ws_mcp(mut socket: axum::extract::ws::WebSocket, state: AppState
                 let tool_name = params["name"].as_str().unwrap_or("");
                 let arguments = &params["arguments"];
                 let call_start = std::time::Instant::now();
-                let result = mcp_dispatch_tool(tool_name, arguments, &state).await;
+                let result = mcp_dispatch_tool(tool_name, arguments, &state, 0).await;
                 let call_ms = call_start.elapsed().as_millis();
 
                 // Broadcast tool-anrop till SSE-dashboard
@@ -5855,6 +5855,7 @@ async fn mcp_dispatch_tool(
     name: &str,
     args: &serde_json::Value,
     _state: &AppState,
+    user_id: i64,
 ) -> Result<serde_json::Value, String> {
     let text_ok = |s: String| -> Result<serde_json::Value, String> {
         Ok(serde_json::json!([{"type": "text", "text": s}]))
@@ -6188,8 +6189,9 @@ async fn mcp_dispatch_tool(
                 aether_agent::tools::resolve_pending_fetches(&mut tree, &goal_str).await;
             }
 
+            let mcp_uid = user_id;
             let result = tokio::task::spawn_blocking(move || {
-                aether_agent::parse_crfr_from_tree_js(&tree, &goal_str, &page_url, top_n, &fmt, run_js)
+                aether_agent::parse_crfr_from_tree_js_user(&tree, &goal_str, &page_url, top_n, &fmt, run_js, mcp_uid)
             })
             .await
             .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
@@ -6201,7 +6203,12 @@ async fn mcp_dispatch_tool(
         "crfr_feedback" => {
             let url = args["url"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
-            let user_id = args["user_id"].as_i64().unwrap_or(0);
+            // Use session user_id (from Bearer token), fall back to explicit param
+            let feedback_user_id = if user_id > 0 {
+                user_id
+            } else {
+                args["user_id"].as_i64().unwrap_or(0)
+            };
             let ids: Vec<u32> = args["successful_node_ids"]
                 .as_array()
                 .map(|arr| {
@@ -6215,11 +6222,11 @@ async fn mcp_dispatch_tool(
             let url_str = url.to_string();
             let goal_str = goal.to_string();
             // Always use per-user feedback — never train global weights from user input
-            let result = if user_id <= 0 {
+            let result = if feedback_user_id <= 0 {
                 r#"{"status":"error","message":"user_id required for feedback. Global weights cannot be trained by users."}"#.to_string()
             } else {
                 tokio::task::spawn_blocking(move || {
-                    aether_agent::crfr_feedback_user(&url_str, &goal_str, &ids_json, user_id)
+                    aether_agent::crfr_feedback_user(&url_str, &goal_str, &ids_json, feedback_user_id)
                 })
                 .await
                 .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string())
@@ -6389,6 +6396,7 @@ async fn mcp_post(
     // Discovery methods (initialize, tools/list, ping, notifications/*) are public.
     // Claude Connectors sends NO auth for discovery — confirmed by production logs.
     let needs_auth = method == "tools/call";
+    let mut mcp_user_id: i64 = 0;
     if needs_auth {
         if api_key.is_empty() {
             let err = serde_json::json!({
@@ -6398,11 +6406,14 @@ async fn mcp_post(
             });
             return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
         }
-        // Try API key, session token, or OAuth token
-        let is_valid = aether_agent::auth::validate_api_key(api_key).is_some()
-            || aether_agent::auth::validate_session_token(api_key).is_some()
-            || aether_agent::auth::validate_oauth_token(api_key).is_some();
-        if !is_valid {
+        // Try API key, session token, or OAuth token — extract user_id
+        if let Some((_key_id, uid)) = aether_agent::auth::validate_api_key(api_key) {
+            mcp_user_id = uid;
+        } else if let Some((_key_id, uid)) = aether_agent::auth::validate_session_token(api_key) {
+            mcp_user_id = uid;
+        } else if let Some((uid, _client)) = aether_agent::auth::validate_oauth_token(api_key) {
+            mcp_user_id = uid;
+        } else {
             let err = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": id,
@@ -6410,6 +6421,7 @@ async fn mcp_post(
             });
             return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
         }
+        eprintln!("[MCP] tools/call authenticated: user_id={}", mcp_user_id);
     }
 
     let params = &msg["params"];
@@ -6462,7 +6474,7 @@ async fn mcp_post(
             let tool_name = params["name"].as_str().unwrap_or("");
             let arguments = &params["arguments"];
             let call_start = std::time::Instant::now();
-            let result = mcp_dispatch_tool(tool_name, arguments, &state).await;
+            let result = mcp_dispatch_tool(tool_name, arguments, &state, mcp_user_id).await;
             let call_ms = call_start.elapsed().as_millis();
 
             // Broadcast tool-anrop till SSE-dashboard
