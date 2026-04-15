@@ -7622,7 +7622,14 @@ async fn live_stats_handler(
     let (cache_entries, cache_capacity) = aether_agent::resonance::cache_stats();
 
     let sites_profiled = fields.len();
-    let total_queries: u32 = fields.iter().map(|f| f.total_queries).sum();
+    let cache_queries: u64 = fields.iter().map(|f| f.total_queries as u64).sum();
+    #[cfg(feature = "persist")]
+    let total_queries = {
+        let p_q = aether_agent::persist::load_global_stat("total_queries");
+        cache_queries.max(p_q) as u32
+    };
+    #[cfg(not(feature = "persist"))]
+    let total_queries = cache_queries as u32;
     let total_nodes: usize = fields.iter().map(|f| f.node_count).sum();
     let total_edges: usize = fields.iter().map(|f| f.edge_count).sum();
     let total_causal_weights: usize = fields.iter().map(|f| f.propagation_weight_count).sum();
@@ -7630,8 +7637,17 @@ async fn live_stats_handler(
     let total_feedback: u32 = fields.iter().map(|f| f.total_feedback).sum();
     let total_successful: u32 = fields.iter().map(|f| f.total_successful_nodes).sum();
     let total_learned: usize = fields.iter().map(|f| f.learned_nodes).sum();
-    let total_chars_in: u64 = fields.iter().map(|f| f.total_chars_in).sum();
-    let total_chars_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
+    // Use max(cache sum, persisted) to preserve stats across restarts
+    let cache_chars_in: u64 = fields.iter().map(|f| f.total_chars_in).sum();
+    let cache_chars_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
+    #[cfg(feature = "persist")]
+    let (total_chars_in, total_chars_out) = {
+        let p_in = aether_agent::persist::load_global_stat("total_chars_in");
+        let p_out = aether_agent::persist::load_global_stat("total_chars_out");
+        (cache_chars_in.max(p_in), cache_chars_out.max(p_out))
+    };
+    #[cfg(not(feature = "persist"))]
+    let (total_chars_in, total_chars_out) = (cache_chars_in, cache_chars_out);
     let token_savings_pct = if total_chars_in > 0 {
         ((1.0 - total_chars_out as f64 / total_chars_in as f64) * 100.0).max(0.0)
     } else {
@@ -7775,6 +7791,18 @@ fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
             if tick_count.is_multiple_of(2) {
                 let reqs = request_counter.load(std::sync::atomic::Ordering::Relaxed);
                 aether_agent::persist::save_global_stat("total_requests", reqs);
+                // Save aggregated token stats — use max(cache, persisted) to
+                // preserve historical data across restarts with lazy-load
+                let fields = aether_agent::resonance::list_cached_fields();
+                let cache_in: u64 = fields.iter().map(|f| f.total_chars_in).sum();
+                let cache_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
+                let cache_q: u64 = fields.iter().map(|f| f.total_queries as u64).sum();
+                let prev_in = aether_agent::persist::load_global_stat("total_chars_in");
+                let prev_out = aether_agent::persist::load_global_stat("total_chars_out");
+                let prev_q = aether_agent::persist::load_global_stat("total_queries");
+                aether_agent::persist::save_global_stat("total_chars_in", cache_in.max(prev_in));
+                aether_agent::persist::save_global_stat("total_chars_out", cache_out.max(prev_out));
+                aether_agent::persist::save_global_stat("total_queries", cache_q.max(prev_q));
                 aether_agent::persist::checkpoint();
             }
         }
