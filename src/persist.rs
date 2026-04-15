@@ -190,7 +190,10 @@ pub fn load_field(url_hash: u64) -> Option<ResonanceField> {
             .ok()?
     }; // Lock released here
 
-    serde_json::from_slice(&data).ok()
+    let mut field: ResonanceField = serde_json::from_slice(&data).ok()?;
+    // Regenerate text_hv (skipped in serialization to save ~50% memory)
+    field.regenerate_text_hvs();
+    Some(field)
 }
 
 /// Load all resonance fields (for startup warm-load).
@@ -225,19 +228,22 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
     let mut failed = 0;
     let result: Vec<ResonanceField> = rows
         .filter_map(|r| r.ok())
-        .filter_map(|data| match serde_json::from_slice(&data) {
-            Ok(field) => {
-                loaded += 1;
-                Some(field)
-            }
-            Err(e) => {
-                failed += 1;
-                if failed <= 3 {
-                    eprintln!("[PERSIST] load_all_fields deserialize error: {e}");
+        .filter_map(
+            |data| match serde_json::from_slice::<ResonanceField>(&data) {
+                Ok(mut field) => {
+                    field.regenerate_text_hvs();
+                    loaded += 1;
+                    Some(field)
                 }
-                None
-            }
-        })
+                Err(e) => {
+                    failed += 1;
+                    if failed <= 3 {
+                        eprintln!("[PERSIST] load_all_fields deserialize error: {e}");
+                    }
+                    None
+                }
+            },
+        )
         .collect();
     if failed > 0 {
         eprintln!("[PERSIST] load_all_fields: {loaded} loaded, {failed} failed deserialization");
@@ -548,19 +554,17 @@ pub fn restore() {
         return;
     }
 
-    // Ladda domain profiles
+    // Ladda domain profiles (small: ~1KB each, safe to preload all)
     let profiles = load_all_domain_profiles();
     let profile_count = profiles.len();
     crate::resonance::import_domain_profiles(profiles);
 
-    // Ladda cachade resonance fields
-    let fields = load_all_fields();
-    let field_count = fields.len();
-    crate::resonance::import_cached_fields(fields);
-
+    // Resonance fields are NOT preloaded — lazy-load from SQLite on demand.
+    // This keeps RSS at ~30MB instead of ~300MB+ at startup.
+    // Fields are loaded in get_or_build_field_with_variant() when queried.
     eprintln!(
-        "[PERSIST] Restored: {} domain profiles, {} resonance fields",
-        profile_count, field_count
+        "[PERSIST] Restored: {} domain profiles (fields: lazy-load on demand)",
+        profile_count
     );
 }
 

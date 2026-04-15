@@ -7601,9 +7601,14 @@ async fn async_main() {
                     "[PERSIST] DB contains: {fields_before} fields, {domains_before} domains, {:.1} KB",
                     size as f64 / 1024.0
                 );
-                aether_agent::persist::restore();
-                let (ce, _) = aether_agent::resonance::cache_stats();
-                eprintln!("[PERSIST] Restored to cache: {ce} fields loaded");
+                // Lazy-load: don't preload fields at startup.
+                // Fields are loaded on-demand from SQLite when queried.
+                // This keeps RSS at ~30MB instead of ~300MB at boot.
+                // Domain profiles are still loaded (small: ~1KB each).
+                let profiles = aether_agent::persist::load_all_domain_profiles();
+                let profile_count = profiles.len();
+                aether_agent::resonance::import_domain_profiles(profiles);
+                eprintln!("[PERSIST] Loaded {profile_count} domain profiles (lazy-load: 0 fields preloaded)");
             }
             Err(e) => {
                 eprintln!("[PERSIST] WARNING: Failed to init DB: {e} — running in-memory only")

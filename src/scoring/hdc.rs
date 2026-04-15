@@ -34,6 +34,11 @@ impl Hypervector {
         }
     }
 
+    /// Empty default (alias for zero, used as serde skip default)
+    pub fn empty() -> Self {
+        Self::zero()
+    }
+
     /// Access the raw bit storage (for serialization)
     pub fn bits_raw(&self) -> &[u64; WORDS] {
         &self.bits

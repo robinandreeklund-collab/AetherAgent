@@ -225,8 +225,10 @@ impl HvData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResonanceState {
     // ── Multi-field vektorer (aspekt 1: multi-field resonance) ──
-    /// Text-hypervector (ren text n-gram encoding, ingen roll-binding)
-    #[serde(with = "hv_serde")]
+    /// Text-hypervector — regenerated on-demand from node label text.
+    /// NOT serialized to save ~256 bytes per node in SQLite/cache.
+    /// Regeneration takes <1ms via Hypervector::from_text_ngrams().
+    #[serde(skip, default = "Hypervector::empty")]
     text_hv: Hypervector,
     /// Roll-string (heading, button, price, etc.) — billigare än HV för roll-matchning
     role: String,
@@ -3444,7 +3446,23 @@ impl ResonanceField {
 
     /// Deserialize a field from a JSON string (restores causal memory).
     pub fn from_json(json: &str) -> Result<Self, String> {
-        serde_json::from_str(json).map_err(|e| format!("Deserialize failed: {e}"))
+        let mut field: Self =
+            serde_json::from_str(json).map_err(|e| format!("Deserialize failed: {e}"))?;
+        field.regenerate_text_hvs();
+        Ok(field)
+    }
+
+    /// Regenerate text_hv for all nodes from node_labels.
+    /// Called after deserialization since text_hv is #[serde(skip)].
+    /// Takes <1ms per 1000 nodes.
+    fn regenerate_text_hvs(&mut self) {
+        for (&nid, state) in self.nodes.iter_mut() {
+            if let Some(label) = self.node_labels.get(&nid) {
+                if !label.is_empty() {
+                    state.text_hv = Hypervector::from_text_ngrams(label);
+                }
+            }
+        }
     }
 }
 
