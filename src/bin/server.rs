@@ -7938,10 +7938,9 @@ async fn oauth_authorize_handler(
     match aether_agent::auth::oauth_authorize(client_id, redirect_uri, state_param) {
         Ok(redirect_url) => {
             let mut headers = HeaderMap::new();
-            headers.insert(
-                axum::http::header::LOCATION,
-                redirect_url.parse().unwrap_or_default(),
-            );
+            if let Ok(val) = redirect_url.parse() {
+                headers.insert(axum::http::header::LOCATION, val);
+            }
             (StatusCode::FOUND, headers, "").into_response()
         }
         Err(e) => (
