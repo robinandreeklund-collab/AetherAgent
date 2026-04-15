@@ -57,8 +57,9 @@ a:hover{color:var(--text)}
     </div>
 
     <!-- Stats cards -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:2rem">
-      <div class="stat-card"><div class="num" id="stat-total" style="color:var(--accent)">0</div><div class="label">Total requests</div></div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-bottom:2rem">
+      <div class="stat-card"><div class="num" id="stat-total" style="color:var(--accent)">0</div><div class="label">Requests (period)</div></div>
+      <div class="stat-card"><div class="num" id="stat-remaining" style="color:var(--green)">-</div><div class="label">Remaining today</div></div>
       <div class="stat-card"><div class="num" id="stat-tokens-in" style="color:var(--amber)">0</div><div class="label">Tokens in</div></div>
       <div class="stat-card"><div class="num" id="stat-tokens-out" style="color:var(--green)">0</div><div class="label">Tokens out</div></div>
       <div class="stat-card"><div class="num" id="stat-avg-time">0</div><div class="label">Avg response (ms)</div></div>
@@ -114,6 +115,19 @@ async function loadUsage() {
   const res = await fetch('/api/auth/usage', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:usageUser.id,since_hours:hours})});
   const data = await res.json();
   const entries = data.entries || [];
+
+  // Fetch key data for remaining count
+  try {
+    const keysRes = await fetch('/api/auth/keys/list', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:usageUser.id})});
+    const keysData = await keysRes.json();
+    const todayTotal = (keysData.keys || []).reduce((s, k) => s + (k.requests_today || 0), 0);
+    const remaining = Math.max(0, 1000 - todayTotal);
+    document.getElementById('stat-remaining').textContent = remaining.toLocaleString();
+    const remEl = document.getElementById('stat-remaining');
+    if (remaining < 100) remEl.style.color = 'var(--red)';
+    else if (remaining < 300) remEl.style.color = 'var(--amber)';
+    else remEl.style.color = 'var(--green)';
+  } catch(e) {}
 
   // Stats
   document.getElementById('stat-total').textContent = entries.length.toLocaleString();

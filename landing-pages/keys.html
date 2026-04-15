@@ -75,10 +75,24 @@ a:hover{color:var(--text)}
       <div style="font-size:.68rem;color:#555;margin-top:.35rem">Click to copy</div>
     </div>
 
-    <!-- Rate limits -->
-    <div style="display:flex;gap:1.5rem;margin-bottom:1.5rem;font-size:.78rem;color:var(--muted)">
-      <span>Rate limit: <span style="color:var(--accent);font-weight:600">60 req/min</span></span>
-      <span>Daily limit: <span style="color:var(--accent);font-weight:600">1,000 req/day</span></span>
+    <!-- Rate limits + live usage -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1.5rem">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1rem;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--accent)" id="usage-today">-</div>
+        <div style="font-size:.7rem;color:var(--muted)">requests today</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1rem;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--green)" id="usage-remaining">-</div>
+        <div style="font-size:.7rem;color:var(--muted)">remaining today</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1rem;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700" id="usage-total">-</div>
+        <div style="font-size:.7rem;color:var(--muted)">total all time</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1rem;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--muted)">1,000</div>
+        <div style="font-size:.7rem;color:var(--muted)">daily limit</div>
+      </div>
     </div>
 
     <!-- Key list -->
@@ -179,6 +193,17 @@ async function loadKeys() {
 }
 
 function renderKeys(keys) {
+  // Update usage stats from key data
+  const totalToday = keys.reduce((s, k) => s + (k.requests_today || 0), 0);
+  const totalAll = keys.reduce((s, k) => s + (k.requests_total || 0), 0);
+  document.getElementById('usage-today').textContent = totalToday.toLocaleString();
+  document.getElementById('usage-remaining').textContent = Math.max(0, 1000 - totalToday).toLocaleString();
+  document.getElementById('usage-total').textContent = totalAll.toLocaleString();
+  const remainEl = document.getElementById('usage-remaining');
+  if (1000 - totalToday < 100) remainEl.style.color = 'var(--red)';
+  else if (1000 - totalToday < 300) remainEl.style.color = 'var(--amber)';
+  else remainEl.style.color = 'var(--green)';
+
   const el = document.getElementById('keys-list');
   if (keys.length === 0) { el.innerHTML = '<div style="color:var(--muted);font-size:.85rem">No API keys yet.</div>'; return; }
   el.innerHTML = keys.map(k => `
