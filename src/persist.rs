@@ -204,15 +204,14 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
         None => return vec![],
     };
 
-    let mut stmt = match conn
-        .prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 256")
-    {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[PERSIST] load_all_fields prepare error: {e}");
-            return vec![];
-        }
-    };
+    let mut stmt =
+        match conn.prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 32") {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[PERSIST] load_all_fields prepare error: {e}");
+                return vec![];
+            }
+        };
 
     let rows = match stmt.query_map([], |row| {
         let data: Vec<u8> = row.get(0)?;
