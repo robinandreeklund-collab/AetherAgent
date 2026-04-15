@@ -193,6 +193,10 @@ a:hover{color:var(--text)}
               <div class="field"><label>Format</label><select id="inp-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
               <div class="field"><label>Run JS</label><select id="inp-js"><option value="false">No</option><option value="true">Yes</option></select></div>
             </div>
+            <div class="field-row" style="margin-top:.75rem">
+              <div class="field"><label>Follow links</label><select id="inp-follow"><option value="false">No</option><option value="true">Yes — follow relevant links</option></select></div>
+            </div>
+            <div style="font-size:.68rem;color:#555;margin-top:.35rem;line-height:1.4">Follow links: auto-follows top-ranked links, fetches their content, and merges results. Gives deeper answers when the page links to relevant sub-pages.</div>
           </div>
           <button class="btn-run" id="btn-run" onclick="runExtract()">Run slaash.extract</button>
         </div>
@@ -471,9 +475,10 @@ async function runExtract() {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({
           url, goal,
-          top_n: parseInt(document.getElementById('inp-topn').value) || 10,
+          top_n: parseInt(document.getElementById('inp-topn').value) || 20,
           output_format: 'json',
-          run_js: document.getElementById('inp-js').value === 'true'
+          run_js: document.getElementById('inp-js').value === 'true',
+          follow_links: document.getElementById('inp-follow').value === 'true'
         })
       }),
       fetch('/api/parse-crfr', {
