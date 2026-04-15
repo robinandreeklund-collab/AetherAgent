@@ -544,6 +544,16 @@ function switchTab(tab) {
   document.getElementById('feedback-section').style.display = 'none';
   // Restore response tabs (render hides them)
   document.querySelectorAll('.response-tab').forEach(t => t.style.display = '');
+  // Clear previous results
+  document.getElementById('response-body').innerHTML = '<span style="color:var(--muted)">// Run a query to see results</span>';
+  document.getElementById('markdown-body').innerHTML = '<span style="color:var(--muted)">Run a query to see results here</span>';
+  document.getElementById('toon-body').innerHTML = '<span style="color:var(--muted)">// TOON output</span>';
+  document.getElementById('meta-tokens').textContent = '-';
+  document.getElementById('meta-savings').textContent = '-';
+  document.getElementById('meta-time').textContent = '-';
+  document.getElementById('meta-nodes').textContent = '-';
+  document.getElementById('feedback-msg').textContent = '';
+  lastResult = null;
   updateCodePreview();
 }
 
