@@ -173,10 +173,20 @@ a:hover{color:var(--text)}
             <span class="example-chip" onclick="fillExample('https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array','branch prediction sorted array unsorted performance railroad junction misprediction flush pipeline penalty')">SO: sorted array</span>
             <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/Gothenburg','population inhabitants Gothenburg Göteborg city urban area people')">Gothenburg population</span>
             <span class="example-chip" onclick="fillExample('https://www.python.org/downloads/','latest Python version release download stable current 2026')">Python: latest version</span>
+            <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/Ibuprofen','ibuprofen medicine drug NSAID anti-inflammatory dosage side effects uses')">Wikipedia: Ibuprofen</span>
             <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/Artificial_Intelligence_Act','EU AI Act regulation artificial intelligence law European Union rules 2024')">EU AI Act</span>
+            <span class="example-chip" onclick="fillExample('https://www.npmjs.com/package/langchain','npm downloads weekly package registry stats version latest')">npm: langchain</span>
+            <span class="example-chip" onclick="fillExample('https://github.com/langchain-ai/langchain','stars forks contributors open issues license programming language repository description')">GitHub: langchain</span>
             <span class="example-chip" onclick="fillExample('https://www.nasa.gov/mars/','NASA Mars mission latest news rover discovery finding surface science')">NASA: Mars mission</span>
             <span class="example-chip" onclick="fillExample('https://docs.python.org/3/','Python documentation version release latest stable tutorial reference library')">Python docs</span>
+            <span class="example-chip" onclick="fillExample('https://openai.com/news/','OpenAI GPT model release announcement latest news product update API')">OpenAI: news</span>
+            <span class="example-chip" onclick="fillExample('https://arxiv.org/list/cs.AI/recent','arxiv paper AI machine learning latest submission abstract title authors')">arXiv: AI papers</span>
+            <span class="example-chip" onclick="fillExample('https://www.bbc.com/sport/football/premier-league/table','Premier League table standings points goals wins losses team position top')">BBC: Premier League</span>
             <span class="example-chip" onclick="fillExample('https://climate.nasa.gov/vital-signs/global-temperature/','global temperature CO2 climate change sea level rise record anomaly celsius latest data')">NASA: climate data</span>
+            <span class="example-chip" onclick="fillExample('https://www.rust-lang.org/','Rust programming language crate version download release stable edition 2024')">Rust-lang.org</span>
+            <span class="example-chip" onclick="fillExample('https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=SEK','currency converter exchange rate USD SEK kronor dollar real-time')">XE: USD/SEK</span>
+            <span class="example-chip" onclick="fillExample('https://survey.stackoverflow.co/2024/','Stack Overflow survey developer programming language most popular used loved dreaded')">SO Survey 2024</span>
+            <span class="example-chip" onclick="fillExample('https://forecast.weather.gov/MapClick.php?CityName=New+York&state=NY','weather forecast temperature today tomorrow rain wind humidity')">Weather: NYC</span>
           </div>
           <div class="field">
             <label>URL</label>
@@ -205,7 +215,11 @@ a:hover{color:var(--text)}
         <div id="form-search" style="display:none">
           <div class="examples">
             <span class="example-chip" onclick="document.getElementById('inp-query').value='latest AI news 2026'">AI news 2026</span>
-            <span class="example-chip" onclick="document.getElementById('inp-query').value='best Rust web frameworks'">Rust frameworks</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='best Rust web frameworks comparison'">Rust frameworks</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='Sweden election results 2026'">Sweden election</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='climate change latest data 2026'">Climate data</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='SpaceX Starship launch schedule'">SpaceX launches</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='EU AI regulation compliance guide'">EU AI regulation</span>
           </div>
           <div class="field">
             <label>Search Query</label>
@@ -240,6 +254,9 @@ a:hover{color:var(--text)}
           <div class="examples">
             <span class="example-chip" onclick="fillCrawl('https://docs.python.org/3/','async programming tutorial guide')">Python async guide</span>
             <span class="example-chip" onclick="fillCrawl('https://doc.rust-lang.org/book/','ownership borrowing lifetimes')">Rust ownership</span>
+            <span class="example-chip" onclick="fillCrawl('https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide','JavaScript closures scope hoisting')">MDN: JS closures</span>
+            <span class="example-chip" onclick="fillCrawl('https://react.dev/learn','React hooks state useEffect components')">React: hooks guide</span>
+            <span class="example-chip" onclick="fillCrawl('https://www.svt.se','senaste nyheter Sverige politik ekonomi')">SVT: Swedish news</span>
           </div>
           <div class="field"><label>Start URL</label><input type="url" id="inp-crawl-url" placeholder="https://docs.example.com" value="https://docs.python.org/3/"></div>
           <div class="field"><label>Goal</label><input type="text" id="inp-crawl-goal" placeholder="What information to gather?" value="async programming tutorial guide"></div>
@@ -256,6 +273,8 @@ a:hover{color:var(--text)}
           <div class="examples">
             <span class="example-chip" onclick="fillStream('https://en.wikipedia.org/wiki/COVID-19_vaccine','vaccine side effects efficacy safety')">Wikipedia: COVID-19</span>
             <span class="example-chip" onclick="fillStream('https://en.wikipedia.org/wiki/Gothenburg','population inhabitants area people')">Wikipedia: Gothenburg</span>
+            <span class="example-chip" onclick="fillStream('https://en.wikipedia.org/wiki/Artificial_Intelligence_Act','EU AI Act regulation rules requirements')">Wikipedia: EU AI Act</span>
+            <span class="example-chip" onclick="fillStream('https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/','styrränta ränta procent beslut')">Riksbanken: räntebeslutet</span>
           </div>
           <div class="field"><label>URL</label><input type="url" id="inp-stream-url" placeholder="https://example.com" value="https://en.wikipedia.org/wiki/COVID-19_vaccine"></div>
           <div class="field"><label>Goal</label><input type="text" id="inp-stream-goal" placeholder="What to stream?" value="vaccine side effects efficacy safety"></div>
@@ -271,6 +290,8 @@ a:hover{color:var(--text)}
           <div class="examples">
             <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Buy the cheapest flight from Stockholm to London'">Book flight</span>
             <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Find and compare prices for iPhone 17 Pro across 3 stores'">Compare prices</span>
+            <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Research the top 5 AI startups in Europe and summarize their products'">Research AI startups</span>
+            <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Find the best restaurants in Gothenburg with ratings above 4.5'">Find restaurants</span>
           </div>
           <div class="field"><label>Goal</label><input type="text" id="inp-plan-goal" placeholder="What do you want to accomplish?" value="Buy the cheapest flight from Stockholm to London"></div>
           <div class="field"><label>Context URL (optional)</label><input type="url" id="inp-plan-url" placeholder="https://starting-page.com"></div>
@@ -290,6 +311,9 @@ a:hover{color:var(--text)}
           <div class="examples">
             <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://www.nasa.gov'">NASA</span>
             <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://news.ycombinator.com'">Hacker News</span>
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://www.svt.se'">SVT Nyheter</span>
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://www.rust-lang.org'">Rust-lang.org</span>
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://docs.python.org/3/'">Python docs</span>
           </div>
           <div class="field"><label>URL</label><input type="url" id="inp-render-url" placeholder="https://example.com" value="https://news.ycombinator.com"></div>
           <div class="field-row">
@@ -303,7 +327,10 @@ a:hover{color:var(--text)}
         <div id="form-links" style="display:none">
           <div class="examples">
             <span class="example-chip" onclick="fillLinks('https://docs.python.org/3/','python modules library')">Python docs links</span>
-            <span class="example-chip" onclick="fillLinks('https://news.ycombinator.com','tech stories')">HN links</span>
+            <span class="example-chip" onclick="fillLinks('https://news.ycombinator.com','tech stories programming')">HN links</span>
+            <span class="example-chip" onclick="fillLinks('https://developer.mozilla.org/en-US/','JavaScript CSS HTML API')">MDN links</span>
+            <span class="example-chip" onclick="fillLinks('https://www.svt.se','nyheter artiklar senaste')">SVT links</span>
+            <span class="example-chip" onclick="fillLinks('https://www.nasa.gov','missions space exploration')">NASA links</span>
           </div>
           <div class="field"><label>URL</label><input type="url" id="inp-links-url" placeholder="https://example.com" value="https://docs.python.org/3/"></div>
           <div class="field"><label>Goal (optional filter)</label><input type="text" id="inp-links-goal" placeholder="Filter links by relevance to..."></div>
