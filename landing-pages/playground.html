@@ -157,7 +157,7 @@ a:hover{color:var(--text)}
     <a href="/mcp">MCP</a>
     <a href="/try">Try</a>
     <span style="font-size:.75rem;color:var(--muted)"><span class="status-dot"></span>Operational</span>
-    <button class="btn-sm" onclick="alert('Coming soon: Sign up for API key')">Get API Key</button>
+    <button class="btn-sm" onclick="window.location='/keys'">Get API Key</button>
   </div>
 </div>
 
@@ -198,8 +198,8 @@ a:hover{color:var(--text)}
     <!-- WELCOME LANDING -->
     <div class="welcome" id="welcome-panel">
       <div class="welcome-inner">
-        <h1>Slaash API Playground</h1>
-        <p class="sub">12 agent primitives. One API. Try them live — no signup required.</p>
+        <h1>Finally, less is actually more.</h1>
+        <p class="sub">The perception layer for AI agents on the web.</p>
 
         <div class="welcome-grid">
           <div class="welcome-card">
@@ -537,6 +537,8 @@ function switchTab(tab) {
   if (formEl) formEl.style.display = '';
   else document.getElementById('form-extract').style.display = ''; // fallback
   document.getElementById('feedback-section').style.display = 'none';
+  // Restore response tabs (render hides them)
+  document.querySelectorAll('.response-tab').forEach(t => t.style.display = '');
   updateCodePreview();
 }
 
@@ -938,16 +940,20 @@ async function runRender() {
     const tier = data.tier_used || 'blitz';
     const sizeKb = data.png_size_bytes ? (data.png_size_bytes/1024).toFixed(0)+'KB' : '?';
 
-    // Show image in markdown panel
-    document.getElementById('markdown-body').innerHTML =
-      '<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff">' +
-      '<img src="data:image/png;base64,' + b64 + '" style="display:block;width:100%;height:auto;max-height:600px;object-fit:contain">' +
+    // Render: show image directly in response panel, hide other views
+    document.querySelectorAll('.response-tab').forEach(t => t.style.display = 'none');
+    document.getElementById('view-markdown').style.display = 'none';
+    document.getElementById('view-toon').style.display = 'none';
+    document.getElementById('view-code').style.display = 'none';
+    document.getElementById('view-response').style.display = 'flex';
+    document.getElementById('response-body').innerHTML =
+      '<div style="text-align:center;padding:1rem">' +
+      '<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;display:inline-block">' +
+      '<img src="data:image/png;base64,' + b64 + '" style="display:block;max-width:100%;max-height:600px;object-fit:contain">' +
+      '</div>' +
+      '<div style="margin-top:.75rem;font-size:.78rem;color:var(--muted)">' + tier + ' engine &middot; ' + w + '&times;' + h + ' &middot; ' + sizeKb + ' &middot; ' + elapsed + 'ms</div>' +
       '</div>';
-    document.getElementById('response-body').textContent = JSON.stringify({
-      url, tier_used: tier, png_size_bytes: data.png_size_bytes, render_time_ms: elapsed,
-      viewport: w + 'x' + h, png_base64: '(truncated, ' + b64.length + ' chars)'
-    }, null, 2);
-    document.getElementById('meta-nodes').textContent = tier + ' engine';
+    document.getElementById('meta-nodes').textContent = tier;
     document.getElementById('meta-time').textContent = elapsed + 'ms';
     document.getElementById('meta-savings').textContent = sizeKb;
     lastResult = data;
