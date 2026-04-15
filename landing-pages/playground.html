@@ -348,6 +348,7 @@ a:hover{color:var(--text)}
       <div class="panel-right">
         <div class="response-tabs">
           <div class="response-tab active" onclick="showResponseTab('markdown')">Markdown</div>
+          <div class="response-tab" onclick="showResponseTab('toon')">TOON</div>
           <div class="response-tab" onclick="showResponseTab('response')">JSON</div>
           <div class="response-tab" onclick="showResponseTab('code')">Code</div>
         </div>
@@ -362,6 +363,13 @@ a:hover{color:var(--text)}
             <span>Savings: <span class="val" id="meta-savings">-</span></span>
             <span>Time: <span class="val" id="meta-time">-</span></span>
             <span>Nodes: <span class="val" id="meta-nodes">-</span></span>
+          </div>
+        </div>
+
+        <!-- TOON view -->
+        <div id="view-toon" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+          <div class="response-body" id="toon-body" style="font-family:var(--mono);font-size:.8rem;line-height:1.5;color:#79c0ff">
+            <span style="color:var(--muted)">// TOON output — Token-Oriented Object Notation</span>
           </div>
         </div>
 
@@ -421,6 +429,7 @@ function showResponseTab(view) {
   event.target.classList.add('active');
   document.getElementById('view-response').style.display = view === 'response' ? 'flex' : 'none';
   document.getElementById('view-markdown').style.display = view === 'markdown' ? 'flex' : 'none';
+  document.getElementById('view-toon').style.display = view === 'toon' ? 'flex' : 'none';
   document.getElementById('view-code').style.display = view === 'code' ? 'flex' : 'none';
 }
 
@@ -469,31 +478,28 @@ async function runExtract() {
   startLoading();
   const t0 = performance.now();
   try {
-    // Fetch both JSON and Markdown in parallel
-    const [resJson, resMd] = await Promise.all([
-      fetch('/api/parse-crfr', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          url, goal,
-          top_n: parseInt(document.getElementById('inp-topn').value) || 20,
-          output_format: 'json',
-          run_js: document.getElementById('inp-js').value === 'true',
-          follow_links: document.getElementById('inp-follow').value === 'true'
-        })
-      }),
-      fetch('/api/parse-crfr', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ url, goal, output_format: 'markdown' })
-      })
+    // Fetch JSON, Markdown, and TOON in parallel
+    const reqBody = {
+      url, goal,
+      top_n: parseInt(document.getElementById('inp-topn').value) || 20,
+      run_js: document.getElementById('inp-js').value === 'true',
+      follow_links: document.getElementById('inp-follow').value === 'true'
+    };
+    const [resJson, resMd, resToon] = await Promise.all([
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...reqBody, output_format: 'json'}) }),
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...reqBody, output_format: 'markdown'}) }),
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...reqBody, output_format: 'toon'}) })
     ]);
     if (!resJson.ok) throw new Error('Server returned ' + resJson.status);
     const data = await resJson.json();
     const mdText = await resMd.text();
+    const toonText = await resToon.text();
     const elapsed = Math.round(performance.now() - t0);
     if (data.error) throw new Error(data.error);
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
     document.getElementById('markdown-body').textContent = mdText;
+    document.getElementById('toon-body').textContent = toonText;
     document.getElementById('meta-tokens').textContent = (data.total_nodes || 0) + ' DOM \u2192 ' + (data.node_count || 0) + ' nodes';
     const savings = data.total_nodes > 0 ? ((1 - (data.node_count || 0) / data.total_nodes) * 100).toFixed(1) + '%' : '-';
     document.getElementById('meta-savings').textContent = savings;

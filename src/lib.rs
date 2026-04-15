@@ -470,6 +470,81 @@ fn count_content_chars(nodes: &[types::SemanticNode]) -> usize {
 }
 
 /// Truncate label to max_len characters, respecting UTF-8 boundaries.
+/// TOON: Token-Oriented Object Notation
+/// Minimal LLM token format. ~60% fewer tokens than Markdown, ~85% fewer than JSON.
+///
+/// Format:
+///   ~node_count|total_dom|time_ms     (header)
+///   #Page Title                       (title)
+///   ROLE_CODE NODE_ID|label|relevance[|url]  (per node)
+///
+/// Role codes: H=heading L=link T=text P=price B=button G=generic
+///             I=listitem C=cell M=main X=img D=data
+fn format_toon(
+    matched: &[(&types::SemanticNode, &resonance::ResonanceResult)],
+    title: &str,
+    total_dom: usize,
+    time_ms: u64,
+    base_url: &str,
+) -> String {
+    let mut out = String::with_capacity(matched.len() * 60 + 64);
+    out.push_str(&format!("~{}|{}|{}ms\n", matched.len(), total_dom, time_ms));
+    if !title.is_empty() {
+        out.push_str(&format!("#{}\n", clean_label(title)));
+    }
+    for (node, res) in matched {
+        let rc = match node.role.as_str() {
+            "heading" => 'H',
+            "link" => 'L',
+            "text" => 'T',
+            "price" => 'P',
+            "button" | "cta" => 'B',
+            "listitem" => 'I',
+            "cell" => 'C',
+            "main" => 'M',
+            "img" => 'X',
+            "data" => 'D',
+            _ => 'G',
+        };
+        let label = clean_label(&node.label);
+        let label = if label.len() > 200 {
+            let mut e = 200;
+            while e > 0 && !label.is_char_boundary(e) {
+                e -= 1;
+            }
+            format!("{}..", &label[..e])
+        } else {
+            label
+        };
+        let boost = if res.causal_boost > 0.01 {
+            format!("*{:.1}", res.causal_boost)
+        } else {
+            String::new()
+        };
+        let val_part = node
+            .value
+            .as_ref()
+            .map(|v| {
+                let rv = resolve_url(v, base_url);
+                if rv.len() > 80 {
+                    let mut e = 80;
+                    while e > 0 && !rv.is_char_boundary(e) {
+                        e -= 1;
+                    }
+                    format!("|{}..", &rv[..e])
+                } else {
+                    format!("|{}", rv)
+                }
+            })
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "{}{}{}|{}|{:.2}{}\n",
+            rc, node.id, boost, label, res.amplitude, val_part
+        ));
+    }
+    out
+}
+
 /// BUG-L4 fix: Resolve relative URLs to absolute using the page's base URL.
 fn resolve_url(href: &str, base_url: &str) -> String {
     // Already absolute
@@ -1504,8 +1579,11 @@ pub fn parse_crfr_from_tree_broad(
     let total_ms = now_ms().saturating_sub(start);
     let is_md =
         output_format.eq_ignore_ascii_case("markdown") || output_format.eq_ignore_ascii_case("md");
+    let is_toon = output_format.eq_ignore_ascii_case("toon");
 
-    if is_md {
+    if is_toon {
+        format_toon(&matched, &tree.title, total_dom_nodes, total_ms, url)
+    } else if is_md {
         let mut md = String::with_capacity(matched.len() * 120);
         if !tree.title.is_empty() {
             md.push_str(&format!("# {}\n\n", tree.title));
@@ -1674,8 +1752,11 @@ pub fn parse_crfr_from_tree_js(
     let total_ms = now_ms().saturating_sub(start);
     let is_md =
         output_format.eq_ignore_ascii_case("markdown") || output_format.eq_ignore_ascii_case("md");
+    let is_toon = output_format.eq_ignore_ascii_case("toon");
 
-    if is_md {
+    if is_toon {
+        format_toon(&matched, &tree.title, total_dom_nodes, total_ms, url)
+    } else if is_md {
         let mut md = String::with_capacity(matched.len() * 120);
         if !tree.title.is_empty() {
             md.push_str(&format!("# {}\n\n", tree.title));
