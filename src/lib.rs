@@ -1702,12 +1702,26 @@ pub fn parse_crfr_from_tree_js(
     output_format: &str,
     js_eval_ran: bool,
 ) -> String {
+    parse_crfr_from_tree_js_user(tree, goal, url, top_n, output_format, js_eval_ran, 0)
+}
+
+/// CRFR with per-user causal weights merged in.
+pub fn parse_crfr_from_tree_js_user(
+    tree: &SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    output_format: &str,
+    js_eval_ran: bool,
+    user_id: i64,
+) -> String {
     let start = now_ms();
     let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
 
     let field_start = now_ms();
     let (mut field, cache_hit) =
-        resonance::get_or_build_field_with_variant(&tree.nodes, url, js_eval_ran);
+        resonance::get_or_build_field_for_user(&tree.nodes, url, js_eval_ran, user_id);
+    let is_user_query = user_id > 0;
     let field_ms = now_ms().saturating_sub(field_start);
 
     let prop_start = now_ms();
@@ -1739,7 +1753,9 @@ pub fn parse_crfr_from_tree_js(
     let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
     let chars_out: u64 = matched.iter().map(|(n, _)| n.label.len() as u64).sum();
     field.record_token_savings(chars_in, chars_out);
-    resonance::save_field(&field);
+    if !is_user_query {
+        resonance::save_field(&field);
+    }
 
     let total_ms = now_ms().saturating_sub(start);
     let is_md =

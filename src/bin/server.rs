@@ -79,6 +79,9 @@ struct ParseCrfrRequest {
     /// with extracted content. Default: true. Set false to disable.
     #[serde(default = "default_true")]
     follow_links: bool,
+    /// User ID for per-user causal weight personalization.
+    #[serde(default)]
+    user_id: i64,
 }
 
 fn default_crfr_top_n() -> u32 {
@@ -1120,13 +1123,28 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
     (StatusCode::OK, result_json)
 }
 
-async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoResponse {
+async fn parse_crfr_handler(
+    headers: HeaderMap,
+    Json(req): Json<ParseCrfrRequest>,
+) -> impl IntoResponse {
     let follow_links = req.follow_links;
     let goal = req.goal;
     let url = req.url;
     let top_n = req.top_n;
     let run_js = req.run_js;
     let output_format = req.output_format;
+    // Resolve user_id: prefer request body, fall back to session token
+    let user_id = if req.user_id > 0 {
+        req.user_id
+    } else {
+        headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| v.starts_with("Bearer "))
+            .and_then(|v| aether_agent::auth::validate_session_token(&v[7..]))
+            .map(|(_key_id, uid)| uid)
+            .unwrap_or(0)
+    };
 
     // Resolve HTML: use provided html, or fetch from url
     let html = if let Some(h) = req.html {
@@ -1233,13 +1251,14 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
 
     // Pass 4: Kör CRFR på (potentiellt berikad) tree
     let result = tokio::task::spawn_blocking(move || {
-        aether_agent::parse_crfr_from_tree_js(
+        aether_agent::parse_crfr_from_tree_js_user(
             &tree,
             &goal_clone,
             &url_clone,
             top_n,
             &fmt_clone,
             run_js,
+            user_id,
         )
     })
     .await

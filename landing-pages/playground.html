@@ -742,11 +742,13 @@ async function runExtract() {
   const t0 = performance.now();
   try {
     // Fetch JSON, Markdown, and TOON in parallel
+    const u = getPlaygroundUser();
     const reqBody = {
       url, goal,
       top_n: parseInt(document.getElementById('inp-topn').value) || 20,
       run_js: document.getElementById('inp-js').value === 'true',
-      follow_links: document.getElementById('inp-follow').value === 'true'
+      follow_links: document.getElementById('inp-follow').value === 'true',
+      user_id: u ? u.id : 0
     };
     const [resJson, resMd, resToon] = await Promise.all([
       fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({...reqBody, output_format: 'json'}) }),
