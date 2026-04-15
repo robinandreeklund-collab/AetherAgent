@@ -458,9 +458,14 @@ a:hover{color:var(--text)}
         <!-- Feedback section — per-node selection -->
         <div id="feedback-section" style="display:none;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
           <div style="font-size:.8rem;font-weight:600;color:var(--text);margin-bottom:.15rem">Teach slaash.learn</div>
-          <div style="font-size:.72rem;color:var(--muted);margin-bottom:.75rem">Select the nodes that contained the correct answer. This teaches CRFR to rank them higher next time.</div>
-          <div id="feedback-nodes" style="display:flex;flex-direction:column;gap:.35rem;max-height:200px;overflow-y:auto"></div>
-          <button class="btn-sm" style="margin-top:.75rem;background:var(--green)" onclick="sendFeedback()">Send feedback</button>
+          <div id="feedback-login-prompt" style="display:none;font-size:.82rem;color:var(--muted);margin-bottom:.75rem;padding:.75rem;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px">
+            <a href="/keys" style="color:var(--accent);font-weight:600">Sign in</a> to teach your own model. Anonymous feedback is disabled to protect global weights.
+          </div>
+          <div id="feedback-form">
+            <div style="font-size:.72rem;color:var(--muted);margin-bottom:.75rem">Select the nodes that contained the correct answer. This trains <strong style="color:var(--text)">your personal model</strong> — it won't affect other users.</div>
+            <div id="feedback-nodes" style="display:flex;flex-direction:column;gap:.35rem;max-height:200px;overflow-y:auto"></div>
+            <button class="btn-sm" style="margin-top:.75rem;background:var(--green)" onclick="sendFeedback()">Send feedback</button>
+          </div>
           <div id="feedback-msg" style="font-size:.72rem;color:var(--muted);margin-top:.35rem"></div>
         </div>
       </div>
@@ -646,6 +651,10 @@ async function runExtract() {
         fbDiv.appendChild(el);
       });
       document.getElementById('feedback-section').style.display = '';
+      // Show login prompt or feedback form based on session
+      const loggedIn = !!getPlaygroundUser();
+      document.getElementById('feedback-login-prompt').style.display = loggedIn ? 'none' : '';
+      document.getElementById('feedback-form').style.display = loggedIn ? '' : 'none';
     }
     updateCodePreview();
   } catch(err) {
@@ -998,6 +1007,12 @@ async function runExplore() {
 }
 
 async function runLearn() {
+  const user = getPlaygroundUser();
+  if (!user) {
+    document.getElementById('response-body').textContent = '// Sign in at /keys first to use slaash.learn';
+    document.getElementById('markdown-body').textContent = 'Sign in required. Go to /keys to create an account.\n\nAnonymous feedback is disabled to protect global weights.';
+    return;
+  }
   const url = document.getElementById('inp-learn-url').value.trim();
   const goal = document.getElementById('inp-learn-goal').value.trim();
   const idsStr = document.getElementById('inp-learn-ids').value.trim();
@@ -1005,11 +1020,11 @@ async function runLearn() {
   const ids = idsStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
   startLoading();
   try {
-    const res = await fetch('/api/crfr-feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, goal, successful_node_ids: ids }) });
+    const res = await fetch('/api/crfr-feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, goal, successful_node_ids: ids, user_id: user.id }) });
     const data = await res.json();
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('markdown-body').textContent = data.status === 'ok' ? 'Feedback sent! Nodes #' + ids.join(', #') + ' will rank higher.' : JSON.stringify(data);
+    document.getElementById('markdown-body').textContent = data.status === 'ok' ? 'Feedback sent to your personal model! Nodes #' + ids.join(', #') + ' will rank higher.' : JSON.stringify(data);
   } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
   finally { stopLoading(); }
 }
@@ -1039,6 +1054,11 @@ async function runInspect() {
 
 async function sendFeedback() {
   if (!lastUrl) return;
+  const user = getPlaygroundUser();
+  if (!user) {
+    document.getElementById('feedback-msg').textContent = 'Sign in at /keys first to use feedback.';
+    return;
+  }
   const checkboxes = document.querySelectorAll('#feedback-nodes input[type=checkbox]:checked');
   const ids = Array.from(checkboxes).map(cb => parseInt(cb.value));
   if (ids.length === 0) {
@@ -1048,10 +1068,10 @@ async function sendFeedback() {
   try {
     await fetch('/api/crfr-feedback', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ url: lastUrl, goal: lastGoal, successful_node_ids: ids })
+      body: JSON.stringify({ url: lastUrl, goal: lastGoal, successful_node_ids: ids, user_id: user.id })
     });
     document.getElementById('feedback-msg').textContent =
-      'Sent! Nodes #' + ids.join(', #') + ' will rank higher on future queries for this URL.';
+      'Sent! Nodes #' + ids.join(', #') + ' will rank higher in your personal model.';
     document.getElementById('feedback-msg').style.color = 'var(--green)';
   } catch(e) {
     document.getElementById('feedback-msg').textContent = 'Feedback failed: ' + e.message;
@@ -1060,6 +1080,13 @@ async function sendFeedback() {
 
 function startPlayground() {
   document.getElementById('welcome-panel').classList.add('hidden');
+}
+
+function getPlaygroundUser() {
+  try {
+    const saved = localStorage.getItem('slaash_user');
+    return saved ? JSON.parse(saved) : null;
+  } catch(e) { return null; }
 }
 
 // Init
