@@ -167,17 +167,24 @@ a:hover{color:var(--text)}
         <!-- Extract form (default) -->
         <div id="form-extract">
           <div class="examples">
-            <span class="example-chip" onclick="fillExample('https://news.ycombinator.com','top tech stories programming articles')">HN: top stories</span>
-            <span class="example-chip" onclick="fillExample('https://www.nasa.gov','space exploration missions Artemis astronauts')">NASA: missions</span>
-            <span class="example-chip" onclick="fillExample('https://docs.python.org/3/','python documentation tutorial reference library')">Python docs</span>
+            <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/COVID-19_vaccine','COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials')">Wikipedia: COVID-19 vaccine</span>
+            <span class="example-chip" onclick="fillExample('https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/','styrränta ränta procent Riksbanken penningpolitik reporänta 2026 interest rate')">Riksbanken: interest rate</span>
+            <span class="example-chip" onclick="fillExample('https://coinmarketcap.com/currencies/bitcoin/','bitcoin price USD current BTC value market cap 24h change crypto')">Bitcoin price</span>
+            <span class="example-chip" onclick="fillExample('https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array','branch prediction sorted array unsorted performance railroad junction misprediction flush pipeline penalty')">SO: sorted array</span>
+            <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/Gothenburg','population inhabitants Gothenburg Göteborg city urban area people')">Gothenburg population</span>
+            <span class="example-chip" onclick="fillExample('https://www.python.org/downloads/','latest Python version release download stable current 2026')">Python: latest version</span>
+            <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/Artificial_Intelligence_Act','EU AI Act regulation artificial intelligence law European Union rules 2024')">EU AI Act</span>
+            <span class="example-chip" onclick="fillExample('https://www.nasa.gov/mars/','NASA Mars mission latest news rover discovery finding surface science')">NASA: Mars mission</span>
+            <span class="example-chip" onclick="fillExample('https://docs.python.org/3/','Python documentation version release latest stable tutorial reference library')">Python docs</span>
+            <span class="example-chip" onclick="fillExample('https://climate.nasa.gov/vital-signs/global-temperature/','global temperature CO2 climate change sea level rise record anomaly celsius latest data')">NASA: climate data</span>
           </div>
           <div class="field">
             <label>URL</label>
-            <input type="url" id="inp-url" placeholder="https://example.com" value="https://news.ycombinator.com">
+            <input type="url" id="inp-url" placeholder="https://example.com" value="https://en.wikipedia.org/wiki/COVID-19_vaccine">
           </div>
           <div class="field">
             <label>Goal</label>
-            <input type="text" id="inp-goal" placeholder="What are you looking for?" value="top tech stories programming articles">
+            <input type="text" id="inp-goal" placeholder="What are you looking for?" value="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">
           </div>
           <span class="advanced-toggle" onclick="this.nextElementSibling.classList.toggle('visible')">&#9660; Advanced options</span>
           <div class="advanced-opts">
