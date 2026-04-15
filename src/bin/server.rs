@@ -7856,9 +7856,7 @@ fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
 // ─── OAuth 2.1 Endpoints (MCP / Claude Connectors) ─────────────────────
 
 /// GET /.well-known/oauth-authorization-server
-async fn oauth_metadata_handler(
-    req: axum::extract::Request,
-) -> impl IntoResponse {
+async fn oauth_metadata_handler(req: axum::extract::Request) -> impl IntoResponse {
     let host = req
         .headers()
         .get("host")
@@ -7879,9 +7877,7 @@ async fn oauth_metadata_handler(
 }
 
 /// GET /.well-known/oauth-protected-resource
-async fn oauth_protected_resource_handler(
-    req: axum::extract::Request,
-) -> impl IntoResponse {
+async fn oauth_protected_resource_handler(req: axum::extract::Request) -> impl IntoResponse {
     let host = req
         .headers()
         .get("host")
@@ -7902,9 +7898,7 @@ async fn oauth_protected_resource_handler(
 }
 
 /// POST /oauth/register — Dynamic Client Registration (RFC 7591)
-async fn oauth_register_handler(
-    Json(req): Json<serde_json::Value>,
-) -> impl IntoResponse {
+async fn oauth_register_handler(Json(req): Json<serde_json::Value>) -> impl IntoResponse {
     let client_name = req["client_name"].as_str().unwrap_or("unknown");
     let redirect_uris: Vec<String> = req["redirect_uris"]
         .as_array()
@@ -7930,10 +7924,7 @@ async fn oauth_authorize_handler(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let client_id = params.get("client_id").map(|s| s.as_str()).unwrap_or("");
-    let redirect_uri = params
-        .get("redirect_uri")
-        .map(|s| s.as_str())
-        .unwrap_or("");
+    let redirect_uri = params.get("redirect_uri").map(|s| s.as_str()).unwrap_or("");
     let state_param = params.get("state").map(|s| s.as_str()).unwrap_or("");
 
     if client_id.is_empty() || redirect_uri.is_empty() {
@@ -7962,9 +7953,7 @@ async fn oauth_authorize_handler(
 }
 
 /// POST /oauth/token — Token exchange
-async fn oauth_token_handler(
-    body: String,
-) -> impl IntoResponse {
+async fn oauth_token_handler(body: String) -> impl IntoResponse {
     // Accept both JSON and form-urlencoded (OAuth spec uses form)
     let params: HashMap<String, String> = if body.starts_with('{') {
         serde_json::from_str(&body).unwrap_or_default()

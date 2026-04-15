@@ -731,15 +731,10 @@ pub fn oauth_authorize(
     let mut guard = oauth_state();
     let ostate = guard.as_mut().unwrap();
 
-    let client = ostate
-        .clients
-        .get(client_id)
-        .ok_or("Unknown client_id")?;
+    let client = ostate.clients.get(client_id).ok_or("Unknown client_id")?;
 
     // Validate redirect_uri
-    if !client.redirect_uris.is_empty()
-        && !client.redirect_uris.iter().any(|u| u == redirect_uri)
-    {
+    if !client.redirect_uris.is_empty() && !client.redirect_uris.iter().any(|u| u == redirect_uri) {
         return Err("redirect_uri mismatch".to_string());
     }
 
@@ -760,11 +755,7 @@ pub fn oauth_authorize(
     );
 
     // Build redirect URL
-    let sep = if redirect_uri.contains('?') {
-        "&"
-    } else {
-        "?"
-    };
+    let sep = if redirect_uri.contains('?') { "&" } else { "?" };
     let mut url = format!("{}{sep}code={code}", redirect_uri);
     if !state_param.is_empty() {
         url.push_str(&format!("&state={state_param}"));
@@ -787,19 +778,13 @@ pub fn oauth_token(
     let ostate = guard.as_mut().unwrap();
 
     // Validate client credentials
-    let client = ostate
-        .clients
-        .get(client_id)
-        .ok_or("invalid_client")?;
+    let client = ostate.clients.get(client_id).ok_or("invalid_client")?;
     if client.client_secret != client_secret {
         return Err("invalid_client".to_string());
     }
 
     // Validate and consume auth code
-    let auth_code = ostate
-        .auth_codes
-        .remove(code)
-        .ok_or("invalid_grant")?;
+    let auth_code = ostate.auth_codes.remove(code).ok_or("invalid_grant")?;
     if auth_code.client_id != client_id {
         return Err("invalid_grant".to_string());
     }
