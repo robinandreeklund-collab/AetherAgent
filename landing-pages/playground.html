@@ -231,6 +231,48 @@ a:hover{color:var(--text)}
           <button class="btn-run" onclick="runAct()">Run slaash.act</button>
         </div>
 
+        <!-- Crawl form -->
+        <div id="form-crawl" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="fillCrawl('https://docs.python.org/3/','async programming tutorial guide')">Python async guide</span>
+            <span class="example-chip" onclick="fillCrawl('https://doc.rust-lang.org/book/','ownership borrowing lifetimes')">Rust ownership</span>
+          </div>
+          <div class="field"><label>Start URL</label><input type="url" id="inp-crawl-url" placeholder="https://docs.example.com" value="https://docs.python.org/3/"></div>
+          <div class="field"><label>Goal</label><input type="text" id="inp-crawl-goal" placeholder="What information to gather?" value="async programming tutorial guide"></div>
+          <div class="field-row">
+            <div class="field"><label>Max pages</label><input type="number" id="inp-crawl-pages" value="5" min="1" max="20"></div>
+            <div class="field"><label>Max depth</label><input type="number" id="inp-crawl-depth" value="2" min="1" max="5"></div>
+            <div class="field"><label>Top links/page</label><input type="number" id="inp-crawl-topk" value="3" min="1" max="10"></div>
+          </div>
+          <button class="btn-run" onclick="runCrawl()">Run slaash.crawl</button>
+        </div>
+
+        <!-- Stream form -->
+        <div id="form-stream" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="fillStream('https://en.wikipedia.org/wiki/COVID-19_vaccine','vaccine side effects efficacy safety')">Wikipedia: COVID-19</span>
+            <span class="example-chip" onclick="fillStream('https://en.wikipedia.org/wiki/Gothenburg','population inhabitants area people')">Wikipedia: Gothenburg</span>
+          </div>
+          <div class="field"><label>URL</label><input type="url" id="inp-stream-url" placeholder="https://example.com" value="https://en.wikipedia.org/wiki/COVID-19_vaccine"></div>
+          <div class="field"><label>Goal</label><input type="text" id="inp-stream-goal" placeholder="What to stream?" value="vaccine side effects efficacy safety"></div>
+          <div class="field-row">
+            <div class="field"><label>Max nodes</label><input type="number" id="inp-stream-max" value="30" min="5" max="100"></div>
+            <div class="field"><label>Min relevance</label><input type="number" id="inp-stream-rel" value="0.1" min="0" max="1" step="0.05"></div>
+          </div>
+          <button class="btn-run" onclick="runStream()">Run slaash.stream</button>
+        </div>
+
+        <!-- Plan form -->
+        <div id="form-plan" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Buy the cheapest flight from Stockholm to London'">Book flight</span>
+            <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Find and compare prices for iPhone 17 Pro across 3 stores'">Compare prices</span>
+          </div>
+          <div class="field"><label>Goal</label><input type="text" id="inp-plan-goal" placeholder="What do you want to accomplish?" value="Buy the cheapest flight from Stockholm to London"></div>
+          <div class="field"><label>Context URL (optional)</label><input type="url" id="inp-plan-url" placeholder="https://starting-page.com"></div>
+          <button class="btn-run" onclick="runPlan()">Run slaash.plan</button>
+        </div>
+
         <!-- Feedback section — per-node selection -->
         <div id="feedback-section" style="display:none;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
           <div style="font-size:.8rem;font-weight:600;color:var(--text);margin-bottom:.15rem">Teach slaash.learn</div>
@@ -297,9 +339,12 @@ function switchTab(tab) {
   const links = document.querySelectorAll('.sidebar-link');
   links.forEach(l => { if(l.textContent.trim().toLowerCase().startsWith(tab)) l.classList.add('active'); });
   document.getElementById('toolbar-title').textContent = 'slaash.' + tab;
-  ['form-extract','form-search','form-act'].forEach(id => document.getElementById(id).style.display = 'none');
-  const formId = 'form-' + (tab === 'extract' || tab === 'crawl' || tab === 'stream' || tab === 'diff' || tab === 'render' || tab === 'plan' ? 'extract' : tab);
-  document.getElementById(formId).style.display = '';
+  const allForms = ['form-extract','form-search','form-act','form-crawl','form-stream','form-plan','form-diff','form-render','form-links','form-explore','form-learn','form-inspect'];
+  allForms.forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
+  const formId = 'form-' + tab;
+  const formEl = document.getElementById(formId);
+  if (formEl) formEl.style.display = '';
+  else document.getElementById('form-extract').style.display = ''; // fallback
   document.getElementById('feedback-section').style.display = 'none';
   updateCodePreview();
 }
@@ -452,6 +497,99 @@ async function runAct() {
     const data = await res.json();
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+function fillCrawl(url, goal) {
+  document.getElementById('inp-crawl-url').value = url;
+  document.getElementById('inp-crawl-goal').value = goal;
+}
+function fillStream(url, goal) {
+  document.getElementById('inp-stream-url').value = url;
+  document.getElementById('inp-stream-goal').value = goal;
+}
+
+async function runCrawl() {
+  const url = document.getElementById('inp-crawl-url').value.trim();
+  const goal = document.getElementById('inp-crawl-goal').value.trim();
+  if (!url || !goal) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/adaptive-crawl', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url, goal,
+        max_pages: parseInt(document.getElementById('inp-crawl-pages').value) || 5,
+        max_depth: parseInt(document.getElementById('inp-crawl-depth').value) || 2,
+        top_k_links: parseInt(document.getElementById('inp-crawl-topk').value) || 3,
+        top_n_per_page: 10,
+      })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('markdown-body').textContent = JSON.stringify(data, null, 2);
+    if (data.pages) {
+      document.getElementById('meta-nodes').textContent = data.pages.length + ' pages';
+      document.getElementById('meta-time').textContent = (data.total_time_ms || 0) + 'ms';
+    }
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+async function runStream() {
+  const url = document.getElementById('inp-stream-url').value.trim();
+  const goal = document.getElementById('inp-stream-goal').value.trim();
+  if (!url || !goal) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/stream-parse', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url, goal,
+        max_nodes: parseInt(document.getElementById('inp-stream-max').value) || 30,
+        min_relevance: parseFloat(document.getElementById('inp-stream-rel').value) || 0.1,
+      })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('markdown-body').textContent = JSON.stringify(data, null, 2);
+    if (data.token_savings_ratio) {
+      document.getElementById('meta-savings').textContent = (data.token_savings_ratio * 100).toFixed(1) + '%';
+    }
+    document.getElementById('meta-nodes').textContent = (data.nodes_emitted || 0) + ' nodes';
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+async function runPlan() {
+  const goal = document.getElementById('inp-plan-goal').value.trim();
+  if (!goal) return;
+  const url = document.getElementById('inp-plan-url').value.trim();
+  startLoading();
+  try {
+    const body = { goal };
+    if (url) body.url = url;
+    const res = await fetch('/api/compile-goal', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    // Format plan as readable markdown
+    let md = '# Plan: ' + goal + '\n\n';
+    if (data.steps) {
+      data.steps.forEach((s, i) => { md += (i+1) + '. **' + (s.action||s.description||'Step') + '**\n'; });
+    } else if (data.plan) {
+      md = JSON.stringify(data.plan, null, 2);
+    }
+    document.getElementById('markdown-body').textContent = md;
   } catch(err) {
     document.getElementById('response-body').textContent = '// Error: ' + err.message;
   } finally { stopLoading(); }
