@@ -166,23 +166,30 @@ a:hover{color:var(--text)}
   <div class="sidebar">
     <div class="sidebar-section">
       <div class="sidebar-label">Playground</div>
-      <div class="sidebar-link active" onclick="switchTab('extract')"><span class="sidebar-icon">&#9889;</span> Extract</div>
-      <div class="sidebar-link" onclick="switchTab('search')"><span class="sidebar-icon">&#128269;</span> Search</div>
-      <div class="sidebar-link" onclick="switchTab('act')"><span class="sidebar-icon">&#9654;</span> Act</div>
+      <div class="sidebar-link active" onclick="switchTab('extract')"><span class="sidebar-icon" style="color:var(--accent)">/</span> Extract</div>
+      <div class="sidebar-link" onclick="switchTab('search')"><span class="sidebar-icon" style="color:var(--accent)">?</span> Search</div>
+      <div class="sidebar-link" onclick="switchTab('act')"><span class="sidebar-icon" style="color:#22c55e">&gt;</span> Act</div>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-label">Advanced</div>
-      <div class="sidebar-link" onclick="switchTab('crawl')"><span class="sidebar-icon">&#128279;</span> Crawl</div>
-      <div class="sidebar-link" onclick="switchTab('stream')"><span class="sidebar-icon">&#9776;</span> Stream</div>
-      <div class="sidebar-link" onclick="switchTab('plan')"><span class="sidebar-icon">&#128203;</span> Plan</div>
-      <div class="sidebar-link" onclick="switchTab('diff')"><span class="sidebar-icon">&#8800;</span> Diff</div>
-      <div class="sidebar-link" onclick="switchTab('render')"><span class="sidebar-icon">&#128247;</span> Render</div>
+      <div class="sidebar-link" onclick="switchTab('crawl')"><span class="sidebar-icon" style="color:#8b5cf6">&raquo;</span> Crawl</div>
+      <div class="sidebar-link" onclick="switchTab('stream')"><span class="sidebar-icon" style="color:#22c55e">&darr;</span> Stream</div>
+      <div class="sidebar-link" onclick="switchTab('plan')"><span class="sidebar-icon" style="color:#f59e0b">&#x25A3;</span> Plan</div>
+      <div class="sidebar-link" onclick="switchTab('diff')"><span class="sidebar-icon" style="color:#ef4444">&Delta;</span> Diff</div>
+      <div class="sidebar-link" onclick="switchTab('render')"><span class="sidebar-icon" style="color:var(--muted)">&lt;/&gt;</span> Render</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Discover</div>
+      <div class="sidebar-link" onclick="switchTab('links')"><span class="sidebar-icon" style="color:var(--accent)">&harr;</span> Links</div>
+      <div class="sidebar-link" onclick="switchTab('explore')"><span class="sidebar-icon" style="color:#f59e0b">~</span> Explore</div>
+      <div class="sidebar-link" onclick="switchTab('learn')"><span class="sidebar-icon" style="color:#22c55e">+</span> Learn</div>
+      <div class="sidebar-link" onclick="switchTab('inspect')"><span class="sidebar-icon" style="color:#ef4444">!</span> Inspect</div>
     </div>
     <div class="sidebar-section">
       <div class="sidebar-label">Account</div>
-      <div class="sidebar-link" onclick="window.location='/keys'"><span class="sidebar-icon">&#128273;</span> API Keys</div>
-      <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon">&#128200;</span> Usage</div>
-      <div class="sidebar-link"><span class="sidebar-icon">&#9881;</span> Settings</div>
+      <div class="sidebar-link" onclick="window.location='/keys'"><span class="sidebar-icon" style="color:var(--muted)">/&middot;</span> API Keys</div>
+      <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon" style="color:var(--muted)">&equiv;</span> Usage</div>
+      <div class="sidebar-link"><span class="sidebar-icon" style="color:var(--muted)">*</span> Settings</div>
     </div>
   </div>
 
@@ -196,32 +203,32 @@ a:hover{color:var(--text)}
 
         <div class="welcome-grid">
           <div class="welcome-card">
-            <div class="icon">&#9889;</div>
+            <div class="icon" style="color:var(--accent)">/</div>
             <h3>Extract</h3>
             <p>URL + question = answer. 99% token reduction vs raw HTML.</p>
           </div>
           <div class="welcome-card">
-            <div class="icon">&#128269;</div>
+            <div class="icon" style="color:var(--accent)">?</div>
             <h3>Search</h3>
             <p>Web search + deep parse. Structured results with snippets.</p>
           </div>
           <div class="welcome-card">
-            <div class="icon">&#128279;</div>
+            <div class="icon" style="color:#8b5cf6">&raquo;</div>
             <h3>Crawl</h3>
             <p>Multi-page intelligent crawl. Thompson Sampling link selection.</p>
           </div>
           <div class="welcome-card">
-            <div class="icon">&#9654;</div>
+            <div class="icon" style="color:#22c55e">&gt;</div>
             <h3>Act</h3>
             <p>Click buttons, fill forms, extract structured data.</p>
           </div>
           <div class="welcome-card">
-            <div class="icon">&#128203;</div>
+            <div class="icon" style="color:#f59e0b">&#x25A3;</div>
             <h3>Plan</h3>
             <p>Decompose goals into step-by-step action plans.</p>
           </div>
           <div class="welcome-card">
-            <div class="icon">&#9776;</div>
+            <div class="icon" style="color:#22c55e">&darr;</div>
             <h3>Stream</h3>
             <p>Token-efficient streaming for massive pages. 95-99% savings.</p>
           </div>
