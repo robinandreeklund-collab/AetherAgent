@@ -1994,8 +1994,10 @@ pub fn crfr_feedback_user(
     successful_node_ids_json: &str,
     user_id: i64,
 ) -> String {
-    if user_id == 0 {
-        return crfr_feedback(url, goal, successful_node_ids_json);
+    // user_id=0 is rejected — users must never train global weights
+    if user_id <= 0 {
+        return r#"{"status":"error","message":"user_id required. Anonymous feedback disabled."}"#
+            .to_string();
     }
     let ids: Vec<u32> = serde_json::from_str(successful_node_ids_json).unwrap_or_default();
     if ids.is_empty() {

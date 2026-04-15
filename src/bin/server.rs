@@ -96,6 +96,8 @@ struct CrfrFeedbackRequest {
     url: String,
     goal: String,
     successful_node_ids: Vec<u32>,
+    #[serde(default)]
+    user_id: i64,
 }
 
 #[derive(Deserialize)]
@@ -1548,13 +1550,21 @@ fn should_follow_link(label: &str) -> bool {
 async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl IntoResponse {
     let url = req.url;
     let goal = req.goal;
+    let user_id = req.user_id;
     let ids_json =
         serde_json::to_string(&req.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
 
-    let result =
-        tokio::task::spawn_blocking(move || aether_agent::crfr_feedback(&url, &goal, &ids_json))
-            .await
-            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    // Always use per-user feedback. user_id=0 is rejected (no anonymous global training).
+    let result = if user_id <= 0 {
+        r#"{"status":"error","message":"user_id required. Sign in at /keys to use feedback."}"#
+            .to_string()
+    } else {
+        tokio::task::spawn_blocking(move || {
+            aether_agent::crfr_feedback_user(&url, &goal, &ids_json, user_id)
+        })
+        .await
+        .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string())
+    };
 
     (StatusCode::OK, result)
 }
@@ -6114,6 +6124,7 @@ async fn mcp_dispatch_tool(
         "crfr_feedback" => {
             let url = args["url"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
+            let user_id = args["user_id"].as_i64().unwrap_or(0);
             let ids: Vec<u32> = args["successful_node_ids"]
                 .as_array()
                 .map(|arr| {
@@ -6126,11 +6137,16 @@ async fn mcp_dispatch_tool(
             let ids_json = serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string());
             let url_str = url.to_string();
             let goal_str = goal.to_string();
-            let result = tokio::task::spawn_blocking(move || {
-                aether_agent::crfr_feedback(&url_str, &goal_str, &ids_json)
-            })
-            .await
-            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+            // Always use per-user feedback — never train global weights from user input
+            let result = if user_id <= 0 {
+                r#"{"status":"error","message":"user_id required for feedback. Global weights cannot be trained by users."}"#.to_string()
+            } else {
+                tokio::task::spawn_blocking(move || {
+                    aether_agent::crfr_feedback_user(&url_str, &goal_str, &ids_json, user_id)
+                })
+                .await
+                .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string())
+            };
 
             text_ok(result)
         }

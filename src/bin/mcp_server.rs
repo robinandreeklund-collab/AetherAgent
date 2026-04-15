@@ -147,6 +147,9 @@ struct CrfrFeedbackParams {
     goal: String,
     /// Array of node IDs that contained the correct answer
     successful_node_ids: Vec<u32>,
+    /// User ID for isolated feedback (required — no anonymous global training)
+    #[serde(default)]
+    user_id: i64,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -730,7 +733,8 @@ impl AetherMcpServer {
     fn crfr_feedback(&self, Parameters(params): Parameters<CrfrFeedbackParams>) -> String {
         let ids_json =
             serde_json::to_string(&params.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
-        aether_agent::crfr_feedback(&params.url, &params.goal, &ids_json)
+        // Always per-user — never train global weights from user input
+        aether_agent::crfr_feedback_user(&params.url, &params.goal, &ids_json, params.user_id)
     }
 
     #[tool(
@@ -1908,12 +1912,9 @@ async fn follow_relevant_links(
                     content.push(n);
                 }
                 if !content.is_empty() {
-                    // Phase 3.1: Auto-feedback — teach CRFR on the target page that
-                    // these nodes were useful. Improves future queries on same URL.
-                    if !successful_ids.is_empty() {
-                        let ids_json = serde_json::to_string(&successful_ids).unwrap_or_default();
-                        aether_agent::crfr_feedback(&fetched.final_url, goal, &ids_json);
-                    }
+                    // Auto-feedback disabled — global weights must not be
+                    // trained by user activity. Per-user feedback only via
+                    // explicit crfr_feedback calls with user_id.
                     replacements.insert(*idx, content);
                     followed_urls.push(format!("{}: {}", label, fetch_url));
                 }
@@ -3267,7 +3268,8 @@ fn dispatch_tool_sync(_server: &AetherMcpServer, name: &str, args: &serde_json::
         }
         "crfr_feedback" => {
             let ids_json = json_str("successful_node_ids");
-            aether_agent::crfr_feedback(s("url"), s("goal"), &ids_json)
+            let user_id = params["user_id"].as_i64().unwrap_or(0);
+            aether_agent::crfr_feedback_user(s("url"), s("goal"), &ids_json, user_id)
         }
         "crfr_clear" => {
             let url = s("url");
