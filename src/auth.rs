@@ -801,7 +801,24 @@ pub fn oauth_authorize(
     let mut guard = oauth_state();
     let ostate = guard.as_mut().unwrap();
 
-    let _client = ostate.clients.get(client_id).ok_or("Unknown client_id")?;
+    // Auto-register unknown clients (Claude Connectors skips /oauth/register)
+    if !ostate.clients.contains_key(client_id) {
+        eprintln!(
+            "[OAUTH] Authorize: auto-registering unknown client_id={}",
+            client_id
+        );
+        let now = now_secs() as i64;
+        ostate.clients.insert(
+            client_id.to_string(),
+            OAuthClient {
+                client_id: client_id.to_string(),
+                client_secret: String::new(), // no secret for auto-registered
+                client_name: "auto-registered".to_string(),
+                redirect_uris: vec![redirect_uri.to_string()],
+                created_at: now,
+            },
+        );
+    }
 
     eprintln!(
         "[OAUTH] Authorize: client_id={}, redirect_uri={}, state={}",
@@ -861,9 +878,9 @@ pub fn oauth_token(
     let mut guard = oauth_state();
     let ostate = guard.as_mut().unwrap();
 
-    // Validate client credentials
+    // Validate client credentials (skip secret check for auto-registered clients)
     let client = ostate.clients.get(client_id).ok_or("invalid_client")?;
-    if client.client_secret != client_secret {
+    if !client.client_secret.is_empty() && client.client_secret != client_secret {
         return Err("invalid_client".to_string());
     }
 
