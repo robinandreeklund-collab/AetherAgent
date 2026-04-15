@@ -19,6 +19,9 @@ a:hover{color:var(--text)}
 .stat-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;text-align:center}
 .stat-card .num{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
 .stat-card .label{font-size:.78rem;color:var(--muted);margin-top:.25rem}
+select option{background:var(--surface);color:var(--text)}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
 </style>
 </head>
 <body>
@@ -46,7 +49,7 @@ a:hover{color:var(--text)}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2rem">
       <h1 style="font-size:1.75rem;font-weight:700">Usage Dashboard</h1>
       <div style="display:flex;gap:.75rem;align-items:center">
-        <select id="period" onchange="loadUsage()" style="appearance:none;background:var(--bg) url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E\") no-repeat right .7rem center;background-size:10px;padding:.45rem 2rem .45rem .75rem;border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.8rem;cursor:pointer">
+        <select id="period" onchange="loadUsage()" style="appearance:none;background:var(--surface) url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E&quot;) no-repeat right .7rem center;background-size:10px;padding:.5rem 2.2rem .5rem .85rem;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:var(--text);font-size:.82rem;font-family:var(--font);cursor:pointer;outline:none">
           <option value="1">Last hour</option>
           <option value="24" selected>Last 24 hours</option>
           <option value="168">Last 7 days</option>
