@@ -6546,28 +6546,8 @@ async fn mcp_get(
         return axum::response::Html(MCP_DASHBOARD_HTML).into_response();
     }
 
-    // SSE stream: allow without auth for Claude Connectors discovery
-    let _auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    // Note: Claude Connectors connects to GET /mcp without auth for SSE notifications.
+    // SSE stream: no auth required for Claude Connectors discovery.
     // Auth is enforced at tools/call level, not at SSE connection level.
-    if false {
-        // Auth check disabled — kept as reference for future paid tiers
-        return (
-            StatusCode::UNAUTHORIZED,
-            "API key required. Set Authorization: Bearer sk-... header.",
-        )
-            .into_response();
-    }
-    if aether_agent::auth::validate_api_key(api_key).is_none() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            "Invalid API key. Get one at https://www.slaash.ai/keys",
-        )
-            .into_response();
-    }
 
     // MCP-klient / EventSource → SSE-ström med broadcast-events
     let session_id = headers
