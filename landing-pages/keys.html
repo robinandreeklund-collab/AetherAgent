@@ -98,6 +98,33 @@ a:hover{color:var(--text)}
     <!-- Key list -->
     <div id="keys-list" style="display:flex;flex-direction:column;gap:.5rem"></div>
 
+    <!-- Claude Connector / MCP OAuth -->
+    <div style="margin-top:2rem;margin-bottom:2rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem">
+      <div style="font-size:.9rem;font-weight:600;margin-bottom:.35rem">Claude Connector (MCP)</div>
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem;line-height:1.5">Connect Slaash as an MCP tool in Claude. Add this URL in Claude settings &rarr; Connectors &rarr; Add custom connector.</div>
+      <div style="margin-bottom:.75rem">
+        <label style="display:block;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.25rem">MCP Endpoint</label>
+        <code style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;font-family:var(--mono);font-size:.78rem;color:var(--text);cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)">https://www.slaash.ai/mcp</code>
+      </div>
+      <div style="font-size:.72rem;color:var(--muted);margin-bottom:.75rem">Claude auto-discovers OAuth via <code style="font-size:.7rem;color:var(--accent)">/.well-known/oauth-authorization-server</code>. For advanced setup:</div>
+      <div id="oauth-creds" style="display:none">
+        <div style="margin-bottom:.5rem">
+          <label style="display:block;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.25rem">Client ID</label>
+          <code id="oauth-client-id" style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;font-family:var(--mono);font-size:.75rem;color:var(--text);word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)"></code>
+        </div>
+        <div style="margin-bottom:.5rem">
+          <label style="display:block;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.25rem">Client Secret</label>
+          <code id="oauth-client-secret" style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;font-family:var(--mono);font-size:.75rem;color:var(--text);word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)"></code>
+        </div>
+        <div style="margin-bottom:.5rem">
+          <label style="display:block;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.25rem">Token Endpoint</label>
+          <code style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;font-family:var(--mono);font-size:.75rem;color:var(--text);cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)">https://www.slaash.ai/oauth/token</code>
+        </div>
+        <div style="font-size:.68rem;color:#555;margin-top:.35rem">Click any value to copy. Credentials expire if unused for 30 days.</div>
+      </div>
+      <button id="btn-gen-oauth" onclick="generateOAuthCreds()" style="padding:.45rem 1rem;border-radius:7px;font-size:.78rem;font-weight:600;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">Generate OAuth credentials</button>
+    </div>
+
     <!-- Create new key -->
     <div style="margin-top:1.5rem;display:flex;gap:.75rem;align-items:end">
       <div style="flex:1"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">New Key Name</label><input type="text" id="new-key-name" value="production" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.55rem .75rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
@@ -231,6 +258,24 @@ async function createKey() {
     document.getElementById('new-key-value').textContent = data.api_key;
     loadKeys();
   }
+}
+
+async function generateOAuthCreds() {
+  try {
+    const res = await fetch('/oauth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      client_name: 'claude-connector-' + (currentUser ? currentUser.email : 'user'),
+      redirect_uris: ['https://claude.ai/api/mcp/oauth_callback']
+    })});
+    const data = await res.json();
+    if (data.client_id) {
+      document.getElementById('oauth-client-id').textContent = data.client_id;
+      document.getElementById('oauth-client-secret').textContent = data.client_secret;
+      document.getElementById('oauth-creds').style.display = '';
+      document.getElementById('btn-gen-oauth').style.display = 'none';
+    } else {
+      alert('Failed: ' + (data.error || 'unknown'));
+    }
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 async function deleteKey(keyId) {
