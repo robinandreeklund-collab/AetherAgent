@@ -1,4 +1,5 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>Slaash Guide — How It Works</title><meta name="description" content="How Slaash works: CRFR resonance fields, goal expansion, causal learning, feedback loops."><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><style>*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}:root{--bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);--text:#f5f5f5;--muted:#888;--accent:#3b82f6;--green:#22c55e;--amber:#f59e0b;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}.doc{max-width:760px;margin:0 auto;padding:6rem 2rem 4rem}.doc h1{font-size:2rem;font-weight:800;letter-spacing:-0.03em;margin-bottom:.5rem}.doc .sub{color:var(--muted);font-size:1rem;margin-bottom:2.5rem}.doc h2{font-size:1.25rem;font-weight:700;margin:2.5rem 0 .75rem}.doc p{color:var(--muted);margin-bottom:1rem;font-size:.9rem}.doc strong{color:var(--text)}.doc code{font-family:var(--mono);font-size:.82rem;background:rgba(255,255,255,0.05);padding:.15rem .4rem;border-radius:4px}.doc pre{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:1.25rem;font-family:var(--mono);font-size:.8rem;line-height:1.6;overflow-x:auto;margin-bottom:1.5rem;color:#e6edf3}.doc ul{color:var(--muted);margin-bottom:1rem;padding-left:1.25rem;font-size:.9rem}.doc li{margin-bottom:.35rem}.tip{background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:1rem;margin-bottom:1.5rem;font-size:.85rem;color:#93b4f5}</style></head><body>
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>Slaash Guide — How It Works</title><meta name="description" content="How Slaash works: CRFR resonance fields, goal expansion, causal learning, feedback loops."><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><style>*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}:root{--bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);--text:#f5f5f5;--muted:#888;--accent:#3b82f6;--green:#22c55e;--amber:#f59e0b;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}.doc{max-width:760px;margin:0 auto;padding:6rem 2rem 4rem}.doc h1{font-size:2rem;font-weight:800;letter-spacing:-0.03em;margin-bottom:.5rem}.doc .sub{color:var(--muted);font-size:1rem;margin-bottom:2.5rem}.doc h2{font-size:1.25rem;font-weight:700;margin:2.5rem 0 .75rem}.doc p{color:var(--muted);margin-bottom:1rem;font-size:.9rem}.doc strong{color:var(--text)}.doc code{font-family:var(--mono);font-size:.82rem;background:rgba(255,255,255,0.05);padding:.15rem .4rem;border-radius:4px}.doc pre{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:1.25rem;font-family:var(--mono);font-size:.8rem;line-height:1.6;overflow-x:auto;margin-bottom:1.5rem;color:#e6edf3}.doc ul{color:var(--muted);margin-bottom:1rem;padding-left:1.25rem;font-size:.9rem}.doc li{margin-bottom:.35rem}.tip{background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:1rem;margin-bottom:1.5rem;font-size:.85rem;color:#93b4f5}
+@media(max-width:600px){.doc{padding:4.5rem 1rem 2rem}.doc h1{font-size:1.5rem}.doc pre{padding:.75rem;font-size:.72rem;border-radius:8px}nav>div{gap:1rem !important;font-size:.8rem !important}nav{padding:0 .75rem !important}}</style></head><body>
 <nav style="position:fixed;top:0;left:0;right:0;z-index:100;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;backdrop-filter:blur(16px);background:rgba(10,10,10,0.85);border-bottom:1px solid var(--border)"><a href="/" style="font-size:1.25rem;font-weight:700;color:#fff;text-decoration:none">sl<span style="color:var(--accent);font-weight:800">/</span>sh</a><div style="display:flex;gap:2rem;font-size:.875rem"><a href="/docs" style="color:var(--muted)">Docs</a><a href="/playground" style="color:var(--muted)">Playground</a><a href="/keys" style="color:var(--muted)">API Keys</a></div></nav>
 <div class="doc">
 <p style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem"><a href="/docs">&larr; Back to Docs</a></p>
@@ -10,11 +11,11 @@
 <p>Slaash reduces that to <strong>~$0.002 per page</strong> by extracting only the relevant nodes.</p>
 
 <h2>How extraction works</h2>
-<p>When you call <code>slaash.extract</code>, three things happen:</p>
+<p>When you call <code>slaash.extract</code>, Slaash:</p>
 <ul>
-<li><strong>Parse</strong> &mdash; HTML is parsed into a semantic accessibility tree. Each element gets a role (heading, link, button, price, text), label, and structural context.</li>
-<li><strong>Score</strong> &mdash; Every node is scored against your goal using BM25 keyword matching + HDC hypervector similarity. High-scoring nodes "resonate" and propagate relevance to their neighbors.</li>
-<li><strong>Select</strong> &mdash; Top nodes are returned, sorted by relevance. Gap detection finds natural clusters — often returning fewer nodes than requested when the answer is clear.</li>
+<li><strong>Parse</strong> &mdash; the page is parsed into a structured tree of meaningful elements: headings, links, buttons, prices, text blocks.</li>
+<li><strong>Score</strong> &mdash; every element is scored against your goal. Relevant nodes are ranked and the best matches float to the top.</li>
+<li><strong>Select</strong> &mdash; top nodes are returned, sorted by relevance. Often fewer nodes than requested when the answer is concentrated in a few elements.</li>
 </ul>
 
 <h2>Goal expansion</h2>
@@ -23,14 +24,15 @@
 <p>Good goal: <code>"price cost amount $ USD kr pris belopp total fee"</code></p>
 <p>In the <a href="/playground">Playground</a>, the examples show expanded goals. In production, your AI agent should auto-expand before calling Slaash.</p>
 
-<h2>Causal learning</h2>
-<p>Slaash <strong>learns from feedback</strong>. When you call <code>slaash.learn</code> with the node IDs that contained the correct answer, the system remembers. Next time a similar query is made on the same URL, those nodes get a <strong>causal boost</strong> — ranked higher automatically.</p>
-<p>This learning:</p>
+<h2>Learning from feedback</h2>
+<p>Slaash <strong>learns from feedback</strong>. When you call <code>slaash.learn</code> with the node IDs that contained the correct answer, the system remembers. Next time a similar query is made, those nodes rank higher automatically.</p>
+<p>Key features:</p>
 <ul>
-<li>Persists across sessions (stored in SQLite)</li>
+<li>Persists across sessions</li>
 <li>Transfers across similar pages on the same domain</li>
-<li>Requires zero training data or gradient descent</li>
-<li>Gets stronger with each feedback signal</li>
+<li>Requires zero training data — just tell it what was right</li>
+<li>Gets more accurate with each feedback signal</li>
+<li>Per-user isolation — your feedback only affects your results</li>
 </ul>
 
 <h2>Output formats</h2>
