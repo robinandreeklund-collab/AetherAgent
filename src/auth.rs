@@ -852,6 +852,58 @@ pub fn oauth_authorize(
     Ok(url)
 }
 
+/// Authorization with explicit user_id (called after login consent screen).
+pub fn oauth_authorize_with_user(
+    client_id: &str,
+    redirect_uri: &str,
+    state_param: &str,
+    user_id: i64,
+) -> Result<String, String> {
+    let mut guard = oauth_state();
+    let ostate = guard.as_mut().unwrap();
+
+    // Auto-register if unknown
+    if !ostate.clients.contains_key(client_id) {
+        let now = now_secs() as i64;
+        ostate.clients.insert(
+            client_id.to_string(),
+            OAuthClient {
+                client_id: client_id.to_string(),
+                client_secret: String::new(),
+                client_name: "auto-registered".to_string(),
+                redirect_uris: vec![redirect_uri.to_string()],
+                created_at: now,
+            },
+        );
+    }
+
+    let code = generate_random_hex(32);
+    let now = now_secs() as i64;
+
+    eprintln!(
+        "[OAUTH] Authorize with user: client_id={}, user_id={}, redirect_uri={}",
+        client_id, user_id, redirect_uri
+    );
+
+    ostate.auth_codes.insert(
+        code.clone(),
+        AuthCode {
+            code: code.clone(),
+            client_id: client_id.to_string(),
+            redirect_uri: redirect_uri.to_string(),
+            user_id,
+            created_at: now,
+        },
+    );
+
+    let sep = if redirect_uri.contains('?') { "&" } else { "?" };
+    let mut url = format!("{}{sep}code={code}", redirect_uri);
+    if !state_param.is_empty() {
+        url.push_str(&format!("&state={state_param}"));
+    }
+    Ok(url)
+}
+
 /// Token exchange: authorization_code → access_token
 pub fn oauth_token(
     grant_type: &str,

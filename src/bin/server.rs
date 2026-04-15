@@ -7710,6 +7710,7 @@ fn build_router(state: AppState) -> Router {
         )
         .route("/oauth/register", post(oauth_register_handler))
         .route("/oauth/authorize", get(oauth_authorize_handler))
+        .route("/oauth/authorize/complete", post(oauth_authorize_complete))
         .route("/oauth/token", post(oauth_token_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
@@ -8059,7 +8060,7 @@ async fn oauth_register_handler(Json(req): Json<serde_json::Value>) -> impl Into
     }
 }
 
-/// GET /oauth/authorize — Authorization endpoint
+/// GET /oauth/authorize — Show login page for OAuth consent
 async fn oauth_authorize_handler(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> impl IntoResponse {
@@ -8068,26 +8069,92 @@ async fn oauth_authorize_handler(
     let state_param = params.get("state").map(|s| s.as_str()).unwrap_or("");
 
     if client_id.is_empty() || redirect_uri.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            "client_id and redirect_uri required",
+        return axum::response::Html(
+            "<h1>Error</h1><p>client_id and redirect_uri required</p>".to_string(),
         )
+        .into_response();
+    }
+
+    // Show login form — user must authenticate with their Slaash account
+    let html = format!(
+        r#"<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Authorize — Slaash</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0a0a0a;color:#f5f5f5;font-family:Inter,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}}
+.card{{background:#111;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:2rem;max-width:380px;width:100%}}
+h1{{font-size:1.3rem;font-weight:700;margin-bottom:.25rem}}
+.sub{{color:#888;font-size:.85rem;margin-bottom:1.5rem}}
+label{{display:block;font-size:.72rem;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:.3rem}}
+input{{width:100%;background:#0a0a0a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:.6rem .8rem;color:#f5f5f5;font-size:.85rem;outline:none;margin-bottom:1rem}}
+input:focus{{border-color:#3b82f6}}
+button{{width:100%;padding:.7rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;background:#3b82f6;color:#fff;cursor:pointer}}
+button:hover{{background:#2563eb}}
+.err{{color:#ef4444;font-size:.8rem;margin-bottom:.75rem;display:none}}
+.logo{{font-size:1.1rem;font-weight:700;margin-bottom:1rem;color:#fff}}
+.logo span{{color:#3b82f6;font-weight:800}}
+</style></head><body>
+<div class="card">
+<div class="logo">sl<span>/</span>sh</div>
+<h1>Authorize Claude</h1>
+<p class="sub">Sign in with your Slaash account to connect.</p>
+<div class="err" id="err"></div>
+<label>Email</label><input type="email" id="email" autofocus>
+<label>Password</label><input type="password" id="pw">
+<button onclick="doAuth()">Authorize &amp; Connect</button>
+</div>
+<script>
+async function doAuth() {{
+  const email = document.getElementById('email').value;
+  const pw = document.getElementById('pw').value;
+  const err = document.getElementById('err');
+  err.style.display = 'none';
+  try {{
+    const r = await fetch('/api/auth/login', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email,password:pw}})}});
+    const d = await r.json();
+    if (d.status !== 'ok') {{ err.textContent = d.message || 'Login failed'; err.style.display = ''; return; }}
+    // Login ok — complete OAuth with user_id
+    const r2 = await fetch('/oauth/authorize/complete', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{
+      client_id: '{client_id}',
+      redirect_uri: '{redirect_uri}',
+      state: '{state_param}',
+      user_id: d.user.id
+    }})}});
+    const d2 = await r2.json();
+    if (d2.redirect_url) {{ window.location.href = d2.redirect_url; }}
+    else {{ err.textContent = d2.error || 'Authorization failed'; err.style.display = ''; }}
+  }} catch(e) {{ err.textContent = e.message; err.style.display = ''; }}
+}}
+document.getElementById('pw').addEventListener('keydown', e => {{ if(e.key==='Enter') doAuth(); }});
+</script></body></html>"#,
+        client_id = client_id,
+        redirect_uri = redirect_uri,
+        state_param = state_param
+    );
+    axum::response::Html(html).into_response()
+}
+
+/// POST /oauth/authorize/complete — Complete authorization with user_id
+async fn oauth_authorize_complete(Json(req): Json<serde_json::Value>) -> impl IntoResponse {
+    let client_id = req["client_id"].as_str().unwrap_or("");
+    let redirect_uri = req["redirect_uri"].as_str().unwrap_or("");
+    let state_param = req["state"].as_str().unwrap_or("");
+    let user_id = req["user_id"].as_i64().unwrap_or(0);
+
+    if client_id.is_empty() || redirect_uri.is_empty() || user_id <= 0 {
+        return Json(serde_json::json!({"error": "Missing client_id, redirect_uri, or user_id"}))
             .into_response();
     }
 
-    match aether_agent::auth::oauth_authorize(client_id, redirect_uri, state_param) {
-        Ok(redirect_url) => {
-            let mut headers = HeaderMap::new();
-            if let Ok(val) = redirect_url.parse() {
-                headers.insert(axum::http::header::LOCATION, val);
-            }
-            (StatusCode::FOUND, headers, "").into_response()
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            serde_json::json!({"error": e}).to_string(),
-        )
-            .into_response(),
+    match aether_agent::auth::oauth_authorize_with_user(
+        client_id,
+        redirect_uri,
+        state_param,
+        user_id,
+    ) {
+        Ok(redirect_url) => Json(serde_json::json!({"redirect_url": redirect_url})).into_response(),
+        Err(e) => Json(serde_json::json!({"error": e})).into_response(),
     }
 }
 
