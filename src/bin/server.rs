@@ -6362,10 +6362,26 @@ async fn mcp_post(
     let method = msg["method"].as_str().unwrap_or("");
     let id = &msg["id"];
 
-    // Auth required for tools/call only.
-    // initialize + tools/list are public (client needs to discover capabilities).
+    eprintln!(
+        "[MCP] POST method={}, auth={}, id={}",
+        method,
+        if api_key.is_empty() {
+            "none"
+        } else if api_key.starts_with("sk-") {
+            "api_key"
+        } else if api_key.starts_with("slaash_") {
+            "oauth"
+        } else if api_key.starts_with("session_") {
+            "session"
+        } else {
+            "unknown"
+        },
+        id
+    );
+
+    // Auth required for all methods except initialize.
     // Accepts: API key (sk-...) OR OAuth token (slaash_...) OR session token (session_...)
-    if method != "initialize" && method != "tools/list" && method != "ping" {
+    if method != "initialize" {
         if api_key.is_empty() {
             let err = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -8091,12 +8107,39 @@ async fn oauth_token_handler(headers: HeaderMap, body: String) -> impl IntoRespo
     let mut params: HashMap<String, String> = if body.starts_with('{') {
         serde_json::from_str(&body).unwrap_or_default()
     } else {
+        // Parse application/x-www-form-urlencoded with URL decoding
         body.split('&')
             .filter_map(|pair| {
                 let mut parts = pair.splitn(2, '=');
                 let key = parts.next()?;
                 let val = parts.next().unwrap_or("");
-                Some((key.to_string(), val.to_string()))
+                // Basic URL decode: %XX → char
+                fn url_decode(s: &str) -> String {
+                    let mut out = String::with_capacity(s.len());
+                    let mut chars = s.bytes();
+                    while let Some(b) = chars.next() {
+                        if b == b'%' {
+                            let h = chars.next().unwrap_or(b'0');
+                            let l = chars.next().unwrap_or(b'0');
+                            let hex = [h, l];
+                            if let Ok(s) = std::str::from_utf8(&hex) {
+                                if let Ok(n) = u8::from_str_radix(s, 16) {
+                                    out.push(n as char);
+                                    continue;
+                                }
+                            }
+                            out.push('%');
+                            out.push(h as char);
+                            out.push(l as char);
+                        } else if b == b'+' {
+                            out.push(' ');
+                        } else {
+                            out.push(b as char);
+                        }
+                    }
+                    out
+                }
+                Some((url_decode(key), url_decode(val)))
             })
             .collect()
     };
@@ -8127,19 +8170,30 @@ async fn oauth_token_handler(headers: HeaderMap, body: String) -> impl IntoRespo
         .map(|s| s.as_str())
         .unwrap_or("");
 
+    eprintln!(
+        "[OAUTH] /oauth/token: grant_type={}, code_len={}, client_id={}, secret_len={}, all_keys={:?}",
+        grant_type, code.len(), client_id, client_secret.len(), params.keys().collect::<Vec<_>>()
+    );
+
     match aether_agent::auth::oauth_token(grant_type, code, client_id, client_secret) {
-        Ok(resp) => (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            resp.to_string(),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            serde_json::json!({"error": e}).to_string(),
-        )
-            .into_response(),
+        Ok(resp) => {
+            eprintln!("[OAUTH] /oauth/token: SUCCESS");
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                resp.to_string(),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            eprintln!("[OAUTH] /oauth/token: FAILED: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                serde_json::json!({"error": e}).to_string(),
+            )
+                .into_response()
+        }
     }
 }
 

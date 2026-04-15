@@ -763,6 +763,11 @@ pub fn oauth_register(
     let client_secret = generate_random_hex(48);
     let now = now_secs() as i64;
 
+    eprintln!(
+        "[OAUTH] Register: client_name={}, redirect_uris={:?}, client_id={}",
+        client_name, redirect_uris, client_id
+    );
+
     let client = OAuthClient {
         client_id: client_id.clone(),
         client_secret: client_secret.clone(),
@@ -798,8 +803,12 @@ pub fn oauth_authorize(
 
     let _client = ostate.clients.get(client_id).ok_or("Unknown client_id")?;
 
+    eprintln!(
+        "[OAUTH] Authorize: client_id={}, redirect_uri={}, state={}",
+        client_id, redirect_uri, state_param
+    );
+
     // Accept any redirect_uri for dynamically registered MCP clients.
-    // Claude Connectors may send a different callback URL than registered.
 
     // Auto-approve for alpha (no interactive login screen)
     // In production, show consent screen
@@ -833,7 +842,19 @@ pub fn oauth_token(
     client_id: &str,
     client_secret: &str,
 ) -> Result<serde_json::Value, String> {
+    eprintln!(
+        "[OAUTH] Token: grant_type={}, code={}..., client_id={}, secret_len={}",
+        grant_type,
+        &code[..code.len().min(8)],
+        client_id,
+        client_secret.len()
+    );
+
     if grant_type != "authorization_code" {
+        eprintln!(
+            "[OAUTH] Token REJECTED: unsupported grant_type={}",
+            grant_type
+        );
         return Err("unsupported_grant_type".to_string());
     }
 
@@ -873,6 +894,13 @@ pub fn oauth_token(
         },
     );
 
+    eprintln!(
+        "[OAUTH] Token ISSUED: access_token={}..., client_id={}, expires_in={}",
+        &access_token[..access_token.len().min(15)],
+        client_id,
+        expires_in
+    );
+
     Ok(serde_json::json!({
         "access_token": access_token,
         "token_type": "Bearer",
@@ -888,10 +916,27 @@ pub fn validate_oauth_token(token: &str) -> Option<(i64, String)> {
     }
     let guard = oauth_state();
     let ostate = guard.as_ref()?;
-    let tok = ostate.tokens.get(token)?;
+    let tok = ostate.tokens.get(token);
+    if tok.is_none() {
+        eprintln!(
+            "[OAUTH] Token validation FAILED: token not found (prefix={}..., {} tokens in store)",
+            &token[..token.len().min(15)],
+            ostate.tokens.len()
+        );
+        return None;
+    }
+    let tok = tok.unwrap();
     let now = now_secs() as i64;
     if now > tok.expires_at {
-        return None; // expired
+        eprintln!(
+            "[OAUTH] Token EXPIRED: now={}, expires={}",
+            now, tok.expires_at
+        );
+        return None;
     }
+    eprintln!(
+        "[OAUTH] Token VALID: user_id={}, client_id={}",
+        tok.user_id, tok.client_id
+    );
     Some((tok.user_id, tok.client_id.clone()))
 }
