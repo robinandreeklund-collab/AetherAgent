@@ -414,7 +414,7 @@ a:hover{color:var(--text)}
           <div class="advanced-opts">
             <div class="field-row">
               <div class="field"><label>Top N</label><input type="number" id="inp-topn" value="20" min="1" max="50"></div>
-              <div class="field"><label>Format</label><select id="inp-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
+              <div class="field"><label>Format</label><select id="inp-format"><option value="json">JSON</option><option value="markdown">Markdown</option><option value="toon">TOON</option></select></div>
               <div class="field"><label>Run JS</label><select id="inp-js"><option value="false">No</option><option value="true">Yes</option></select></div>
             </div>
             <div class="field-row" style="margin-top:.75rem">
@@ -741,30 +741,44 @@ async function runExtract() {
   startLoading();
   const t0 = performance.now();
   try {
-    // Fetch JSON, Markdown, and TOON in parallel
+    // Single request — generate Markdown and TOON client-side from JSON
     const u = getPlaygroundUser();
     const reqBody = {
       url, goal,
       top_n: parseInt(document.getElementById('inp-topn').value) || 20,
       run_js: document.getElementById('inp-js').value === 'true',
       follow_links: document.getElementById('inp-follow').value === 'true',
-      user_id: u ? u.id : 0
+      user_id: u ? u.id : 0,
+      output_format: 'json'
     };
-    const [resJson, resMd, resToon] = await Promise.all([
-      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({...reqBody, output_format: 'json'}) }),
-      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({...reqBody, output_format: 'markdown'}) }),
-      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({...reqBody, output_format: 'toon'}) })
-    ]);
-    if (!resJson.ok) throw new Error('Server returned ' + resJson.status);
-    const data = await resJson.json();
-    const mdText = await resMd.text();
-    const toonText = await resToon.text();
+    const res = await fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify(reqBody) });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
     const elapsed = Math.round(performance.now() - t0);
     if (data.error) throw new Error(data.error);
     lastResult = data;
+    // JSON view
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('markdown-body').textContent = mdText;
-    document.getElementById('toon-body').textContent = toonText;
+    // Markdown view (generated client-side)
+    const nodes = data.nodes || [];
+    let md = '';
+    nodes.forEach(n => {
+      const role = (n.role||'?').toUpperCase();
+      if (role === 'HEADING') md += '## ' + (n.label||'') + '\n\n';
+      else if (role === 'LINK') md += '[' + (n.label||'') + '](' + (n.action||'#') + ')\n\n';
+      else md += (n.label||'') + '\n\n';
+    });
+    if (!md) md = 'No results.';
+    document.getElementById('markdown-body').textContent = md;
+    // TOON view (generated client-side)
+    let toon = '';
+    nodes.forEach(n => {
+      const r = (n.role||'?').substring(0,3).toUpperCase();
+      const rel = (n.relevance||0).toFixed(2);
+      toon += r + '|' + (n.label||'').substring(0,200) + '|' + rel + '\n';
+    });
+    if (!toon) toon = '// No results';
+    document.getElementById('toon-body').textContent = toon;
     document.getElementById('meta-tokens').textContent = (data.total_nodes || 0) + ' DOM \u2192 ' + (data.node_count || 0) + ' nodes';
     const savings = data.total_nodes > 0 ? ((1 - (data.node_count || 0) / data.total_nodes) * 100).toFixed(1) + '%' : '-';
     document.getElementById('meta-savings').textContent = savings;
