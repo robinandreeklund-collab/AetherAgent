@@ -3303,9 +3303,14 @@ impl ResonanceField {
 
             // Strategy 2: Label prefix match (handles truncated/updated content)
             if matched_donor.is_none() && recipient_label.len() >= 30 {
-                let rl_prefix = &recipient_label[..recipient_label.len().min(60)].to_lowercase();
+                // UTF-8 safety: find valid char boundary at or before byte 60
+                let mut prefix_end = recipient_label.len().min(60);
+                while prefix_end > 0 && !recipient_label.is_char_boundary(prefix_end) {
+                    prefix_end -= 1;
+                }
+                let rl_prefix = recipient_label[..prefix_end].to_lowercase();
                 for (&dnid, &dlabel) in &donor_labels {
-                    if dlabel.len() >= 30 && dlabel.to_lowercase().starts_with(rl_prefix) {
+                    if dlabel.len() >= 30 && dlabel.to_lowercase().starts_with(&rl_prefix) {
                         if let Some(ds) = donor.nodes.get(&dnid) {
                             matched_donor = Some(ds);
                             break;
