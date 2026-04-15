@@ -471,6 +471,24 @@ pub fn validate_api_key(_key: &str) -> Option<(i64, i64)> {
 
 // ─── Usage logging ────────────────────────────────────────────────────────
 
+/// Get the first API key ID for a user (for session-based usage attribution).
+#[cfg(feature = "persist")]
+pub fn get_default_key_id(user_id: i64) -> Option<i64> {
+    let pool = crate::persist::get_db_lock()?;
+    let conn = pool.next_reader()?;
+    conn.query_row(
+        "SELECT id FROM api_keys WHERE user_id = ?1 ORDER BY created_at ASC LIMIT 1",
+        params![user_id],
+        |row| row.get::<_, i64>(0),
+    )
+    .ok()
+}
+
+#[cfg(not(feature = "persist"))]
+pub fn get_default_key_id(_user_id: i64) -> Option<i64> {
+    None
+}
+
 #[cfg(feature = "persist")]
 pub fn log_usage(
     api_key_id: i64,
@@ -564,4 +582,268 @@ pub fn log_usage(
 #[cfg(not(feature = "persist"))]
 pub fn get_usage_stats(_user_id: i64, _since_secs: i64) -> Vec<UsageEntry> {
     vec![]
+}
+
+// ─── OAuth 2.1 for MCP (Claude Connectors) ──────────────────────────────
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// In-memory OAuth state (auth codes, tokens, registered clients).
+/// Sufficient for alpha — production should use Redis/DB.
+static OAUTH_STATE: Mutex<Option<OAuthState>> = Mutex::new(None);
+static OAUTH_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+struct OAuthState {
+    clients: HashMap<String, OAuthClient>,
+    auth_codes: HashMap<String, AuthCode>,
+    tokens: HashMap<String, OAuthToken>,
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+struct OAuthClient {
+    client_id: String,
+    client_secret: String,
+    client_name: String,
+    redirect_uris: Vec<String>,
+    created_at: i64,
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+struct AuthCode {
+    code: String,
+    client_id: String,
+    redirect_uri: String,
+    user_id: i64,
+    created_at: i64,
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+struct OAuthToken {
+    access_token: String,
+    client_id: String,
+    user_id: i64,
+    scopes: Vec<String>,
+    expires_at: i64,
+}
+
+fn oauth_state() -> std::sync::MutexGuard<'static, Option<OAuthState>> {
+    let mut guard = OAUTH_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Some(OAuthState {
+            clients: HashMap::new(),
+            auth_codes: HashMap::new(),
+            tokens: HashMap::new(),
+        });
+    }
+    guard
+}
+
+fn generate_random_hex(bytes: usize) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let counter = OAUTH_COUNTER.fetch_add(1, Ordering::Relaxed);
+    counter.hash(&mut hasher);
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .hash(&mut hasher);
+    std::thread::current().id().hash(&mut hasher);
+    let h1 = hasher.finish();
+    h1.hash(&mut hasher);
+    let h2 = hasher.finish();
+    h2.hash(&mut hasher);
+    let h3 = hasher.finish();
+    let full = format!("{h1:016x}{h2:016x}{h3:016x}");
+    full[..bytes.min(full.len())].to_string()
+}
+
+/// OAuth2 Authorization Server Metadata (RFC 8414)
+pub fn oauth_metadata(issuer: &str) -> serde_json::Value {
+    serde_json::json!({
+        "issuer": issuer,
+        "authorization_endpoint": format!("{}/oauth/authorize", issuer),
+        "token_endpoint": format!("{}/oauth/token", issuer),
+        "registration_endpoint": format!("{}/oauth/register", issuer),
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
+        "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+        "scopes_supported": ["read", "write"],
+        "code_challenge_methods_supported": ["S256"]
+    })
+}
+
+/// OAuth2 Protected Resource Metadata (RFC 9728)
+pub fn oauth_protected_resource(issuer: &str) -> serde_json::Value {
+    serde_json::json!({
+        "resource": issuer,
+        "authorization_servers": [issuer],
+        "scopes_supported": ["read", "write"],
+        "bearer_methods_supported": ["header"]
+    })
+}
+
+/// Dynamic Client Registration (RFC 7591)
+pub fn oauth_register(
+    client_name: &str,
+    redirect_uris: &[String],
+) -> Result<serde_json::Value, String> {
+    if client_name.is_empty() {
+        return Err("client_name required".to_string());
+    }
+    let client_id = format!("cid_{}", generate_random_hex(24));
+    let client_secret = generate_random_hex(48);
+    let now = now_secs() as i64;
+
+    let client = OAuthClient {
+        client_id: client_id.clone(),
+        client_secret: client_secret.clone(),
+        client_name: client_name.to_string(),
+        redirect_uris: redirect_uris.to_vec(),
+        created_at: now,
+    };
+
+    let mut guard = oauth_state();
+    let state = guard.as_mut().unwrap();
+    state.clients.insert(client_id.clone(), client);
+
+    Ok(serde_json::json!({
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "client_name": client_name,
+        "redirect_uris": redirect_uris,
+        "token_endpoint_auth_method": "client_secret_post",
+        "grant_types": ["authorization_code"],
+        "response_types": ["code"]
+    }))
+}
+
+/// Authorization: validate client and issue auth code.
+/// Returns the redirect URI with ?code=... appended.
+pub fn oauth_authorize(
+    client_id: &str,
+    redirect_uri: &str,
+    state_param: &str,
+) -> Result<String, String> {
+    let mut guard = oauth_state();
+    let ostate = guard.as_mut().unwrap();
+
+    let client = ostate
+        .clients
+        .get(client_id)
+        .ok_or("Unknown client_id")?;
+
+    // Validate redirect_uri
+    if !client.redirect_uris.is_empty()
+        && !client.redirect_uris.iter().any(|u| u == redirect_uri)
+    {
+        return Err("redirect_uri mismatch".to_string());
+    }
+
+    // Auto-approve for alpha (no interactive login screen)
+    // In production, show consent screen
+    let code = generate_random_hex(32);
+    let now = now_secs() as i64;
+
+    ostate.auth_codes.insert(
+        code.clone(),
+        AuthCode {
+            code: code.clone(),
+            client_id: client_id.to_string(),
+            redirect_uri: redirect_uri.to_string(),
+            user_id: 0, // system-level access
+            created_at: now,
+        },
+    );
+
+    // Build redirect URL
+    let sep = if redirect_uri.contains('?') {
+        "&"
+    } else {
+        "?"
+    };
+    let mut url = format!("{}{sep}code={code}", redirect_uri);
+    if !state_param.is_empty() {
+        url.push_str(&format!("&state={state_param}"));
+    }
+    Ok(url)
+}
+
+/// Token exchange: authorization_code → access_token
+pub fn oauth_token(
+    grant_type: &str,
+    code: &str,
+    client_id: &str,
+    client_secret: &str,
+) -> Result<serde_json::Value, String> {
+    if grant_type != "authorization_code" {
+        return Err("unsupported_grant_type".to_string());
+    }
+
+    let mut guard = oauth_state();
+    let ostate = guard.as_mut().unwrap();
+
+    // Validate client credentials
+    let client = ostate
+        .clients
+        .get(client_id)
+        .ok_or("invalid_client")?;
+    if client.client_secret != client_secret {
+        return Err("invalid_client".to_string());
+    }
+
+    // Validate and consume auth code
+    let auth_code = ostate
+        .auth_codes
+        .remove(code)
+        .ok_or("invalid_grant")?;
+    if auth_code.client_id != client_id {
+        return Err("invalid_grant".to_string());
+    }
+
+    let now = now_secs() as i64;
+    // Auth codes expire after 10 minutes
+    if now - auth_code.created_at > 600 {
+        return Err("invalid_grant".to_string());
+    }
+
+    // Issue access token (1 hour expiry)
+    let access_token = format!("slaash_{}", generate_random_hex(48));
+    let expires_in: i64 = 3600;
+
+    ostate.tokens.insert(
+        access_token.clone(),
+        OAuthToken {
+            access_token: access_token.clone(),
+            client_id: client_id.to_string(),
+            user_id: auth_code.user_id,
+            scopes: vec!["read".to_string(), "write".to_string()],
+            expires_at: now + expires_in,
+        },
+    );
+
+    Ok(serde_json::json!({
+        "access_token": access_token,
+        "token_type": "Bearer",
+        "expires_in": expires_in,
+        "scope": "read write"
+    }))
+}
+
+/// Validate an OAuth Bearer token. Returns (user_id, client_id) if valid.
+pub fn validate_oauth_token(token: &str) -> Option<(i64, String)> {
+    if !token.starts_with("slaash_") {
+        return None;
+    }
+    let guard = oauth_state();
+    let ostate = guard.as_ref()?;
+    let tok = ostate.tokens.get(token)?;
+    let now = now_secs() as i64;
+    if now > tok.expires_at {
+        return None; // expired
+    }
+    Some((tok.user_id, tok.client_id.clone()))
 }

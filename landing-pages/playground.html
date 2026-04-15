@@ -721,9 +721,9 @@ async function runExtract() {
       follow_links: document.getElementById('inp-follow').value === 'true'
     };
     const [resJson, resMd, resToon] = await Promise.all([
-      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...reqBody, output_format: 'json'}) }),
-      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...reqBody, output_format: 'markdown'}) }),
-      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({...reqBody, output_format: 'toon'}) })
+      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({...reqBody, output_format: 'json'}) }),
+      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({...reqBody, output_format: 'markdown'}) }),
+      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({...reqBody, output_format: 'toon'}) })
     ]);
     if (!resJson.ok) throw new Error('Server returned ' + resJson.status);
     const data = await resJson.json();
@@ -774,7 +774,7 @@ async function runSearch() {
   startLoading();
   try {
     const res = await fetch('/api/search', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:apiHeaders(),
       body: JSON.stringify({
         query, goal: query,
         top_n: parseInt(document.getElementById('inp-maxres').value) || 5,
@@ -793,7 +793,7 @@ async function runAct() {
   startLoading();
   try {
     const res = await fetch('/api/act', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:apiHeaders(),
       body: JSON.stringify({
         url: document.getElementById('inp-act-url').value,
         goal: document.getElementById('inp-act-goal').value,
@@ -826,7 +826,7 @@ async function runCrawl() {
   const t0 = performance.now();
   try {
     const res = await fetch('/api/adaptive-crawl', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:apiHeaders(),
       body: JSON.stringify({
         url, goal,
         max_pages: parseInt(document.getElementById('inp-crawl-pages').value) || 5,
@@ -968,7 +968,7 @@ async function runPlan() {
     const body = { goal };
     if (url) body.url = url;
     const res = await fetch('/api/compile-goal', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:apiHeaders(),
       body: JSON.stringify(body)
     });
     const data = await res.json();
@@ -1002,9 +1002,9 @@ async function runDiff() {
   try {
     // Fetch both pages and compare their CRFR results
     const [r1, r2] = await Promise.all([
-      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'},
+      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(),
         body: JSON.stringify({url, goal, top_n: 30, output_format:'json'}) }),
-      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'},
+      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(),
         body: JSON.stringify({url: url2, goal, top_n: 30, output_format:'json'}) }),
     ]);
     const d1 = await r1.json();
@@ -1043,7 +1043,7 @@ async function runRender() {
   const h = parseInt(document.getElementById('inp-render-h').value) || 800;
   try {
     const res = await fetch('/api/fetch/render', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:apiHeaders(),
       body: JSON.stringify({ url, width: w, height: h })
     });
     if (!res.ok) throw new Error('Server returned ' + res.status);
@@ -1082,7 +1082,7 @@ async function runLinks() {
   startLoading();
   try {
     const res = await fetch('/api/extract-links', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:apiHeaders(),
       body: JSON.stringify({ url, goal: document.getElementById('inp-links-goal').value, max_links: parseInt(document.getElementById('inp-links-max').value)||20 })
     });
     const data = await res.json();
@@ -1101,7 +1101,7 @@ async function runExplore() {
   if (!url) return;
   startLoading();
   try {
-    const res = await fetch('/api/detect-xhr', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url }) });
+    const res = await fetch('/api/detect-xhr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({ url }) });
     const data = await res.json();
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
@@ -1126,7 +1126,7 @@ async function runLearn() {
   const ids = idsStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
   startLoading();
   try {
-    const res = await fetch('/api/crfr-feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, goal, successful_node_ids: ids, user_id: user.id }) });
+    const res = await fetch('/api/crfr-feedback', { method:'POST', headers:apiHeaders(), body: JSON.stringify({ url, goal, successful_node_ids: ids, user_id: user.id }) });
     const data = await res.json();
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
@@ -1149,7 +1149,7 @@ async function runInspect() {
       endpoint = '/api/firewall-classify';
       body = JSON.stringify({ url: input, goal: 'security check' });
     }
-    const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body });
+    const res = await fetch(endpoint, { method:'POST', headers:apiHeaders(), body });
     const data = await res.json();
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
@@ -1173,7 +1173,7 @@ async function sendFeedback() {
   }
   try {
     await fetch('/api/crfr-feedback', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:apiHeaders(),
       body: JSON.stringify({ url: lastUrl, goal: lastGoal, successful_node_ids: ids, user_id: user.id })
     });
     document.getElementById('feedback-msg').textContent =
@@ -1201,6 +1201,14 @@ function getPlaygroundUser() {
     const saved = localStorage.getItem('slaash_user');
     return saved ? JSON.parse(saved) : null;
   } catch(e) { return null; }
+}
+
+// Common headers for all API calls — includes user ID for usage tracking
+function apiHeaders() {
+  const h = {'Content-Type':'application/json'};
+  const u = getPlaygroundUser();
+  if (u && u.id) h['X-Slaash-User-Id'] = String(u.id);
+  return h;
 }
 
 // Init

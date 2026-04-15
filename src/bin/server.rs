@@ -3146,10 +3146,13 @@ async fn ws_mcp_handler(
     } else {
         ""
     };
-    if api_key.is_empty() || aether_agent::auth::validate_api_key(api_key).is_none() {
+    let is_valid = (!api_key.is_empty())
+        && (aether_agent::auth::validate_api_key(api_key).is_some()
+            || aether_agent::auth::validate_oauth_token(api_key).is_some());
+    if !is_valid {
         return (
             StatusCode::UNAUTHORIZED,
-            "API key required for WebSocket MCP. Set Authorization: Bearer sk-... header.",
+            "Authorization required. Use Bearer token (API key or OAuth). See /.well-known/oauth-authorization-server",
         )
             .into_response();
     }
@@ -6272,21 +6275,25 @@ async fn mcp_post(
     let method = msg["method"].as_str().unwrap_or("");
     let id = &msg["id"];
 
-    // API key required for ALL methods except initialize
+    // Auth required for ALL methods except initialize.
+    // Accepts: API key (sk-...) OR OAuth token (slaash_...)
     if method != "initialize" {
         if api_key.is_empty() {
             let err = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": id,
-                "error": {"code": -32001, "message": "API key required. Set Authorization: Bearer sk-... header. Get a key at https://www.slaash.ai/keys"}
+                "error": {"code": -32001, "message": "Authorization required. Use Bearer token (API key or OAuth). Get a key at https://www.slaash.ai/keys"}
             });
             return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
         }
-        if aether_agent::auth::validate_api_key(api_key).is_none() {
+        // Try API key first, then OAuth token
+        let is_valid = aether_agent::auth::validate_api_key(api_key).is_some()
+            || aether_agent::auth::validate_oauth_token(api_key).is_some();
+        if !is_valid {
             let err = serde_json::json!({
                 "jsonrpc": "2.0",
                 "id": id,
-                "error": {"code": -32001, "message": "Invalid API key. Get one at https://www.slaash.ai/keys"}
+                "error": {"code": -32001, "message": "Invalid token. Get an API key at https://www.slaash.ai/keys or use OAuth via /.well-known/oauth-authorization-server"}
             });
             return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
         }
@@ -7230,8 +7237,24 @@ fn build_router(state: AppState) -> Router {
                 .map(|v| &v[7..])
                 .and_then(|key| aether_agent::auth::validate_api_key(key));
 
+            // Fallback: check X-Slaash-User-Id header (playground session)
+            let session_key_id = if key_info.is_none() {
+                req.headers()
+                    .get("x-slaash-user-id")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .and_then(|uid| {
+                        aether_agent::auth::get_default_key_id(uid).map(|kid| (kid, uid))
+                    })
+            } else {
+                None
+            };
+
+            // Effective auth: prefer Bearer key, fall back to session
+            let effective_auth = key_info.or(session_key_id);
+
             // Rate limiting
-            if let Some((_key_id, _user_id)) = key_info {
+            if let Some((_key_id, _user_id)) = effective_auth {
                 // Authenticated: 60 req/min, 1000/day
                 let limits = aether_agent::auth::RateLimits::free_tier();
                 let id = format!("key:{}", _key_id);
@@ -7275,8 +7298,8 @@ fn build_router(state: AppState) -> Router {
 
             let resp = next.run(req).await;
 
-            // Log usage if authenticated
-            if let Some((key_id, _user_id)) = key_info {
+            // Log usage for ALL authenticated requests (Bearer key or session)
+            if let Some((key_id, _user_id)) = effective_auth {
                 let elapsed = t0.elapsed().as_millis() as i64;
                 aether_agent::auth::log_usage(key_id, &endpoint, elapsed, 0, 0);
             }
@@ -7536,6 +7559,18 @@ fn build_router(state: AppState) -> Router {
         .route("/api/workflow/complete", post(workflow_complete))
         .route("/api/workflow/rollback", post(workflow_rollback))
         .route("/api/workflow/status", post(workflow_status_handler))
+        // OAuth 2.1 for MCP (Claude Connectors)
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(oauth_metadata_handler),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(oauth_protected_resource_handler),
+        )
+        .route("/oauth/register", post(oauth_register_handler))
+        .route("/oauth/authorize", get(oauth_authorize_handler))
+        .route("/oauth/token", post(oauth_token_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .route("/mcp/events", get(mcp_events_poll))
@@ -7816,6 +7851,157 @@ fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
             }
         }
     });
+}
+
+// ─── OAuth 2.1 Endpoints (MCP / Claude Connectors) ─────────────────────
+
+/// GET /.well-known/oauth-authorization-server
+async fn oauth_metadata_handler(
+    req: axum::extract::Request,
+) -> impl IntoResponse {
+    let host = req
+        .headers()
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost:3000");
+    let scheme = if host.contains("slaash.ai") || host.contains("443") {
+        "https"
+    } else {
+        "http"
+    };
+    let issuer = format!("{scheme}://{host}");
+    let meta = aether_agent::auth::oauth_metadata(&issuer);
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        meta.to_string(),
+    )
+}
+
+/// GET /.well-known/oauth-protected-resource
+async fn oauth_protected_resource_handler(
+    req: axum::extract::Request,
+) -> impl IntoResponse {
+    let host = req
+        .headers()
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost:3000");
+    let scheme = if host.contains("slaash.ai") || host.contains("443") {
+        "https"
+    } else {
+        "http"
+    };
+    let issuer = format!("{scheme}://{host}");
+    let meta = aether_agent::auth::oauth_protected_resource(&issuer);
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        meta.to_string(),
+    )
+}
+
+/// POST /oauth/register — Dynamic Client Registration (RFC 7591)
+async fn oauth_register_handler(
+    Json(req): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let client_name = req["client_name"].as_str().unwrap_or("unknown");
+    let redirect_uris: Vec<String> = req["redirect_uris"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    match aether_agent::auth::oauth_register(client_name, &redirect_uris) {
+        Ok(resp) => (StatusCode::CREATED, resp.to_string()).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error": e}).to_string(),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /oauth/authorize — Authorization endpoint
+async fn oauth_authorize_handler(
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let client_id = params.get("client_id").map(|s| s.as_str()).unwrap_or("");
+    let redirect_uri = params
+        .get("redirect_uri")
+        .map(|s| s.as_str())
+        .unwrap_or("");
+    let state_param = params.get("state").map(|s| s.as_str()).unwrap_or("");
+
+    if client_id.is_empty() || redirect_uri.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            "client_id and redirect_uri required",
+        )
+            .into_response();
+    }
+
+    match aether_agent::auth::oauth_authorize(client_id, redirect_uri, state_param) {
+        Ok(redirect_url) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                axum::http::header::LOCATION,
+                redirect_url.parse().unwrap_or_default(),
+            );
+            (StatusCode::FOUND, headers, "").into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error": e}).to_string(),
+        )
+            .into_response(),
+    }
+}
+
+/// POST /oauth/token — Token exchange
+async fn oauth_token_handler(
+    body: String,
+) -> impl IntoResponse {
+    // Accept both JSON and form-urlencoded (OAuth spec uses form)
+    let params: HashMap<String, String> = if body.starts_with('{') {
+        serde_json::from_str(&body).unwrap_or_default()
+    } else {
+        // Parse application/x-www-form-urlencoded
+        body.split('&')
+            .filter_map(|pair| {
+                let mut parts = pair.splitn(2, '=');
+                let key = parts.next()?;
+                let val = parts.next().unwrap_or("");
+                Some((key.to_string(), val.to_string()))
+            })
+            .collect()
+    };
+
+    let grant_type = params.get("grant_type").map(|s| s.as_str()).unwrap_or("");
+    let code = params.get("code").map(|s| s.as_str()).unwrap_or("");
+    let client_id = params.get("client_id").map(|s| s.as_str()).unwrap_or("");
+    let client_secret = params
+        .get("client_secret")
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
+    match aether_agent::auth::oauth_token(grant_type, code, client_id, client_secret) {
+        Ok(resp) => (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            resp.to_string(),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            serde_json::json!({"error": e}).to_string(),
+        )
+            .into_response(),
+    }
 }
 
 // ─── Auth API Endpoints ──────────────────────────────────────────────────
