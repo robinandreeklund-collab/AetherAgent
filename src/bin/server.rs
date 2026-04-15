@@ -2545,8 +2545,23 @@ fn deep_extract_page_nodes(json: &str, max: usize) -> Vec<aether_agent::search::
 // ─── WebSocket: Universal API Gateway (/ws/api) ─────────────────────────────
 
 /// Universell WebSocket-gateway som multiplexar alla API-anrop med realtids-progress.
-async fn ws_api_handler(ws: axum::extract::WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_ws_api)
+async fn ws_api_handler(
+    ws: axum::extract::WebSocketUpgrade,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+) -> impl IntoResponse {
+    // Rate limit WebSocket connections per IP
+    let ip = connect_info
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let limits = aether_agent::auth::RateLimits::anonymous();
+    if let Err(retry) = aether_agent::auth::check_rate_limit(&format!("ws-ip:{ip}"), &limits) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Rate limit exceeded. Retry after {retry}s"),
+        )
+            .into_response();
+    }
+    ws.on_upgrade(handle_ws_api).into_response()
 }
 
 async fn handle_ws_api(mut socket: axum::extract::ws::WebSocket) {
@@ -3292,8 +3307,21 @@ async fn handle_ws_mcp(mut socket: axum::extract::ws::WebSocket, state: AppState
 async fn ws_search_handler(
     ws: axum::extract::WebSocketUpgrade,
     axum::extract::State(state): axum::extract::State<AppState>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
 ) -> impl IntoResponse {
+    let ip = connect_info
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let limits = aether_agent::auth::RateLimits::anonymous();
+    if let Err(retry) = aether_agent::auth::check_rate_limit(&format!("ws-ip:{ip}"), &limits) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Rate limit exceeded. Retry after {retry}s"),
+        )
+            .into_response();
+    }
     ws.on_upgrade(move |socket| handle_ws_search(socket, state))
+        .into_response()
 }
 
 async fn handle_ws_search(mut socket: axum::extract::ws::WebSocket, _state: AppState) {
@@ -3481,8 +3509,22 @@ async fn handle_ws_search(mut socket: axum::extract::ws::WebSocket, _state: AppS
 ///   {"type":"warning", "warning":{...}}
 ///   {"type":"done", "nodes_emitted":10, "total_dom_nodes":372, ...}
 ///   {"type":"error", "message":"..."}
-async fn ws_stream_handler(ws: axum::extract::WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_ws_stream)
+async fn ws_stream_handler(
+    ws: axum::extract::WebSocketUpgrade,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+) -> impl IntoResponse {
+    let ip = connect_info
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let limits = aether_agent::auth::RateLimits::anonymous();
+    if let Err(retry) = aether_agent::auth::check_rate_limit(&format!("ws-ip:{ip}"), &limits) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Rate limit exceeded. Retry after {retry}s"),
+        )
+            .into_response();
+    }
+    ws.on_upgrade(handle_ws_stream).into_response()
 }
 
 async fn handle_ws_stream(mut socket: axum::extract::ws::WebSocket) {
@@ -7238,8 +7280,11 @@ fn build_router(state: AppState) -> Router {
             let t0 = std::time::Instant::now();
             let endpoint = req.uri().path().to_string();
 
-            // Only rate-limit /api/ and /mcp endpoints
-            let is_api = endpoint.starts_with("/api/") || endpoint == "/mcp";
+            // Rate-limit /api/, /mcp, /oauth, and /ws/ endpoints
+            let is_api = endpoint.starts_with("/api/")
+                || endpoint == "/mcp"
+                || endpoint.starts_with("/oauth/")
+                || endpoint.starts_with("/ws/");
             if !is_api {
                 return next.run(req).await;
             }
@@ -7266,12 +7311,12 @@ fn build_router(state: AppState) -> Router {
                 None
             };
 
-            // Effective auth: prefer Bearer key, fall back to session
-            let effective_auth = key_info.or(session_key_id);
-
-            // Rate limiting
-            if let Some((_key_id, _user_id)) = effective_auth {
-                // Authenticated: 60 req/min, 1000/day
+            // Rate limiting: ONLY Bearer API key gets elevated limits.
+            // X-Slaash-User-Id is for usage attribution only, NOT rate limit upgrade.
+            // This prevents spoofing: anyone can send X-Slaash-User-Id but only
+            // a valid Bearer token proves identity.
+            if let Some((_key_id, _user_id)) = key_info {
+                // Authenticated via Bearer: 60 req/min, 1000/day
                 let limits = aether_agent::auth::RateLimits::free_tier();
                 let id = format!("key:{}", _key_id);
                 if let Err(retry) = aether_agent::auth::check_rate_limit(&id, &limits) {
@@ -7314,8 +7359,9 @@ fn build_router(state: AppState) -> Router {
 
             let resp = next.run(req).await;
 
-            // Log usage for ALL authenticated requests (Bearer key or session)
-            if let Some((key_id, _user_id)) = effective_auth {
+            // Log usage: Bearer key OR session (for dashboard attribution)
+            let log_auth = key_info.or(session_key_id);
+            if let Some((key_id, _user_id)) = log_auth {
                 let elapsed = t0.elapsed().as_millis() as i64;
                 aether_agent::auth::log_usage(key_id, &endpoint, elapsed, 0, 0);
                 // For session-based auth (no Bearer header), also increment
