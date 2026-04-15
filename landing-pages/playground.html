@@ -518,6 +518,7 @@ let lastGoal = '';
 
 function switchTab(tab) {
   currentTab = tab;
+  document.getElementById('welcome-panel').classList.add('hidden');
   document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
   const links = document.querySelectorAll('.sidebar-link');
   links.forEach(l => { if(l.textContent.trim().toLowerCase().startsWith(tab)) l.classList.add('active'); });
