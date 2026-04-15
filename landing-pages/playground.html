@@ -182,7 +182,7 @@ a:hover{color:var(--text)}
           <span class="advanced-toggle" onclick="this.nextElementSibling.classList.toggle('visible')">&#9660; Advanced options</span>
           <div class="advanced-opts">
             <div class="field-row">
-              <div class="field"><label>Top N</label><input type="number" id="inp-topn" value="10" min="1" max="50"></div>
+              <div class="field"><label>Top N</label><input type="number" id="inp-topn" value="20" min="1" max="50"></div>
               <div class="field"><label>Format</label><select id="inp-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
               <div class="field"><label>Run JS</label><select id="inp-js"><option value="false">No</option><option value="true">Yes</option></select></div>
             </div>
@@ -237,15 +237,15 @@ a:hover{color:var(--text)}
       <!-- RIGHT: Response + Markdown + Code -->
       <div class="panel-right">
         <div class="response-tabs">
-          <div class="response-tab active" onclick="showResponseTab('response')">Response</div>
-          <div class="response-tab" onclick="showResponseTab('markdown')">Markdown</div>
+          <div class="response-tab active" onclick="showResponseTab('markdown')">Markdown</div>
+          <div class="response-tab" onclick="showResponseTab('response')">JSON</div>
           <div class="response-tab" onclick="showResponseTab('code')">Code</div>
         </div>
 
-        <!-- Response view -->
-        <div id="view-response" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
-          <div class="response-body" id="response-body">
-            <span style="color:var(--muted)">// Run a query to see results here</span>
+        <!-- Markdown view (default) -->
+        <div id="view-markdown" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+          <div class="response-body" id="markdown-body" style="font-family:var(--font);font-size:.85rem;line-height:1.7">
+            <span style="color:var(--muted)">Run a query to see results here</span>
           </div>
           <div class="response-meta" id="response-meta">
             <span>Tokens: <span class="val" id="meta-tokens">-</span></span>
@@ -255,10 +255,10 @@ a:hover{color:var(--text)}
           </div>
         </div>
 
-        <!-- Markdown view -->
-        <div id="view-markdown" style="display:none;flex-direction:column;flex:1;overflow:hidden">
-          <div class="response-body" id="markdown-body" style="font-family:var(--font);font-size:.85rem;line-height:1.7">
-            <span style="color:var(--muted)">// Markdown output will appear here</span>
+        <!-- JSON view -->
+        <div id="view-response" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+          <div class="response-body" id="response-body">
+            <span style="color:var(--muted)">// JSON response</span>
           </div>
         </div>
 
