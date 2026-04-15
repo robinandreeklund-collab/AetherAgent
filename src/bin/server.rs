@@ -7415,7 +7415,18 @@ fn build_router(state: AppState) -> Router {
 
             // Log usage: Bearer key OR session (for dashboard attribution)
             let log_auth = key_info.or(session_key_id);
+            let auth_source = if key_info.is_some() {
+                "bearer"
+            } else if session_key_id.is_some() {
+                "x-user-id"
+            } else {
+                "none"
+            };
             if let Some((key_id, _user_id)) = log_auth {
+                eprintln!(
+                    "[USAGE] {} auth={} key_id={} user_id={}",
+                    endpoint, auth_source, key_id, _user_id
+                );
                 let elapsed = t0.elapsed().as_millis() as i64;
                 // Prefer handler-provided token counts (X-Tokens-In/Out)
                 // which reflect actual CRFR savings, not HTTP body sizes

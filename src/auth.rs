@@ -540,13 +540,23 @@ pub fn get_default_key_id(_user_id: i64) -> Option<i64> {
 pub fn increment_key_counters(key_id: i64) {
     let pool = match crate::persist::get_db_lock() {
         Some(p) => p,
-        None => return,
+        None => {
+            eprintln!(
+                "[AUTH] increment_key_counters: no DB pool for key_id={}",
+                key_id
+            );
+            return;
+        }
     };
     if let Some(writer) = pool.writer.as_ref() {
         let now = now_secs() as i64;
-        let _ = writer.execute(
+        let affected = writer.execute(
             "UPDATE api_keys SET last_used = ?1, requests_today = requests_today + 1, requests_total = requests_total + 1 WHERE id = ?2",
             params![now, key_id],
+        ).unwrap_or(0);
+        eprintln!(
+            "[AUTH] increment_key_counters: key_id={}, rows_affected={}",
+            key_id, affected
         );
     }
 }
