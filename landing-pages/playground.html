@@ -575,14 +575,14 @@ function startLoading() {
   bar.classList.remove('active');
   void bar.offsetWidth;
   bar.classList.add('active');
-  document.getElementById('btn-run').disabled = true;
+  document.querySelectorAll('.btn-run').forEach(b => b.disabled = true);
 }
 
 function stopLoading() {
   const bar = document.getElementById('loading-bar');
   bar.style.width = '100%';
   setTimeout(() => { bar.classList.remove('active'); bar.style.width = '0'; }, 300);
-  document.getElementById('btn-run').disabled = false;
+  document.querySelectorAll('.btn-run').forEach(b => b.disabled = false);
 }
 
 async function runExtract() {
