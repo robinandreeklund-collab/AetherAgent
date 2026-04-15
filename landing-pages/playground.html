@@ -722,31 +722,90 @@ async function runCrawl() {
   } finally { stopLoading(); }
 }
 
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 async function runStream() {
   const url = document.getElementById('inp-stream-url').value.trim();
   const goal = document.getElementById('inp-stream-goal').value.trim();
   if (!url || !goal) return;
   startLoading();
-  try {
-    const res = await fetch('/api/stream-parse', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        url, goal,
-        max_nodes: parseInt(document.getElementById('inp-stream-max').value) || 30,
-        min_relevance: parseFloat(document.getElementById('inp-stream-rel').value) || 0.1,
-      })
-    });
-    const data = await res.json();
-    lastResult = data;
-    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('markdown-body').textContent = JSON.stringify(data, null, 2);
-    if (data.token_savings_ratio) {
-      document.getElementById('meta-savings').textContent = (data.token_savings_ratio * 100).toFixed(1) + '%';
+  const t0 = performance.now();
+  const body = document.getElementById('response-body');
+  const mdBody = document.getElementById('markdown-body');
+  body.innerHTML = '';
+  mdBody.textContent = '';
+  // Show response tab for real-time display
+  document.querySelectorAll('.response-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector('.response-tab').classList.add('active');
+  document.getElementById('view-response').style.display = 'flex';
+  document.getElementById('view-markdown').style.display = 'none';
+  document.getElementById('view-toon').style.display = 'none';
+  document.getElementById('view-code').style.display = 'none';
+
+  const maxNodes = parseInt(document.getElementById('inp-stream-max').value) || 30;
+  const threshold = parseFloat(document.getElementById('inp-stream-rel').value) || 0.1;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws/api');
+  let nodeCount = 0;
+  let totalDom = 0;
+  let savings = 0;
+  let allNodes = [];
+
+  ws.onopen = function() {
+    document.getElementById('meta-nodes').textContent = 'connecting...';
+    ws.send(JSON.stringify({
+      id: 'stream-1', method: 'fetch_stream_parse',
+      params: { url, goal, top_n: maxNodes, threshold, max_nodes: maxNodes }
+    }));
+  };
+
+  ws.onmessage = function(e) {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'progress') {
+      document.getElementById('meta-nodes').textContent = msg.stage === 'fetching' ? 'fetching...' : 'parsing...';
     }
-    document.getElementById('meta-nodes').textContent = (data.nodes_emitted || 0) + ' nodes';
-  } catch(err) {
-    document.getElementById('response-body').textContent = '// Error: ' + err.message;
-  } finally { stopLoading(); }
+    if (msg.type === 'stream_start') {
+      totalDom = msg.total_dom_nodes || 0;
+      savings = msg.token_savings_ratio || 0;
+      document.getElementById('meta-tokens').textContent = totalDom + ' DOM';
+    }
+    if (msg.type === 'stream_node') {
+      nodeCount++;
+      const n = msg.node || {};
+      allNodes.push(n);
+      const rel = (n.relevance || 0).toFixed(3);
+      const div = document.createElement('div');
+      div.style.cssText = 'padding:.4rem .6rem;margin:.2rem 0;border-left:3px solid var(--accent);border-radius:0 6px 6px 0;background:rgba(59,130,246,0.04);font-size:.8rem;opacity:0;transform:translateY(8px);transition:all .3s ease';
+      div.innerHTML = '<span style="color:var(--accent);font-family:var(--mono);font-size:.7rem">#' + nodeCount + ' [' + (n.role||'?') + '] rel:' + rel + '</span><br>' + escHtml((n.label||'').slice(0,300));
+      body.appendChild(div);
+      requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translateY(0)'; });
+      body.scrollTop = body.scrollHeight;
+      document.getElementById('meta-nodes').textContent = nodeCount + ' nodes';
+      document.getElementById('meta-savings').textContent = (savings * 100).toFixed(1) + '%';
+    }
+    if (msg.type === 'result' || msg.type === 'stream_complete') {
+      const elapsed = Math.round(performance.now() - t0);
+      document.getElementById('meta-time').textContent = elapsed + 'ms';
+      document.getElementById('meta-nodes').textContent = nodeCount + ' streamed';
+      document.getElementById('meta-savings').textContent = (savings * 100).toFixed(1) + '%';
+      // Fill markdown with final result
+      let md = '# Stream: ' + url + '\n\n';
+      allNodes.forEach((n, i) => { md += (i+1) + '. [' + (n.role||'?') + '] ' + (n.label||'').slice(0,200) + '\n'; });
+      mdBody.textContent = md;
+      lastResult = { nodes: allNodes, total_dom_nodes: totalDom, token_savings_ratio: savings };
+      stopLoading();
+      ws.close();
+    }
+    if (msg.type === 'error') {
+      body.textContent = '// Stream error: ' + (msg.message || 'unknown');
+      stopLoading();
+      ws.close();
+    }
+  };
+  ws.onerror = function() { body.textContent = '// WebSocket connection failed'; stopLoading(); };
+  ws.onclose = function() { stopLoading(); };
 }
 
 async function runPlan() {
@@ -785,18 +844,41 @@ function fillLinks(url, goal) {
 async function runDiff() {
   const url = document.getElementById('inp-diff-url').value.trim();
   if (!url) return;
-  const url2 = document.getElementById('inp-diff-url2').value.trim();
-  const goal = document.getElementById('inp-diff-goal').value.trim();
+  const url2 = document.getElementById('inp-diff-url2').value.trim() || url;
+  const goal = document.getElementById('inp-diff-goal').value.trim() || 'changes';
   startLoading();
+  const t0 = performance.now();
   try {
-    const body = { url1: url, goal: goal || 'changes' };
-    if (url2) body.url2 = url2;
-    const res = await fetch('/api/diff', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-    const data = await res.json();
-    lastResult = data;
-    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('markdown-body').textContent = JSON.stringify(data, null, 2);
-    if (data.token_savings_ratio) document.getElementById('meta-savings').textContent = (data.token_savings_ratio * 100).toFixed(1) + '%';
+    // Fetch both pages and compare their CRFR results
+    const [r1, r2] = await Promise.all([
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url, goal, top_n: 30, output_format:'json'}) }),
+      fetch('/api/parse-crfr', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url: url2, goal, top_n: 30, output_format:'json'}) }),
+    ]);
+    const d1 = await r1.json();
+    const d2 = await r2.json();
+    const elapsed = Math.round(performance.now() - t0);
+    const nodes1 = d1.nodes || [];
+    const nodes2 = d2.nodes || [];
+    const labels1 = new Set(nodes1.map(n => n.label));
+    const labels2 = new Set(nodes2.map(n => n.label));
+    const added = nodes2.filter(n => !labels1.has(n.label));
+    const removed = nodes1.filter(n => !labels2.has(n.label));
+    const kept = nodes1.filter(n => labels2.has(n.label));
+
+    // Build visual diff for markdown panel
+    let md = '# Diff: ' + url.split('/').slice(0,3).join('/') + '\n\n';
+    md += '**+' + added.length + ' added** | **-' + removed.length + ' removed** | **' + kept.length + ' unchanged** | ' + elapsed + 'ms\n\n';
+    if (added.length) { md += '## Added\n'; added.forEach(n => md += '+ [' + (n.role||'?') + '] ' + (n.label||'').slice(0,200) + '\n'); md += '\n'; }
+    if (removed.length) { md += '## Removed\n'; removed.forEach(n => md += '- [' + (n.role||'?') + '] ' + (n.label||'').slice(0,200) + '\n'); md += '\n'; }
+    if (kept.length) { md += '## Unchanged (' + kept.length + ')\n'; kept.slice(0,5).forEach(n => md += '  [' + (n.role||'?') + '] ' + (n.label||'').slice(0,150) + '\n'); }
+
+    document.getElementById('markdown-body').textContent = md;
+    document.getElementById('response-body').textContent = JSON.stringify({added: added.length, removed: removed.length, kept: kept.length, nodes_a: nodes1.length, nodes_b: nodes2.length, elapsed_ms: elapsed}, null, 2);
+    document.getElementById('meta-nodes').textContent = '+' + added.length + ' / -' + removed.length;
+    document.getElementById('meta-time').textContent = elapsed + 'ms';
+    lastResult = { added, removed, kept };
   } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
   finally { stopLoading(); }
 }
@@ -805,21 +887,36 @@ async function runRender() {
   const url = document.getElementById('inp-render-url').value.trim();
   if (!url) return;
   startLoading();
+  const t0 = performance.now();
+  const w = parseInt(document.getElementById('inp-render-w').value) || 1280;
+  const h = parseInt(document.getElementById('inp-render-h').value) || 800;
   try {
-    const res = await fetch('/api/tiered-screenshot', {
+    const res = await fetch('/api/fetch/render', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ url, width: parseInt(document.getElementById('inp-render-w').value)||1280, height: parseInt(document.getElementById('inp-render-h').value)||800 })
+      body: JSON.stringify({ url, width: w, height: h })
     });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
     const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    const b64 = data.png_base64;
+    if (!b64) throw new Error('No image returned');
+    const tier = data.tier_used || 'blitz';
+    const sizeKb = data.png_size_bytes ? (data.png_size_bytes/1024).toFixed(0)+'KB' : '?';
+
+    // Show image in markdown panel
+    document.getElementById('markdown-body').innerHTML =
+      '<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff">' +
+      '<img src="data:image/png;base64,' + b64 + '" style="display:block;width:100%;height:auto;max-height:600px;object-fit:contain">' +
+      '</div>';
+    document.getElementById('response-body').textContent = JSON.stringify({
+      url, tier_used: tier, png_size_bytes: data.png_size_bytes, render_time_ms: elapsed,
+      viewport: w + 'x' + h, png_base64: '(truncated, ' + b64.length + ' chars)'
+    }, null, 2);
+    document.getElementById('meta-nodes').textContent = tier + ' engine';
+    document.getElementById('meta-time').textContent = elapsed + 'ms';
+    document.getElementById('meta-savings').textContent = sizeKb;
     lastResult = data;
-    document.getElementById('response-body').textContent = JSON.stringify({...data, image: '(base64 truncated)'}, null, 2);
-    if (data.image) {
-      document.getElementById('markdown-body').innerHTML = '<img src="data:image/png;base64,' + data.image + '" style="max-width:100%;border-radius:8px">';
-    } else {
-      document.getElementById('markdown-body').textContent = 'No image returned';
-    }
-    if (data.tier_used) document.getElementById('meta-nodes').textContent = 'Tier ' + data.tier_used;
-    if (data.latency_ms) document.getElementById('meta-time').textContent = data.latency_ms + 'ms';
   } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
   finally { stopLoading(); }
 }
