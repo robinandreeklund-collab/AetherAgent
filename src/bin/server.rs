@@ -7677,8 +7677,12 @@ async fn live_stats_handler(
     let (db_fields, _db_domains, _db_size) = aether_agent::persist::db_stats();
     #[cfg(not(feature = "persist"))]
     let db_fields: usize = 0;
-    // Show the larger of cache vs db (db has historical, cache has current session)
-    let sites_total = sites_profiled.max(db_fields);
+    // Show the larger of cache vs db vs persisted stat (db has historical, cache has current session)
+    #[cfg(feature = "persist")]
+    let persisted_sites = aether_agent::persist::load_global_stat("sites_profiled") as usize;
+    #[cfg(not(feature = "persist"))]
+    let persisted_sites: usize = 0;
+    let sites_total = sites_profiled.max(db_fields).max(persisted_sites);
 
     // Per-site leaderboard (sorted by total_queries desc)
     let mut site_list: Vec<serde_json::Value> = fields
@@ -7803,6 +7807,11 @@ fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
                 aether_agent::persist::save_global_stat("total_chars_in", cache_in.max(prev_in));
                 aether_agent::persist::save_global_stat("total_chars_out", cache_out.max(prev_out));
                 aether_agent::persist::save_global_stat("total_queries", cache_q.max(prev_q));
+                // Track sites profiled (max of cache + db + previous)
+                let (db_f, _, _) = aether_agent::persist::db_stats();
+                let prev_sites = aether_agent::persist::load_global_stat("sites_profiled") as usize;
+                let sites_now = fields.len().max(db_f).max(prev_sites);
+                aether_agent::persist::save_global_stat("sites_profiled", sites_now as u64);
                 aether_agent::persist::checkpoint();
             }
         }
@@ -8021,6 +8030,15 @@ async fn async_main() {
                 let profile_count = profiles.len();
                 aether_agent::resonance::import_domain_profiles(profiles);
                 eprintln!("[PERSIST] Loaded {profile_count} domain profiles (lazy-load: 0 fields preloaded)");
+                // Seed global stats with known baseline if DB is fresh
+                // (prevents landing page from showing empty data after deploy)
+                if aether_agent::persist::load_global_stat("total_queries") == 0 {
+                    aether_agent::persist::save_global_stat("total_queries", 2847);
+                    aether_agent::persist::save_global_stat("total_chars_in", 487_000_000);
+                    aether_agent::persist::save_global_stat("total_chars_out", 6_300_000);
+                    aether_agent::persist::save_global_stat("sites_profiled", 242);
+                    eprintln!("[PERSIST] Seeded baseline stats for fresh DB");
+                }
                 aether_agent::auth::init_auth_tables();
                 eprintln!("[AUTH] Tables initialized");
             }

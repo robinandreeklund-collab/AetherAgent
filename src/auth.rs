@@ -275,7 +275,7 @@ pub fn signup(email: &str, password: &str, name: &str) -> Result<(User, String),
         requests_per_minute: 5,
         requests_per_day: 10,
     };
-    if let Err(_) = check_rate_limit(&domain_key, &domain_limits) {
+    if check_rate_limit(&domain_key, &domain_limits).is_err() {
         return Err("Too many signups from this email domain. Try again later.".to_string());
     }
 
