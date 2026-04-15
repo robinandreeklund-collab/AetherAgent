@@ -6238,8 +6238,40 @@ async fn mcp_post(
     headers: HeaderMap,
     Json(msg): Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    // API key required for MCP endpoint
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let api_key = if auth.starts_with("Bearer ") {
+        &auth[7..]
+    } else {
+        ""
+    };
+
+    // Allow "initialize" without auth (client needs to discover capabilities first)
     let method = msg["method"].as_str().unwrap_or("");
     let id = &msg["id"];
+
+    if method != "initialize" && !api_key.is_empty() {
+        // Validate key
+        if aether_agent::auth::validate_api_key(api_key).is_none() {
+            let err = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32001, "message": "Invalid API key. Get one at https://www.slaash.ai/keys"}
+            });
+            return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
+        }
+    } else if method != "initialize" && api_key.is_empty() {
+        let err = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": {"code": -32001, "message": "API key required. Set Authorization: Bearer sk-... header. Get a key at https://www.slaash.ai/keys"}
+        });
+        return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
+    }
+
     let params = &msg["params"];
 
     // Notification (inget id) — acceptera tyst
@@ -6372,6 +6404,31 @@ async fn mcp_get(
 
     if accept.contains("text/html") {
         return axum::response::Html(MCP_DASHBOARD_HTML).into_response();
+    }
+
+    // API key required for SSE connection
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let api_key = if auth.starts_with("Bearer ") {
+        &auth[7..]
+    } else {
+        ""
+    };
+    if api_key.is_empty() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "API key required. Set Authorization: Bearer sk-... header.",
+        )
+            .into_response();
+    }
+    if aether_agent::auth::validate_api_key(api_key).is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Invalid API key. Get one at https://www.slaash.ai/keys",
+        )
+            .into_response();
     }
 
     // MCP-klient / EventSource → SSE-ström med broadcast-events
