@@ -489,6 +489,26 @@ pub fn get_default_key_id(_user_id: i64) -> Option<i64> {
     None
 }
 
+/// Increment request counters for a key (for session-based requests
+/// that bypass validate_api_key).
+#[cfg(feature = "persist")]
+pub fn increment_key_counters(key_id: i64) {
+    let pool = match crate::persist::get_db_lock() {
+        Some(p) => p,
+        None => return,
+    };
+    if let Some(writer) = pool.writer.as_ref() {
+        let now = now_secs() as i64;
+        let _ = writer.execute(
+            "UPDATE api_keys SET last_used = ?1, requests_today = requests_today + 1, requests_total = requests_total + 1 WHERE id = ?2",
+            params![now, key_id],
+        );
+    }
+}
+
+#[cfg(not(feature = "persist"))]
+pub fn increment_key_counters(_key_id: i64) {}
+
 #[cfg(feature = "persist")]
 pub fn log_usage(
     api_key_id: i64,

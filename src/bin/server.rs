@@ -7318,6 +7318,12 @@ fn build_router(state: AppState) -> Router {
             if let Some((key_id, _user_id)) = effective_auth {
                 let elapsed = t0.elapsed().as_millis() as i64;
                 aether_agent::auth::log_usage(key_id, &endpoint, elapsed, 0, 0);
+                // For session-based auth (no Bearer header), also increment
+                // the key's request counters (validate_api_key does this for
+                // Bearer requests, but session auth skips it)
+                if key_info.is_none() && session_key_id.is_some() {
+                    aether_agent::auth::increment_key_counters(key_id);
+                }
             }
 
             resp
