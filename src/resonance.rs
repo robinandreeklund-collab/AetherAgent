@@ -3450,8 +3450,12 @@ impl ResonanceField {
 /// This is a HOT CACHE only — SQLite is the permanent store.
 /// No TTL eviction: fields stay in cache until capacity is reached,
 /// then the least-recently-used field is evicted (but preserved in SQLite).
-/// Capacity is generous (1024) to avoid frequent SQLite reads.
-const FIELD_CACHE_CAPACITY: usize = 1024;
+/// RAM cache capacity. Production runs at ~2GB RSS with 269 fields cached.
+/// Each field holds hypervectors (4096 bits) per node — a field with 5000
+/// nodes uses ~50MB. 1024 fields would need ~50GB.
+/// Set to 64 to stay under 1GB cache footprint. SQLite persist
+/// handles long-term storage; RAM is for hot queries only.
+const FIELD_CACHE_CAPACITY: usize = 64;
 
 struct FieldCacheInner {
     /// BUG-3 fix: use VecDeque so eviction (pop_front) is O(1) instead of O(N).
