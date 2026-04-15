@@ -6385,9 +6385,11 @@ async fn mcp_post(
         id
     );
 
-    // Auth required for all methods except initialize.
-    // Accepts: API key (sk-...) OR OAuth token (slaash_...) OR session token (session_...)
-    if method != "initialize" {
+    // Auth only required for tools/call (actual tool execution).
+    // Discovery methods (initialize, tools/list, ping, notifications/*) are public.
+    // Claude Connectors sends NO auth for discovery — confirmed by production logs.
+    let needs_auth = method == "tools/call";
+    if needs_auth {
         if api_key.is_empty() {
             let err = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -6544,17 +6546,15 @@ async fn mcp_get(
         return axum::response::Html(MCP_DASHBOARD_HTML).into_response();
     }
 
-    // API key required for SSE connection
-    let auth = headers
+    // SSE stream: allow without auth for Claude Connectors discovery
+    let _auth = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let api_key = if auth.starts_with("Bearer ") {
-        &auth[7..]
-    } else {
-        ""
-    };
-    if api_key.is_empty() {
+    // Note: Claude Connectors connects to GET /mcp without auth for SSE notifications.
+    // Auth is enforced at tools/call level, not at SSE connection level.
+    if false {
+        // Auth check disabled — kept as reference for future paid tiers
         return (
             StatusCode::UNAUTHORIZED,
             "API key required. Set Authorization: Bearer sk-... header.",
