@@ -6362,9 +6362,10 @@ async fn mcp_post(
     let method = msg["method"].as_str().unwrap_or("");
     let id = &msg["id"];
 
-    // Auth required for ALL methods except initialize.
-    // Accepts: API key (sk-...) OR OAuth token (slaash_...)
-    if method != "initialize" {
+    // Auth required for tools/call only.
+    // initialize + tools/list are public (client needs to discover capabilities).
+    // Accepts: API key (sk-...) OR OAuth token (slaash_...) OR session token (session_...)
+    if method != "initialize" && method != "tools/list" && method != "ping" {
         if api_key.is_empty() {
             let err = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -6373,8 +6374,9 @@ async fn mcp_post(
             });
             return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
         }
-        // Try API key first, then OAuth token
+        // Try API key, session token, or OAuth token
         let is_valid = aether_agent::auth::validate_api_key(api_key).is_some()
+            || aether_agent::auth::validate_session_token(api_key).is_some()
             || aether_agent::auth::validate_oauth_token(api_key).is_some();
         if !is_valid {
             let err = serde_json::json!({
