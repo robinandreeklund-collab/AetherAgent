@@ -12,9 +12,9 @@
 <style>
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#0a0a0a;--surface:#111;--surface2:#161616;--border:rgba(255,255,255,0.08);
-  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.15);
-  --green:#22c55e;--red:#ef4444;--amber:#f59e0b;
+  --bg:#ffffff;--surface:#f8f9fa;--surface2:#f1f3f5;--border:rgba(0,0,0,0.08);
+  --text:#1a1a1a;--muted:#6b7280;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.08);
+  --green:#16a34a;--red:#dc2626;--amber:#d97706;
   --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
   --sidebar-w:220px;
 }
@@ -23,11 +23,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:
 a{color:var(--muted);text-decoration:none;transition:color .2s}
 a:hover{color:var(--text)}
 
-/* TOP NAV — matches landing page */
-.top-nav{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid var(--border);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.85)}
+/* TOP NAV — dark to match rest of site */
+.top-nav{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid rgba(255,255,255,0.08);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.95)}
 .wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
 .top-nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
-.top-nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease}
+.top-nav-links a{color:#888;font-weight:500;position:relative;transition:color .25s ease}
 .top-nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}
 .top-nav-links a:not(.btn-sm):hover{color:#fff}
 .top-nav-links a:not(.btn-sm):hover::after{width:100%}
@@ -44,8 +44,8 @@ a:hover{color:var(--text)}
 .sidebar-section{padding:0 .75rem;margin-bottom:1.25rem}
 .sidebar-label{font-size:.65rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:0 .5rem;margin-bottom:.4rem}
 .sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.45rem .75rem;border-radius:7px;font-size:.82rem;color:var(--muted);cursor:pointer;transition:all .15s}
-.sidebar-link:hover{background:rgba(255,255,255,0.04);color:var(--text)}
-.sidebar-link.active{background:var(--accent-glow);color:#fff;font-weight:500}
+.sidebar-link:hover{background:rgba(0,0,0,0.03);color:var(--text)}
+.sidebar-link.active{background:var(--accent-glow);color:var(--accent);font-weight:500}
 .sidebar-icon{font-size:.9rem;width:1.2rem;text-align:center}
 
 /* MAIN AREA */
@@ -54,13 +54,13 @@ a:hover{color:var(--text)}
 /* TOOLBAR */
 .toolbar{display:flex;align-items:center;gap:1rem;padding:.6rem 1.25rem;border-bottom:1px solid var(--border);background:var(--surface2)}
 .toolbar h2{font-size:.95rem;font-weight:600;flex:1}
-.toolbar .api-ver{font-size:.7rem;color:var(--muted);font-family:var(--mono);background:rgba(255,255,255,0.05);padding:.2rem .5rem;border-radius:4px}
+.toolbar .api-ver{font-size:.7rem;color:var(--muted);font-family:var(--mono);background:rgba(0,0,0,0.04);padding:.2rem .5rem;border-radius:4px}
 
 /* TABS */
 .tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1.25rem}
 .tab{padding:.55rem 1.1rem;font-size:.8rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
 .tab:hover{color:var(--text)}
-.tab.active{color:#fff;border-bottom-color:var(--accent)}
+.tab.active{color:var(--text);border-bottom-color:var(--accent)}
 
 /* SPLIT PANELS */
 .split{display:flex;flex:1;overflow:hidden}
@@ -81,15 +81,15 @@ a:hover{color:var(--text)}
 .advanced-opts{display:none}
 .advanced-opts.visible{display:block}
 .examples{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem}
-.example-chip{padding:.25rem .65rem;border-radius:14px;font-size:.7rem;font-weight:500;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.15);color:#93b4f5;cursor:pointer;transition:all .15s}
-.example-chip:hover{background:rgba(59,130,246,0.18);border-color:rgba(59,130,246,0.3)}
+.example-chip{padding:.25rem .65rem;border-radius:14px;font-size:.7rem;font-weight:500;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.18);color:#2563eb;cursor:pointer;transition:all .15s}
+.example-chip:hover{background:rgba(59,130,246,0.12);border-color:rgba(59,130,246,0.35)}
 
 /* RESPONSE PANEL */
 .response-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1rem}
 .response-tab{padding:.45rem .9rem;font-size:.75rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
 .response-tab:hover{color:var(--text)}
-.response-tab.active{color:#fff;border-bottom-color:var(--green)}
-.response-body{flex:1;overflow-y:auto;padding:1rem;font-family:var(--mono);font-size:.78rem;white-space:pre-wrap;color:#c9d1d9}
+.response-tab.active{color:var(--text);border-bottom-color:var(--green)}
+.response-body{flex:1;overflow-y:auto;padding:1rem;font-family:var(--mono);font-size:.78rem;white-space:pre-wrap;color:#374151}
 .response-meta{display:flex;gap:1rem;padding:.5rem 1rem;border-top:1px solid var(--border);font-size:.7rem;color:var(--muted);background:var(--surface2)}
 .response-meta .val{color:var(--green);font-weight:600}
 
@@ -97,8 +97,8 @@ a:hover{color:var(--text)}
 .code-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1rem}
 .code-tab{padding:.45rem .9rem;font-size:.72rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
 .code-tab:hover{color:var(--text)}
-.code-tab.active{color:#fff;border-bottom-color:var(--accent)}
-.code-body{flex:1;overflow-y:auto;padding:1rem;font-family:var(--mono);font-size:.75rem;white-space:pre-wrap;color:#c9d1d9;background:var(--bg)}
+.code-tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.code-body{flex:1;overflow-y:auto;padding:1rem;font-family:var(--mono);font-size:.75rem;white-space:pre-wrap;color:#374151;background:var(--surface)}
 
 /* LOADING */
 .loading-bar{height:2px;background:var(--accent);position:absolute;top:0;left:0;width:0;transition:width .3s;z-index:10}
@@ -186,25 +186,25 @@ a:hover{color:var(--text)}
 .mobile-tabs::-webkit-scrollbar{display:none}
 .mobile-tab{padding:.55rem .85rem;font-size:.75rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0;transition:color .15s}
 .mobile-tab:hover{color:var(--text)}
-.mobile-tab.active{color:#fff;border-bottom-color:var(--accent)}
+.mobile-tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
 
-/* CUSTOM SCROLLBARS — dark, minimal */
+/* CUSTOM SCROLLBARS — light, minimal */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}
-*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.12);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,0.22)}
+*{scrollbar-width:thin;scrollbar-color:rgba(0,0,0,0.12) transparent}
 
-/* CUSTOM SELECT/DROPDOWN — modern dark */
-.field select{appearance:none;-webkit-appearance:none;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right .85rem center;background-size:10px 6px;padding-right:2.2rem;cursor:pointer}
+/* CUSTOM SELECT/DROPDOWN — light */
+.field select{appearance:none;-webkit-appearance:none;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E") no-repeat right .85rem center;background-size:10px 6px;padding-right:2.2rem;cursor:pointer}
 .field select:focus{border-color:var(--accent);outline:none}
-.field select option{background:var(--surface);color:var(--text);padding:.5rem}
+.field select option{background:#fff;color:var(--text);padding:.5rem}
 
 /* WELCOME PANEL */
 .welcome{position:absolute;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:2rem;overflow-y:auto}
 .welcome.hidden{display:none}
 .welcome-inner{max-width:680px;text-align:center}
-.welcome-inner h1{font-size:clamp(1.8rem,4vw,2.5rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:.75rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.welcome-inner h1{font-size:clamp(1.8rem,4vw,2.5rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:.75rem;background:linear-gradient(to bottom,#1a1a1a 40%,#6b7280);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
 .welcome-inner .sub{color:var(--muted);font-size:1rem;margin-bottom:2rem;line-height:1.6}
 .welcome-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem;text-align:left}
 .welcome-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem;transition:all .2s}
@@ -217,8 +217,8 @@ a:hover{color:var(--text)}
 .welcome-limits .limit-val{color:var(--accent);font-weight:600;font-family:var(--mono)}
 .btn-start{padding:.85rem 2.5rem;border-radius:10px;font-size:1rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s}
 .btn-start:hover{background:#2563eb;transform:translateY(-2px)}
-.btn-outline{padding:.65rem 1.5rem;border-radius:8px;font-size:.85rem;font-weight:500;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .2s;margin-left:.75rem}
-.btn-outline:hover{border-color:var(--accent);color:var(--text)}
+.btn-outline{padding:.65rem 1.5rem;border-radius:8px;font-size:.85rem;font-weight:500;border:1px solid rgba(0,0,0,0.12);background:transparent;color:var(--muted);cursor:pointer;transition:all .2s;margin-left:.75rem}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
 /* welcome-grid responsive handled by main breakpoints above */
 </style>
 </head>
@@ -232,7 +232,7 @@ a:hover{color:var(--text)}
     <a href="/playground" class="active">Playground</a>
     <a href="/mcp" class="nav-hide-phone">MCP</a>
     <a href="/keys" class="nav-hide-mobile">API Keys</a>
-    <span class="nav-hide-mobile" style="font-size:.75rem;color:var(--muted)"><span class="status-dot"></span>Operational</span>
+    <span class="nav-hide-mobile" style="font-size:.75rem;color:#888"><span class="status-dot"></span>Operational</span>
     <button class="btn-sm" onclick="window.location='/keys'">Get API Key</button>
   </div>
 </div>
@@ -337,7 +337,7 @@ a:hover{color:var(--text)}
           <button class="btn-outline" onclick="window.location='/keys'">Get API Key</button>
         </div>
 
-        <p style="font-size:.72rem;color:#555;margin-top:1.5rem">Sign up for an API key to unlock 1,000 req/day, all primitives, and a usage dashboard.</p>
+        <p style="font-size:.72rem;color:#9ca3af;margin-top:1.5rem">Sign up for an API key to unlock 1,000 req/day, all primitives, and a usage dashboard.</p>
       </div>
     </div>
 
@@ -392,7 +392,7 @@ a:hover{color:var(--text)}
             <div class="field-row" style="margin-top:.75rem">
               <div class="field"><label>Follow links</label><select id="inp-follow"><option value="false">No</option><option value="true">Yes — follow relevant links</option></select></div>
             </div>
-            <div style="font-size:.68rem;color:#555;margin-top:.35rem;line-height:1.4">Follow links: auto-follows top-ranked links, fetches their content, and merges results. Gives deeper answers when the page links to relevant sub-pages.</div>
+            <div style="font-size:.68rem;color:#9ca3af;margin-top:.35rem;line-height:1.4">Follow links: auto-follows top-ranked links, fetches their content, and merges results. Gives deeper answers when the page links to relevant sub-pages.</div>
           </div>
           <button class="btn-run" id="btn-run" onclick="runExtract()">Run slaash.extract</button>
         </div>
@@ -586,7 +586,7 @@ a:hover{color:var(--text)}
 
         <!-- TOON view -->
         <div id="view-toon" style="display:none;flex-direction:column;flex:1;overflow:hidden">
-          <div class="response-body" id="toon-body" style="font-family:var(--mono);font-size:.8rem;line-height:1.5;color:#79c0ff">
+          <div class="response-body" id="toon-body" style="font-family:var(--mono);font-size:.8rem;line-height:1.5;color:#2563eb">
             <span style="color:var(--muted)">// TOON output — Token-Oriented Object Notation</span>
           </div>
         </div>
@@ -748,7 +748,7 @@ async function runExtract() {
         const label = (n.label || '').substring(0, 80);
         const el = document.createElement('label');
         el.style.cssText = 'display:flex;align-items:center;gap:.5rem;padding:.3rem .5rem;border-radius:6px;cursor:pointer;font-size:.78rem;color:var(--muted);transition:background .15s';
-        el.onmouseenter = () => el.style.background = 'rgba(255,255,255,0.03)';
+        el.onmouseenter = () => el.style.background = 'rgba(0,0,0,0.02)';
         el.onmouseleave = () => el.style.background = '';
         el.innerHTML = '<input type="checkbox" value="' + n.id + '" style="accent-color:var(--green)">'
           + '<span style="color:var(--accent);font-family:var(--mono);font-size:.7rem;min-width:1.5rem">#' + n.id + '</span>'
@@ -1206,7 +1206,6 @@ function getPlaygroundUser() {
 // Init
 updateCodePreview();
 </script>
-<div data-component="footer"></div>
 <script src="/components.js"></script>
 </body>
 </html>
