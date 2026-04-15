@@ -5,6 +5,7 @@ pub mod adaptive;
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
 pub mod arena_dom;
 pub mod arena_dom_sink;
+pub mod auth;
 pub mod bot_detect;
 pub(crate) mod causal;
 pub(crate) mod collab;

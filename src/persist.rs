@@ -20,10 +20,10 @@ const POOL_MAX_READERS: usize = 4;
 /// Connection pool: 1 writer + N readers for concurrent access.
 /// Writer is protected by Mutex (SQLite requires single-writer).
 /// Readers are pooled in a Mutex<Vec> — take/return pattern.
-struct ConnectionPool {
-    writer: Option<Connection>,
-    readers: Vec<Connection>,
-    db_path: String,
+pub struct ConnectionPool {
+    pub writer: Option<Connection>,
+    pub readers: Vec<Connection>,
+    pub db_path: String,
     /// OPT-D1: Round-robin counter for reader selection.
     /// Atomic so it can be incremented without mutable borrow.
     reader_idx: AtomicUsize,
@@ -41,7 +41,7 @@ impl ConnectionPool {
 
     /// OPT-D1: Round-robin reader selection. Distributes reads across all
     /// reader connections instead of always using readers[0].
-    fn next_reader(&self) -> Option<&Connection> {
+    pub fn next_reader(&self) -> Option<&Connection> {
         if self.readers.is_empty() {
             return self.writer.as_ref();
         }
@@ -136,6 +136,11 @@ pub fn init(db_path: &str) -> Result<(), String> {
 }
 
 /// Check if persistence is initialized.
+/// Get DB lock for external modules (auth.rs)
+pub fn get_db_lock() -> Option<std::sync::MutexGuard<'static, ConnectionPool>> {
+    DB.lock().ok()
+}
+
 pub fn is_initialized() -> bool {
     DB.lock().map(|pool| pool.writer.is_some()).unwrap_or(false)
 }
