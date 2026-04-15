@@ -1264,7 +1264,17 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
         result
     };
 
-    (StatusCode::OK, result).into_response()
+    // Set token headers for middleware usage logging
+    let tokens_in = (raw_html_chars / 4) as i64;
+    let tokens_out = (result.len() / 4) as i64;
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = tokens_in.to_string().parse() {
+        headers.insert("x-tokens-in", v);
+    }
+    if let Ok(v) = tokens_out.to_string().parse() {
+        headers.insert("x-tokens-out", v);
+    }
+    (StatusCode::OK, headers, result).into_response()
 }
 
 /// Auto-follow relevant link nodes: fetch targets, run CRFR, REPLACE link nodes
@@ -7370,14 +7380,13 @@ fn build_router(state: AppState) -> Router {
                 }
             }
 
-            // Measure request body size (tokens in)
-            let req_size = req
+            // Measure request body size (fallback tokens in)
+            let req_content_len = req
                 .headers()
                 .get(axum::http::header::CONTENT_LENGTH)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|v| v.parse::<i64>().ok())
                 .unwrap_or(0);
-            let tokens_in = req_size / 4;
 
             let resp = next.run(req).await;
 
@@ -7385,14 +7394,20 @@ fn build_router(state: AppState) -> Router {
             let log_auth = key_info.or(session_key_id);
             if let Some((key_id, _user_id)) = log_auth {
                 let elapsed = t0.elapsed().as_millis() as i64;
-                // Measure response size (tokens out) from Content-Length
-                let resp_size = resp
+                // Prefer handler-provided token counts (X-Tokens-In/Out)
+                // which reflect actual CRFR savings, not HTTP body sizes
+                let tokens_in = resp
                     .headers()
-                    .get(axum::http::header::CONTENT_LENGTH)
+                    .get("x-tokens-in")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .unwrap_or(req_content_len / 4);
+                let tokens_out = resp
+                    .headers()
+                    .get("x-tokens-out")
                     .and_then(|v| v.to_str().ok())
                     .and_then(|v| v.parse::<i64>().ok())
                     .unwrap_or(0);
-                let tokens_out = resp_size / 4;
                 aether_agent::auth::log_usage(key_id, &endpoint, elapsed, tokens_in, tokens_out);
                 // For session-based auth (no Bearer header), also increment
                 // the key's request counters (validate_api_key does this for
