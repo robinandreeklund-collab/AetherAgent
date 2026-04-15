@@ -7114,6 +7114,15 @@ fn build_router(state: AppState) -> Router {
         .route("/landing/2", get(landing_concept_2))
         .route("/try", get(landing_try))
         .route("/playground", get(landing_playground))
+        .route("/keys", get(landing_keys))
+        .route("/usage", get(landing_usage))
+        // Auth API
+        .route("/api/auth/signup", post(auth_signup))
+        .route("/api/auth/login", post(auth_login))
+        .route("/api/auth/keys/create", post(auth_create_key))
+        .route("/api/auth/keys/list", post(auth_list_keys))
+        .route("/api/auth/keys/delete", post(auth_delete_key))
+        .route("/api/auth/usage", post(auth_usage))
         .route("/mission", get(landing_mission))
         .route("/timeline", get(landing_timeline))
         .route("/live", get(landing_live))
@@ -7578,6 +7587,152 @@ fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
     });
 }
 
+// ─── Auth API Endpoints ──────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct SignupRequest {
+    email: String,
+    password: String,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct LoginRequest {
+    email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct CreateKeyRequest {
+    user_id: i64,
+    #[serde(default = "default_key_name")]
+    name: String,
+}
+
+fn default_key_name() -> String {
+    "default".to_string()
+}
+
+#[derive(Deserialize)]
+struct DeleteKeyRequest {
+    key_id: i64,
+    user_id: i64,
+}
+
+#[derive(Deserialize)]
+struct UsageRequest {
+    user_id: i64,
+    #[serde(default = "default_since")]
+    since_hours: i64,
+}
+
+fn default_since() -> i64 {
+    24
+}
+
+async fn auth_signup(Json(req): Json<SignupRequest>) -> impl IntoResponse {
+    match aether_agent::auth::signup(&req.email, &req.password, &req.name) {
+        Ok((user, api_key)) => {
+            let body = serde_json::json!({
+                "status": "ok",
+                "user": user,
+                "api_key": api_key,
+                "message": "Save your API key — it won't be shown again."
+            });
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::BAD_REQUEST, body.to_string())
+        }
+    }
+}
+
+async fn auth_login(Json(req): Json<LoginRequest>) -> impl IntoResponse {
+    match aether_agent::auth::login(&req.email, &req.password) {
+        Ok(user) => {
+            let keys = aether_agent::auth::list_api_keys(user.id);
+            let body = serde_json::json!({
+                "status": "ok",
+                "user": user,
+                "api_keys": keys,
+            });
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::UNAUTHORIZED, body.to_string())
+        }
+    }
+}
+
+async fn auth_create_key(Json(req): Json<CreateKeyRequest>) -> impl IntoResponse {
+    match aether_agent::auth::create_api_key(req.user_id, &req.name) {
+        Ok((info, key)) => {
+            let body = serde_json::json!({
+                "status": "ok",
+                "key": info,
+                "api_key": key,
+                "message": "Save your API key — it won't be shown again."
+            });
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::BAD_REQUEST, body.to_string())
+        }
+    }
+}
+
+async fn auth_list_keys(Json(req): Json<serde_json::Value>) -> impl IntoResponse {
+    let user_id = req.get("user_id").and_then(|v| v.as_i64()).unwrap_or(0);
+    let keys = aether_agent::auth::list_api_keys(user_id);
+    let body = serde_json::json!({"status": "ok", "keys": keys});
+    (StatusCode::OK, body.to_string())
+}
+
+async fn auth_delete_key(Json(req): Json<DeleteKeyRequest>) -> impl IntoResponse {
+    match aether_agent::auth::delete_api_key(req.key_id, req.user_id) {
+        Ok(()) => {
+            let body = serde_json::json!({"status": "ok"});
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::BAD_REQUEST, body.to_string())
+        }
+    }
+}
+
+async fn auth_usage(Json(req): Json<UsageRequest>) -> impl IntoResponse {
+    let since_secs = req.since_hours * 3600;
+    let entries = aether_agent::auth::get_usage_stats(req.user_id, since_secs);
+    let body = serde_json::json!({
+        "status": "ok",
+        "entries": entries,
+        "count": entries.len(),
+        "period_hours": req.since_hours,
+    });
+    (StatusCode::OK, body.to_string())
+}
+
+async fn landing_keys() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/keys.html",
+        "landing-pages/keys.html",
+    ])
+    .await
+}
+
+async fn landing_usage() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/usage.html",
+        "landing-pages/usage.html",
+    ])
+    .await
+}
+
 // html5ever + ArenaDom recursive parsing needs 8MB stack for deeply nested HTML.
 fn main() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -7618,6 +7773,8 @@ async fn async_main() {
                 let profile_count = profiles.len();
                 aether_agent::resonance::import_domain_profiles(profiles);
                 eprintln!("[PERSIST] Loaded {profile_count} domain profiles (lazy-load: 0 fields preloaded)");
+                aether_agent::auth::init_auth_tables();
+                eprintln!("[AUTH] Tables initialized");
             }
             Err(e) => {
                 eprintln!("[PERSIST] WARNING: Failed to init DB: {e} — running in-memory only")
