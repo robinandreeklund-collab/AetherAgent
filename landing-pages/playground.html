@@ -23,12 +23,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:
 a{color:var(--muted);text-decoration:none;transition:color .2s}
 a:hover{color:var(--text)}
 
-/* TOP NAV */
-.top-nav{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid var(--border);background:var(--surface)}
-.wordmark{font-size:1.15rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
-.top-nav-links{display:flex;align-items:center;gap:1.5rem;font-size:.82rem}
-.top-nav-links a{color:var(--muted);font-weight:500}
-.top-nav-links a:hover{color:#fff}
+/* TOP NAV — matches landing page */
+.top-nav{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid var(--border);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.85)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.top-nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.top-nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease}
+.top-nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}
+.top-nav-links a:not(.btn-sm):hover{color:#fff}
+.top-nav-links a:not(.btn-sm):hover::after{width:100%}
 .top-nav-links a.active{color:#fff}
 .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:5px}
 .btn-sm{padding:.4rem 1rem;border-radius:7px;font-size:.78rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s}
@@ -222,21 +224,21 @@ a:hover{color:var(--text)}
           <button class="btn-run" onclick="runAct()">Run slaash.act</button>
         </div>
 
-        <!-- Feedback section -->
+        <!-- Feedback section — per-node selection -->
         <div id="feedback-section" style="display:none;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
-          <div style="font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:.5rem">Was this helpful?</div>
-          <div style="display:flex;gap:.5rem">
-            <button class="btn-sm" style="background:var(--green)" onclick="sendFeedback(true)">Yes, correct</button>
-            <button class="btn-sm" style="background:var(--red)" onclick="sendFeedback(false)">No, wrong</button>
-          </div>
+          <div style="font-size:.8rem;font-weight:600;color:var(--text);margin-bottom:.15rem">Teach slaash.learn</div>
+          <div style="font-size:.72rem;color:var(--muted);margin-bottom:.75rem">Select the nodes that contained the correct answer. This teaches CRFR to rank them higher next time.</div>
+          <div id="feedback-nodes" style="display:flex;flex-direction:column;gap:.35rem;max-height:200px;overflow-y:auto"></div>
+          <button class="btn-sm" style="margin-top:.75rem;background:var(--green)" onclick="sendFeedback()">Send feedback</button>
           <div id="feedback-msg" style="font-size:.72rem;color:var(--muted);margin-top:.35rem"></div>
         </div>
       </div>
 
-      <!-- RIGHT: Response + Code -->
+      <!-- RIGHT: Response + Markdown + Code -->
       <div class="panel-right">
         <div class="response-tabs">
           <div class="response-tab active" onclick="showResponseTab('response')">Response</div>
+          <div class="response-tab" onclick="showResponseTab('markdown')">Markdown</div>
           <div class="response-tab" onclick="showResponseTab('code')">Code</div>
         </div>
 
@@ -250,6 +252,13 @@ a:hover{color:var(--text)}
             <span>Savings: <span class="val" id="meta-savings">-</span></span>
             <span>Time: <span class="val" id="meta-time">-</span></span>
             <span>Nodes: <span class="val" id="meta-nodes">-</span></span>
+          </div>
+        </div>
+
+        <!-- Markdown view -->
+        <div id="view-markdown" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+          <div class="response-body" id="markdown-body" style="font-family:var(--font);font-size:.85rem;line-height:1.7">
+            <span style="color:var(--muted)">// Markdown output will appear here</span>
           </div>
         </div>
 
@@ -298,6 +307,7 @@ function showResponseTab(view) {
   document.querySelectorAll('.response-tab').forEach(t => t.classList.remove('active'));
   event.target.classList.add('active');
   document.getElementById('view-response').style.display = view === 'response' ? 'flex' : 'none';
+  document.getElementById('view-markdown').style.display = view === 'markdown' ? 'flex' : 'none';
   document.getElementById('view-code').style.display = view === 'code' ? 'flex' : 'none';
 }
 
@@ -346,27 +356,53 @@ async function runExtract() {
   startLoading();
   const t0 = performance.now();
   try {
-    const res = await fetch('/api/parse-crfr', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        url, goal,
-        top_n: parseInt(document.getElementById('inp-topn').value) || 10,
-        output_format: document.getElementById('inp-format').value,
-        run_js: document.getElementById('inp-js').value === 'true'
+    // Fetch both JSON and Markdown in parallel
+    const [resJson, resMd] = await Promise.all([
+      fetch('/api/parse-crfr', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          url, goal,
+          top_n: parseInt(document.getElementById('inp-topn').value) || 10,
+          output_format: 'json',
+          run_js: document.getElementById('inp-js').value === 'true'
+        })
+      }),
+      fetch('/api/parse-crfr', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ url, goal, output_format: 'markdown' })
       })
-    });
-    if (!res.ok) throw new Error('Server returned ' + res.status);
-    const data = await res.json();
+    ]);
+    if (!resJson.ok) throw new Error('Server returned ' + resJson.status);
+    const data = await resJson.json();
+    const mdText = await resMd.text();
     const elapsed = Math.round(performance.now() - t0);
     if (data.error) throw new Error(data.error);
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('meta-tokens').textContent = (data.total_nodes || 0) + ' DOM -> ' + (data.node_count || 0) + ' nodes';
+    document.getElementById('markdown-body').textContent = mdText;
+    document.getElementById('meta-tokens').textContent = (data.total_nodes || 0) + ' DOM \u2192 ' + (data.node_count || 0) + ' nodes';
     const savings = data.total_nodes > 0 ? ((1 - (data.node_count || 0) / data.total_nodes) * 100).toFixed(1) + '%' : '-';
     document.getElementById('meta-savings').textContent = savings;
     document.getElementById('meta-time').textContent = elapsed + 'ms';
     document.getElementById('meta-nodes').textContent = data.node_count || 0;
-    document.getElementById('feedback-section').style.display = '';
+    // Build per-node feedback checkboxes
+    const fbDiv = document.getElementById('feedback-nodes');
+    fbDiv.innerHTML = '';
+    if (data.nodes && data.nodes.length > 0) {
+      data.nodes.forEach(n => {
+        const label = (n.label || '').substring(0, 80);
+        const el = document.createElement('label');
+        el.style.cssText = 'display:flex;align-items:center;gap:.5rem;padding:.3rem .5rem;border-radius:6px;cursor:pointer;font-size:.78rem;color:var(--muted);transition:background .15s';
+        el.onmouseenter = () => el.style.background = 'rgba(255,255,255,0.03)';
+        el.onmouseleave = () => el.style.background = '';
+        el.innerHTML = '<input type="checkbox" value="' + n.id + '" style="accent-color:var(--green)">'
+          + '<span style="color:var(--accent);font-family:var(--mono);font-size:.7rem;min-width:1.5rem">#' + n.id + '</span>'
+          + '<span style="color:var(--text);font-weight:500">[' + (n.role||'?') + ']</span> '
+          + '<span>' + label + (label.length >= 80 ? '\u2026' : '') + '</span>';
+        fbDiv.appendChild(el);
+      });
+      document.getElementById('feedback-section').style.display = '';
+    }
     updateCodePreview();
   } catch(err) {
     document.getElementById('response-body').textContent = '// Error: ' + err.message;
@@ -414,17 +450,22 @@ async function runAct() {
   } finally { stopLoading(); }
 }
 
-async function sendFeedback(positive) {
-  if (!lastResult || !lastResult.nodes || !lastUrl) return;
-  const ids = positive ? lastResult.nodes.slice(0,3).map(n => n.id) : [];
+async function sendFeedback() {
+  if (!lastUrl) return;
+  const checkboxes = document.querySelectorAll('#feedback-nodes input[type=checkbox]:checked');
+  const ids = Array.from(checkboxes).map(cb => parseInt(cb.value));
+  if (ids.length === 0) {
+    document.getElementById('feedback-msg').textContent = 'Select at least one node to send feedback.';
+    return;
+  }
   try {
     await fetch('/api/crfr-feedback', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ url: lastUrl, goal: lastGoal, successful_node_ids: ids })
     });
-    document.getElementById('feedback-msg').textContent = positive
-      ? 'Thanks! Slaash will rank these nodes higher next time.'
-      : 'Noted. Results will be adjusted on next query.';
+    document.getElementById('feedback-msg').textContent =
+      'Sent! Nodes #' + ids.join(', #') + ' will rank higher on future queries for this URL.';
+    document.getElementById('feedback-msg').style.color = 'var(--green)';
   } catch(e) {
     document.getElementById('feedback-msg').textContent = 'Feedback failed: ' + e.message;
   }
