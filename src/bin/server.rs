@@ -3133,9 +3133,28 @@ async fn ws_api_fetch_op(
 /// MCP JSON-RPC via WebSocket — initialize, tools/list, tools/call, ping
 async fn ws_mcp_handler(
     ws: axum::extract::WebSocketUpgrade,
+    headers: HeaderMap,
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> impl IntoResponse {
+    // Auth check before WebSocket upgrade
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let api_key = if auth.starts_with("Bearer ") {
+        &auth[7..]
+    } else {
+        ""
+    };
+    if api_key.is_empty() || aether_agent::auth::validate_api_key(api_key).is_none() {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "API key required for WebSocket MCP. Set Authorization: Bearer sk-... header.",
+        )
+            .into_response();
+    }
     ws.on_upgrade(move |socket| handle_ws_mcp(socket, state))
+        .into_response()
 }
 
 async fn handle_ws_mcp(mut socket: axum::extract::ws::WebSocket, state: AppState) {
@@ -6253,8 +6272,16 @@ async fn mcp_post(
     let method = msg["method"].as_str().unwrap_or("");
     let id = &msg["id"];
 
-    if method != "initialize" && !api_key.is_empty() {
-        // Validate key
+    // API key required for ALL methods except initialize
+    if method != "initialize" {
+        if api_key.is_empty() {
+            let err = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32001, "message": "API key required. Set Authorization: Bearer sk-... header. Get a key at https://www.slaash.ai/keys"}
+            });
+            return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
+        }
         if aether_agent::auth::validate_api_key(api_key).is_none() {
             let err = serde_json::json!({
                 "jsonrpc": "2.0",
@@ -6263,13 +6290,6 @@ async fn mcp_post(
             });
             return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
         }
-    } else if method != "initialize" && api_key.is_empty() {
-        let err = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {"code": -32001, "message": "API key required. Set Authorization: Bearer sk-... header. Get a key at https://www.slaash.ai/keys"}
-        });
-        return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
     }
 
     let params = &msg["params"];
