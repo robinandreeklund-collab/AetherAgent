@@ -3268,7 +3268,7 @@ fn dispatch_tool_sync(_server: &AetherMcpServer, name: &str, args: &serde_json::
         }
         "crfr_feedback" => {
             let ids_json = json_str("successful_node_ids");
-            let user_id = params["user_id"].as_i64().unwrap_or(0);
+            let user_id = args["user_id"].as_i64().unwrap_or(0);
             aether_agent::crfr_feedback_user(s("url"), s("goal"), &ids_json, user_id)
         }
         "crfr_clear" => {
