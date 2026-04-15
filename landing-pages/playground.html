@@ -106,11 +106,87 @@ a:hover{color:var(--text)}
 @keyframes load-progress{0%{width:0}50%{width:60%}90%{width:85%}100%{width:92%}}
 
 /* RESPONSIVE */
+
+/* Tablet: ≤900px */
 @media(max-width:900px){
   .sidebar{display:none}
+  .mobile-tabs{display:flex}
+  .app{flex-direction:column}
+  .main{flex:1;min-height:0}
   .split{flex-direction:column}
-  .panel-left{border-right:none;border-bottom:1px solid var(--border)}
+  .panel-left{border-right:none;border-bottom:1px solid var(--border);max-height:50vh;overflow-y:auto}
+  .panel-right{min-height:40vh}
+  .top-nav-links .nav-hide-mobile{display:none}
+  .top-nav-links{gap:1rem}
+  .welcome-grid{grid-template-columns:repeat(2,1fr)}
+  .welcome-limits{flex-wrap:wrap;gap:.75rem 1.5rem;justify-content:center}
 }
+
+/* Phone: ≤600px */
+@media(max-width:600px){
+  html{font-size:15px}
+  .top-nav{padding:0 .75rem;height:48px}
+  .wordmark{font-size:1.1rem}
+  .top-nav-links{gap:.6rem;font-size:.8rem}
+  .top-nav-links .nav-hide-phone{display:none}
+  .btn-sm{padding:.35rem .7rem;font-size:.72rem}
+  .app{height:auto;min-height:calc(100vh - 48px);flex-direction:column}
+  .mobile-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;gap:0;padding:0 .5rem;scrollbar-width:none}
+  .mobile-tabs::-webkit-scrollbar{display:none}
+  .mobile-tab{padding:.5rem .65rem;font-size:.7rem;white-space:nowrap;flex-shrink:0}
+  .main{overflow:visible}
+  .toolbar{padding:.5rem .75rem}
+  .toolbar h2{font-size:.85rem}
+  .toolbar .api-ver{font-size:.65rem;padding:.15rem .35rem}
+  .split{flex-direction:column;overflow:visible}
+  .panel-left{max-height:none;overflow-y:visible;padding:.75rem;border-right:none;border-bottom:1px solid var(--border)}
+  .panel-right{min-height:50vh;overflow:visible}
+  .field label{font-size:.7rem}
+  .field input,.field textarea,.field select{font-size:.85rem;padding:.6rem .75rem;border-radius:6px}
+  .field-row{flex-direction:column;gap:.5rem}
+  .btn-run{padding:.75rem;font-size:.88rem;border-radius:8px}
+  .examples{gap:.3rem}
+  .example-chip{font-size:.68rem;padding:.25rem .55rem}
+  .response-tabs{padding:0 .5rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;flex-shrink:0}
+  .response-tabs::-webkit-scrollbar{display:none}
+  .response-tab{padding:.4rem .7rem;font-size:.72rem;white-space:nowrap;flex-shrink:0}
+  .response-body{padding:.75rem;font-size:.75rem}
+  .response-meta{flex-wrap:wrap;gap:.5rem .75rem;padding:.4rem .75rem;font-size:.68rem}
+  .code-tabs{padding:0 .5rem}
+  .code-tab{padding:.4rem .7rem;font-size:.7rem}
+  .code-body{padding:.75rem;font-size:.72rem}
+  /* Welcome */
+  .welcome{position:fixed;top:48px;left:0;right:0;bottom:0;padding:1.25rem;align-items:flex-start;padding-top:2rem}
+  .welcome-inner{max-width:100%}
+  .welcome-inner h1{font-size:1.6rem}
+  .welcome-inner .sub{font-size:.88rem;margin-bottom:1.25rem}
+  .welcome-grid{grid-template-columns:1fr;gap:.6rem;margin-bottom:1.25rem}
+  .welcome-card{padding:1rem}
+  .welcome-card h3{font-size:.82rem}
+  .welcome-card p{font-size:.72rem}
+  .welcome-limits{flex-direction:column;gap:.4rem;align-items:center;margin-bottom:1.25rem;font-size:.72rem}
+  .btn-start{padding:.75rem 2rem;font-size:.92rem}
+  .btn-outline{margin-left:0;margin-top:.5rem;display:inline-block}
+  /* Feedback */
+  #feedback-nodes{max-height:160px}
+  .advanced-opts .field-row{flex-direction:column;gap:.5rem}
+}
+
+/* Small phone: ≤380px */
+@media(max-width:380px){
+  html{font-size:14px}
+  .top-nav{padding:0 .5rem}
+  .mobile-tab{padding:.45rem .5rem;font-size:.65rem}
+  .welcome-inner h1{font-size:1.35rem}
+  .panel-left{padding:.5rem}
+}
+
+/* MOBILE TAB BAR — replaces sidebar on ≤900px */
+.mobile-tabs{display:none;border-bottom:1px solid var(--border);background:var(--surface2);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.mobile-tabs::-webkit-scrollbar{display:none}
+.mobile-tab{padding:.55rem .85rem;font-size:.75rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0;transition:color .15s}
+.mobile-tab:hover{color:var(--text)}
+.mobile-tab.active{color:#fff;border-bottom-color:var(--accent)}
 
 /* CUSTOM SCROLLBARS — dark, minimal */
 ::-webkit-scrollbar{width:6px;height:6px}
@@ -125,7 +201,7 @@ a:hover{color:var(--text)}
 .field select option{background:var(--surface);color:var(--text);padding:.5rem}
 
 /* WELCOME PANEL */
-.welcome{position:absolute;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:2rem}
+.welcome{position:absolute;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:2rem;overflow-y:auto}
 .welcome.hidden{display:none}
 .welcome-inner{max-width:680px;text-align:center}
 .welcome-inner h1{font-size:clamp(1.8rem,4vw,2.5rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:.75rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
@@ -143,7 +219,7 @@ a:hover{color:var(--text)}
 .btn-start:hover{background:#2563eb;transform:translateY(-2px)}
 .btn-outline{padding:.65rem 1.5rem;border-radius:8px;font-size:.85rem;font-weight:500;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .2s;margin-left:.75rem}
 .btn-outline:hover{border-color:var(--accent);color:var(--text)}
-@media(max-width:700px){.welcome-grid{grid-template-columns:1fr}}
+/* welcome-grid responsive handled by main breakpoints above */
 </style>
 </head>
 <body>
@@ -152,11 +228,11 @@ a:hover{color:var(--text)}
 <div class="top-nav">
   <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
   <div class="top-nav-links">
-    <a href="/docs">Docs</a>
+    <a href="/docs" class="nav-hide-phone">Docs</a>
     <a href="/playground" class="active">Playground</a>
-    <a href="/mcp">MCP</a>
-    <a href="/keys">API Keys</a>
-    <span style="font-size:.75rem;color:var(--muted)"><span class="status-dot"></span>Operational</span>
+    <a href="/mcp" class="nav-hide-phone">MCP</a>
+    <a href="/keys" class="nav-hide-mobile">API Keys</a>
+    <span class="nav-hide-mobile" style="font-size:.75rem;color:var(--muted)"><span class="status-dot"></span>Operational</span>
     <button class="btn-sm" onclick="window.location='/keys'">Get API Key</button>
   </div>
 </div>
@@ -191,6 +267,22 @@ a:hover{color:var(--text)}
       <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon" style="color:var(--muted)">&equiv;</span> Usage</div>
       <div class="sidebar-link"><span class="sidebar-icon" style="color:var(--muted)">*</span> Settings</div>
     </div>
+  </div>
+
+  <!-- MOBILE TAB BAR (visible ≤900px) -->
+  <div class="mobile-tabs" id="mobile-tabs">
+    <div class="mobile-tab active" onclick="mobileSwitchTab('extract',this)">/&thinsp;Extract</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('search',this)">?&thinsp;Search</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('act',this)">&gt;&thinsp;Act</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('crawl',this)">&raquo;&thinsp;Crawl</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('stream',this)">&darr;&thinsp;Stream</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('plan',this)">&#x25A3;&thinsp;Plan</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('diff',this)">&Delta;&thinsp;Diff</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('render',this)">&lt;/&gt;&thinsp;Render</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('links',this)">&harr;&thinsp;Links</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('explore',this)">~&thinsp;Explore</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('learn',this)">+&thinsp;Learn</div>
+    <div class="mobile-tab" onclick="mobileSwitchTab('inspect',this)">!&thinsp;Inspect</div>
   </div>
 
   <!-- MAIN -->
@@ -534,6 +626,10 @@ function switchTab(tab) {
   document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
   const links = document.querySelectorAll('.sidebar-link');
   links.forEach(l => { if(l.textContent.trim().toLowerCase().startsWith(tab)) l.classList.add('active'); });
+  // Sync mobile tab bar
+  document.querySelectorAll('.mobile-tab').forEach(t => {
+    t.classList.toggle('active', t.textContent.trim().toLowerCase().includes(tab));
+  });
   document.getElementById('toolbar-title').textContent = 'slaash.' + tab;
   const allForms = ['form-extract','form-search','form-act','form-crawl','form-stream','form-plan','form-diff','form-render','form-links','form-explore','form-learn','form-inspect'];
   allForms.forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
@@ -1090,6 +1186,14 @@ async function sendFeedback() {
 
 function startPlayground() {
   document.getElementById('welcome-panel').classList.add('hidden');
+}
+
+function mobileSwitchTab(tab, el) {
+  document.querySelectorAll('.mobile-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  switchTab(tab);
+  // Scroll active tab into view
+  if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
 }
 
 function getPlaygroundUser() {
