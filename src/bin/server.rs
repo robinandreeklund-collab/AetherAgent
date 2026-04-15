@@ -8065,12 +8065,11 @@ async fn oauth_authorize_handler(
 }
 
 /// POST /oauth/token — Token exchange
-async fn oauth_token_handler(body: String) -> impl IntoResponse {
+async fn oauth_token_handler(headers: HeaderMap, body: String) -> impl IntoResponse {
     // Accept both JSON and form-urlencoded (OAuth spec uses form)
-    let params: HashMap<String, String> = if body.starts_with('{') {
+    let mut params: HashMap<String, String> = if body.starts_with('{') {
         serde_json::from_str(&body).unwrap_or_default()
     } else {
-        // Parse application/x-www-form-urlencoded
         body.split('&')
             .filter_map(|pair| {
                 let mut parts = pair.splitn(2, '=');
@@ -8080,6 +8079,24 @@ async fn oauth_token_handler(body: String) -> impl IntoResponse {
             })
             .collect()
     };
+
+    // Support Basic Auth: Authorization: Basic base64(client_id:client_secret)
+    if let Some(auth_header) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        if auth_header.starts_with("Basic ") {
+            if let Ok(decoded_bytes) = B64.decode(&auth_header[6..]) {
+                if let Ok(decoded) = String::from_utf8(decoded_bytes) {
+                    if let Some((cid, csec)) = decoded.split_once(':') {
+                        params
+                            .entry("client_id".to_string())
+                            .or_insert_with(|| cid.to_string());
+                        params
+                            .entry("client_secret".to_string())
+                            .or_insert_with(|| csec.to_string());
+                    }
+                }
+            }
+        }
+    }
 
     let grant_type = params.get("grant_type").map(|s| s.as_str()).unwrap_or("");
     let code = params.get("code").map(|s| s.as_str()).unwrap_or("");

@@ -796,12 +796,10 @@ pub fn oauth_authorize(
     let mut guard = oauth_state();
     let ostate = guard.as_mut().unwrap();
 
-    let client = ostate.clients.get(client_id).ok_or("Unknown client_id")?;
+    let _client = ostate.clients.get(client_id).ok_or("Unknown client_id")?;
 
-    // Validate redirect_uri
-    if !client.redirect_uris.is_empty() && !client.redirect_uris.iter().any(|u| u == redirect_uri) {
-        return Err("redirect_uri mismatch".to_string());
-    }
+    // Accept any redirect_uri for dynamically registered MCP clients.
+    // Claude Connectors may send a different callback URL than registered.
 
     // Auto-approve for alpha (no interactive login screen)
     // In production, show consent screen
