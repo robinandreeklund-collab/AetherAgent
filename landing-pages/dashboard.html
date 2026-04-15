@@ -172,7 +172,7 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
     <a href="/timeline">Timeline</a>
     <a href="/live">Live</a>
     <a href="/docs">Docs</a>
-    <a class="btn-sm" href="/try">Try alpha</a>
+    <a class="btn-sm" href="/playground">Playground</a>
   </div>
 </nav>
 
@@ -353,7 +353,7 @@ function update(d){
   const sites = d.sites || [];
   const lbEl = document.getElementById('lb-rows');
   if(sites.length === 0){
-    lbEl.innerHTML = '<div class="lb-row"><div class="lb-domain" style="color:#444">No sites profiled yet. Try the <a href="/try" style="color:var(--blue)">alpha playground</a>.</div></div>';
+    lbEl.innerHTML = '<div class="lb-row"><div class="lb-domain" style="color:#444">No sites profiled yet. Try the <a href="/playground" style="color:var(--blue)">playground</a>.</div></div>';
     return;
   }
   const maxQ = Math.max(...sites.map(s=>s.queries||1));

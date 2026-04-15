@@ -68,7 +68,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
         <a href="/timeline"${current==='timeline'?' class="active"':''}>Timeline</a>
         <a href="/live"${current==='live'?' class="active"':''}>Live</a>
         <a href="/docs"${current==='docs'?' class="active"':''}>Docs</a>
-        <a class="btn-sm btn-accent" href="/try">Try alpha</a>
+        <a class="btn-sm btn-accent" href="/playground">Playground</a>
       </div>
     `;
   }
@@ -108,7 +108,7 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
     <div class="footer-center">
       <div style="font-size:1.15rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.35rem">Distill it yourself</div>
       <div style="font-size:.8rem;color:#888;margin-bottom:.75rem">Any URL. Any question.</div>
-      <a class="btn-sm btn-accent" href="/try" style="font-size:.75rem;padding:.45rem 1.25rem;border-radius:8px;background:#3b82f6;color:#fff;text-decoration:none;display:inline-block">Try alpha &rarr;</a>
+      <a class="btn-sm btn-accent" href="/playground" style="font-size:.75rem;padding:.45rem 1.25rem;border-radius:8px;background:#3b82f6;color:#fff;text-decoration:none;display:inline-block">Playground &rarr;</a>
     </div>
     <div class="footer-right">
       <div class="footer-logo" style="margin-bottom:.5rem">sl<span class="fl-slash">/</span>sh</div>
