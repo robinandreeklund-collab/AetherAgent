@@ -1986,6 +1986,59 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
     .to_string()
 }
 
+/// Per-user feedback: isolates causal memory per user_id.
+/// user_id=0 falls back to global feedback (backward compatible).
+pub fn crfr_feedback_user(
+    url: &str,
+    goal: &str,
+    successful_node_ids_json: &str,
+    user_id: i64,
+) -> String {
+    if user_id == 0 {
+        return crfr_feedback(url, goal, successful_node_ids_json);
+    }
+    let ids: Vec<u32> = serde_json::from_str(successful_node_ids_json).unwrap_or_default();
+    if ids.is_empty() {
+        return r#"{"status":"no_ids"}"#.to_string();
+    }
+
+    // Try to find user-specific field
+    let user_hash_js = resonance::hash_url_user_pub(url, user_id, true);
+    let user_hash_no = resonance::hash_url_user_pub(url, user_id, false);
+
+    let mut field = if let Some(f) = resonance::get_field_by_hash(user_hash_js) {
+        f
+    } else if let Some(f) = resonance::get_field_by_hash(user_hash_no) {
+        f
+    } else {
+        // No user field yet — try global and clone for this user
+        let global = if let Some(f) = resonance::get_field_for_feedback(url, true) {
+            f
+        } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
+            f
+        } else {
+            return r#"{"status":"no_field","message":"No cached field. Run parse_crfr first."}"#
+                .to_string();
+        };
+        let mut user_field = global.clone();
+        user_field.url_hash = user_hash_no;
+        // Clear global causal memory — user starts fresh
+        user_field.clear_causal_memory();
+        user_field
+    };
+
+    field.feedback(goal, &ids);
+    resonance::save_field(&field);
+
+    serde_json::json!({
+        "status": "ok",
+        "nodes_updated": ids.len(),
+        "user_id": user_id,
+        "isolated": true,
+    })
+    .to_string()
+}
+
 /// Implicit feedback: infer useful nodes from LLM response text.
 /// Closes the learning loop without explicit node ID tracking.
 #[wasm_bindgen]

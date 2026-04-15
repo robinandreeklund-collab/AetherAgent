@@ -739,6 +739,18 @@ fn hash_url(url: &str) -> u64 {
     h
 }
 
+/// Hash URL + user_id for per-user isolated CRFR fields.
+/// user_id=0 means global/anonymous (shared baseline).
+fn hash_url_user(url: &str, user_id: i64) -> u64 {
+    if user_id == 0 {
+        hash_url(url)
+    } else {
+        // Mix user_id into the hash to create isolated namespace
+        let user_url = format!("{}#__user_{}", url, user_id);
+        hash_url(&user_url)
+    }
+}
+
 /// ALG-1 fix: Ordöverlapp-baserad goal-clustering.
 ///
 /// Tidigare: top-3 ord sorterade → "latest news headlines" och "breaking news stories"
@@ -3455,6 +3467,23 @@ impl ResonanceField {
     /// Regenerate text_hv for all nodes from node_labels.
     /// Called after deserialization since text_hv is #[serde(skip)].
     /// Takes <1ms per 1000 nodes.
+    /// Clear all causal memory from nodes (for creating fresh per-user fields).
+    pub fn clear_causal_memory(&mut self) {
+        for state in self.nodes.values_mut() {
+            state.causal_memory = Hypervector::zero();
+            state.hit_count = 0;
+            state.last_goal_hash = 0;
+            state.last_hit_ms = 0;
+            state.query_count = 0;
+            state.miss_count = 0;
+        }
+        self.propagation_stats.clear();
+        self.concept_memory.clear();
+        self.concept_memory_order.clear();
+        self.total_feedback = 0;
+        self.total_successful_nodes = 0;
+    }
+
     pub fn regenerate_text_hvs(&mut self) {
         for (&nid, state) in self.nodes.iter_mut() {
             if let Some(label) = self.node_labels.get(&nid) {
@@ -3897,6 +3926,96 @@ pub fn cache_stats() -> (usize, usize) {
         Err(poisoned) => poisoned.into_inner(),
     };
     (cache.len(), cache.capacity)
+}
+
+// ─── Per-User Isolated CRFR Fields ─────────────────────────────────────────
+
+/// Get or build a per-user CRFR field. User fields inherit from the global
+/// field but have isolated causal memory from feedback.
+/// user_id=0 falls back to the global field.
+pub fn get_or_build_user_field(
+    tree_nodes: &[SemanticNode],
+    url: &str,
+    user_id: i64,
+    js_variant: bool,
+) -> (ResonanceField, bool) {
+    if user_id == 0 {
+        return get_or_build_field_with_variant(tree_nodes, url, js_variant);
+    }
+
+    let variant_url = if js_variant {
+        format!("{}#__js_eval", url)
+    } else {
+        url.to_string()
+    };
+    let user_hash = hash_url_user(&variant_url, user_id);
+
+    // Check user-specific cache first
+    let mut cache = match FIELD_CACHE.write() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(cached) = cache.take(user_hash) {
+        let new_hash = compute_content_hash(tree_nodes);
+        if cached.content_hash != 0 && cached.content_hash != new_hash {
+            drop(cache);
+            let mut fresh = ResonanceField::from_semantic_tree(tree_nodes, url);
+            fresh.url_hash = user_hash;
+            fresh.content_hash = new_hash;
+            fresh.migrate_learning_from(&cached);
+            return (fresh, false);
+        }
+        return (cached, true);
+    }
+    drop(cache);
+
+    // No user field exists — clone from global field and set user hash
+    let (global_field, _) = get_or_build_field_with_variant(tree_nodes, url, js_variant);
+    // Create a fresh user field (don't inherit global causal memory)
+    let mut user_field = ResonanceField::from_semantic_tree(tree_nodes, url);
+    user_field.url_hash = user_hash;
+    user_field.content_hash = global_field.content_hash;
+    // Copy domain profile but NOT causal memory (user starts fresh)
+    user_field.domain_hash = global_field.domain_hash;
+    // Save global back (we took it from cache)
+    save_field(&global_field);
+    (user_field, false)
+}
+
+/// Save a per-user field back to cache.
+pub fn save_user_field(field: &ResonanceField) {
+    save_field(field); // Same mechanism, different url_hash
+}
+
+/// Public wrapper for hash_url_user (used by lib.rs)
+pub fn hash_url_user_pub(url: &str, user_id: i64, js_variant: bool) -> u64 {
+    let variant_url = if js_variant {
+        format!("{}#__js_eval", url)
+    } else {
+        url.to_string()
+    };
+    hash_url_user(&variant_url, user_id)
+}
+
+/// Get a field by its exact hash (for user-specific lookups)
+pub fn get_field_by_hash(url_hash: u64) -> Option<ResonanceField> {
+    let mut cache = match FIELD_CACHE.write() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(field) = cache.take(url_hash) {
+        return Some(field);
+    }
+    drop(cache);
+
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        if let Some(field) = crate::persist::load_field(url_hash) {
+            return Some(field);
+        }
+    }
+
+    None
 }
 
 /// Clear a specific URL's cached CRFR field (both RAM and SQLite).
