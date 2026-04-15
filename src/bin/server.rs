@@ -1145,6 +1145,12 @@ async fn parse_crfr_handler(
             .map(|(_key_id, uid)| uid)
             .unwrap_or(0)
     };
+    eprintln!(
+        "[CRFR] parse_crfr_handler: url={}, user_id={}, goal={}...",
+        url,
+        user_id,
+        &goal[..goal.len().min(30)]
+    );
 
     // Resolve HTML: use provided html, or fetch from url
     let html = if let Some(h) = req.html {
@@ -7446,10 +7452,14 @@ fn build_router(state: AppState) -> Router {
                     .and_then(|v| v.parse::<i64>().ok())
                     .unwrap_or(0);
                 aether_agent::auth::log_usage(key_id, &endpoint, elapsed, tokens_in, tokens_out);
-                // For session-based auth (no Bearer header), also increment
-                // the key's request counters (validate_api_key does this for
-                // Bearer requests, but session auth skips it)
-                if key_info.is_none() && session_key_id.is_some() {
+                // Increment key counters for ALL auth methods that bypass
+                // validate_api_key (which does its own increment).
+                // Session tokens and OAuth tokens need explicit increment.
+                if bearer
+                    .as_deref()
+                    .map(|t| !t.starts_with("sk-"))
+                    .unwrap_or(true)
+                {
                     aether_agent::auth::increment_key_counters(key_id);
                 }
             }
