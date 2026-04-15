@@ -7370,13 +7370,33 @@ fn build_router(state: AppState) -> Router {
                 }
             }
 
+            // Measure request body size (tokens in)
+            let req_size = req
+                .headers()
+                .get(axum::http::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(0);
+            let tokens_in = req_size / 4;
+
             let resp = next.run(req).await;
 
             // Log usage: Bearer key OR session (for dashboard attribution)
             let log_auth = key_info.or(session_key_id);
             if let Some((key_id, _user_id)) = log_auth {
                 let elapsed = t0.elapsed().as_millis() as i64;
-                aether_agent::auth::log_usage(key_id, &endpoint, elapsed, 0, 0);
+                // Measure response size (tokens out)
+                let resp_size = resp
+                    .headers()
+                    .get(axum::http::header::CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .unwrap_or_else(|| {
+                        // Estimate from body size hint if no Content-Length
+                        resp.body().size_hint().exact().unwrap_or(0) as i64
+                    });
+                let tokens_out = resp_size / 4;
+                aether_agent::auth::log_usage(key_id, &endpoint, elapsed, tokens_in, tokens_out);
                 // For session-based auth (no Bearer header), also increment
                 // the key's request counters (validate_api_key does this for
                 // Bearer requests, but session auth skips it)
