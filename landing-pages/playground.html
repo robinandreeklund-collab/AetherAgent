@@ -273,6 +273,63 @@ a:hover{color:var(--text)}
           <button class="btn-run" onclick="runPlan()">Run slaash.plan</button>
         </div>
 
+        <!-- Diff form -->
+        <div id="form-diff" style="display:none">
+          <div class="field"><label>URL</label><input type="url" id="inp-diff-url" placeholder="https://example.com" value="https://news.ycombinator.com"></div>
+          <div class="field"><label>Compare URL (or leave empty to diff same page)</label><input type="url" id="inp-diff-url2" placeholder="https://..."></div>
+          <div class="field"><label>Goal (optional)</label><input type="text" id="inp-diff-goal" placeholder="Focus diff on what?"></div>
+          <button class="btn-run" onclick="runDiff()">Run slaash.diff</button>
+        </div>
+
+        <!-- Render form -->
+        <div id="form-render" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://www.nasa.gov'">NASA</span>
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://news.ycombinator.com'">Hacker News</span>
+          </div>
+          <div class="field"><label>URL</label><input type="url" id="inp-render-url" placeholder="https://example.com" value="https://news.ycombinator.com"></div>
+          <div class="field-row">
+            <div class="field"><label>Width</label><input type="number" id="inp-render-w" value="1280" min="320" max="1920"></div>
+            <div class="field"><label>Height</label><input type="number" id="inp-render-h" value="800" min="200" max="1200"></div>
+          </div>
+          <button class="btn-run" onclick="runRender()">Run slaash.render</button>
+        </div>
+
+        <!-- Links form -->
+        <div id="form-links" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="fillLinks('https://docs.python.org/3/','python modules library')">Python docs links</span>
+            <span class="example-chip" onclick="fillLinks('https://news.ycombinator.com','tech stories')">HN links</span>
+          </div>
+          <div class="field"><label>URL</label><input type="url" id="inp-links-url" placeholder="https://example.com" value="https://docs.python.org/3/"></div>
+          <div class="field"><label>Goal (optional filter)</label><input type="text" id="inp-links-goal" placeholder="Filter links by relevance to..."></div>
+          <div class="field"><label>Max links</label><input type="number" id="inp-links-max" value="20" min="5" max="100"></div>
+          <button class="btn-run" onclick="runLinks()">Run slaash.links</button>
+        </div>
+
+        <!-- Explore form -->
+        <div id="form-explore" style="display:none">
+          <div class="field"><label>URL</label><input type="url" id="inp-explore-url" placeholder="https://example.com" value="https://news.ycombinator.com"></div>
+          <button class="btn-run" onclick="runExplore()">Run slaash.explore</button>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:.5rem">Scans inline scripts for fetch()/XHR/WebMCP registrations. Discovers hidden API endpoints.</div>
+        </div>
+
+        <!-- Learn form -->
+        <div id="form-learn" style="display:none">
+          <div class="field"><label>URL</label><input type="url" id="inp-learn-url" placeholder="URL that was previously extracted"></div>
+          <div class="field"><label>Goal</label><input type="text" id="inp-learn-goal" placeholder="Goal used during extraction"></div>
+          <div class="field"><label>Node IDs (comma-separated)</label><input type="text" id="inp-learn-ids" placeholder="5, 12, 23"></div>
+          <button class="btn-run" onclick="runLearn()">Run slaash.learn</button>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:.5rem">Tip: Use the Extract tab first, then note the node IDs of correct answers.</div>
+        </div>
+
+        <!-- Inspect form -->
+        <div id="form-inspect" style="display:none">
+          <div class="field"><label>URL or Text</label><input type="text" id="inp-inspect-input" placeholder="https://example.com or text to scan for injection"></div>
+          <div class="field"><label>Check</label><select id="inp-inspect-check"><option value="injection">Injection scan</option><option value="firewall">Firewall classify</option></select></div>
+          <button class="btn-run" onclick="runInspect()">Run slaash.inspect</button>
+        </div>
+
         <!-- Feedback section — per-node selection -->
         <div id="feedback-section" style="display:none;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
           <div style="font-size:.8rem;font-weight:600;color:var(--text);margin-bottom:.15rem">Teach slaash.learn</div>
@@ -593,6 +650,129 @@ async function runPlan() {
   } catch(err) {
     document.getElementById('response-body').textContent = '// Error: ' + err.message;
   } finally { stopLoading(); }
+}
+
+function fillLinks(url, goal) {
+  document.getElementById('inp-links-url').value = url;
+  document.getElementById('inp-links-goal').value = goal;
+}
+
+async function runDiff() {
+  const url = document.getElementById('inp-diff-url').value.trim();
+  if (!url) return;
+  const url2 = document.getElementById('inp-diff-url2').value.trim();
+  const goal = document.getElementById('inp-diff-goal').value.trim();
+  startLoading();
+  try {
+    const body = { url1: url, goal: goal || 'changes' };
+    if (url2) body.url2 = url2;
+    const res = await fetch('/api/diff', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('markdown-body').textContent = JSON.stringify(data, null, 2);
+    if (data.token_savings_ratio) document.getElementById('meta-savings').textContent = (data.token_savings_ratio * 100).toFixed(1) + '%';
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runRender() {
+  const url = document.getElementById('inp-render-url').value.trim();
+  if (!url) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/tiered-screenshot', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url, width: parseInt(document.getElementById('inp-render-w').value)||1280, height: parseInt(document.getElementById('inp-render-h').value)||800 })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify({...data, image: '(base64 truncated)'}, null, 2);
+    if (data.image) {
+      document.getElementById('markdown-body').innerHTML = '<img src="data:image/png;base64,' + data.image + '" style="max-width:100%;border-radius:8px">';
+    } else {
+      document.getElementById('markdown-body').textContent = 'No image returned';
+    }
+    if (data.tier_used) document.getElementById('meta-nodes').textContent = 'Tier ' + data.tier_used;
+    if (data.latency_ms) document.getElementById('meta-time').textContent = data.latency_ms + 'ms';
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runLinks() {
+  const url = document.getElementById('inp-links-url').value.trim();
+  if (!url) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/extract-links', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url, goal: document.getElementById('inp-links-goal').value, max_links: parseInt(document.getElementById('inp-links-max').value)||20 })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    let md = '# Links\n\n';
+    if (data.links) data.links.slice(0,20).forEach((l,i) => { md += (i+1) + '. [' + (l.anchor||l.url||'?') + '](' + (l.url||'') + ') — rel:' + (l.relevance||0).toFixed(2) + '\n'; });
+    document.getElementById('markdown-body').textContent = md;
+    document.getElementById('meta-nodes').textContent = (data.links||[]).length + ' links';
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runExplore() {
+  const url = document.getElementById('inp-explore-url').value.trim();
+  if (!url) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/detect-xhr', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url }) });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    let md = '# Hidden API Endpoints\n\n';
+    if (Array.isArray(data)) data.forEach((x,i) => { md += (i+1) + '. ' + (x.method||'GET') + ' ' + (x.url||'?') + '\n'; });
+    document.getElementById('markdown-body').textContent = md;
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runLearn() {
+  const url = document.getElementById('inp-learn-url').value.trim();
+  const goal = document.getElementById('inp-learn-goal').value.trim();
+  const idsStr = document.getElementById('inp-learn-ids').value.trim();
+  if (!url || !goal || !idsStr) return;
+  const ids = idsStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  startLoading();
+  try {
+    const res = await fetch('/api/crfr-feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url, goal, successful_node_ids: ids }) });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('markdown-body').textContent = data.status === 'ok' ? 'Feedback sent! Nodes #' + ids.join(', #') + ' will rank higher.' : JSON.stringify(data);
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runInspect() {
+  const input = document.getElementById('inp-inspect-input').value.trim();
+  if (!input) return;
+  const check = document.getElementById('inp-inspect-check').value;
+  startLoading();
+  try {
+    let endpoint, body;
+    if (check === 'injection') {
+      endpoint = '/api/check-injection';
+      body = JSON.stringify({ text: input });
+    } else {
+      endpoint = '/api/firewall-classify';
+      body = JSON.stringify({ url: input, goal: 'security check' });
+    }
+    const res = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('markdown-body').textContent = JSON.stringify(data, null, 2);
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
 }
 
 async function sendFeedback() {
