@@ -7189,10 +7189,17 @@ fn build_router(state: AppState) -> Router {
         },
     );
 
-    // Usage tracking middleware: extract API key, validate, log per request
+    // Usage tracking + rate limiting middleware
     let usage_layer = axum::middleware::from_fn(
         |req: axum::extract::Request, next: axum::middleware::Next| async move {
             let t0 = std::time::Instant::now();
+            let endpoint = req.uri().path().to_string();
+
+            // Only rate-limit /api/ and /mcp endpoints
+            let is_api = endpoint.starts_with("/api/") || endpoint == "/mcp";
+            if !is_api {
+                return next.run(req).await;
+            }
 
             // Extract API key from Authorization header
             let key_info = req
@@ -7203,18 +7210,55 @@ fn build_router(state: AppState) -> Router {
                 .map(|v| &v[7..])
                 .and_then(|key| aether_agent::auth::validate_api_key(key));
 
-            // Extract endpoint path for logging
-            let endpoint = req.uri().path().to_string();
+            // Rate limiting
+            if let Some((_key_id, _user_id)) = key_info {
+                // Authenticated: 60 req/min, 1000/day
+                let limits = aether_agent::auth::RateLimits::free_tier();
+                let id = format!("key:{}", _key_id);
+                if let Err(retry) = aether_agent::auth::check_rate_limit(&id, &limits) {
+                    let body = serde_json::json!({
+                        "error": "Rate limit exceeded",
+                        "retry_after_seconds": retry,
+                        "tier": "free"
+                    });
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        [(axum::http::header::RETRY_AFTER, retry.to_string())],
+                        body.to_string(),
+                    )
+                        .into_response();
+                }
+            } else {
+                // Anonymous: 10 req/min, 50/day per IP
+                let ip = req
+                    .extensions()
+                    .get::<ConnectInfo<SocketAddr>>()
+                    .map(|ci| ci.0.ip().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let limits = aether_agent::auth::RateLimits::anonymous();
+                let id = format!("ip:{}", ip);
+                if let Err(retry) = aether_agent::auth::check_rate_limit(&id, &limits) {
+                    let body = serde_json::json!({
+                        "error": "Rate limit exceeded. Sign up at /keys for higher limits.",
+                        "retry_after_seconds": retry,
+                        "tier": "anonymous",
+                        "limit": "10 req/min, 50 req/day"
+                    });
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        [(axum::http::header::RETRY_AFTER, retry.to_string())],
+                        body.to_string(),
+                    )
+                        .into_response();
+                }
+            }
 
             let resp = next.run(req).await;
 
             // Log usage if authenticated
             if let Some((key_id, _user_id)) = key_info {
                 let elapsed = t0.elapsed().as_millis() as i64;
-                // Only log /api/ endpoints (not static pages)
-                if endpoint.starts_with("/api/") || endpoint == "/mcp" {
-                    aether_agent::auth::log_usage(key_id, &endpoint, elapsed, 0, 0);
-                }
+                aether_agent::auth::log_usage(key_id, &endpoint, elapsed, 0, 0);
             }
 
             resp
