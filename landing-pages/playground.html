@@ -706,6 +706,7 @@ async function runCrawl() {
   const goal = document.getElementById('inp-crawl-goal').value.trim();
   if (!url || !goal) return;
   startLoading();
+  const t0 = performance.now();
   try {
     const res = await fetch('/api/adaptive-crawl', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -718,13 +719,38 @@ async function runCrawl() {
       })
     });
     const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
-    document.getElementById('markdown-body').textContent = JSON.stringify(data, null, 2);
-    if (data.pages) {
-      document.getElementById('meta-nodes').textContent = data.pages.length + ' pages';
-      document.getElementById('meta-time').textContent = (data.total_time_ms || 0) + 'ms';
-    }
+
+    // Build readable markdown from crawl results
+    const pages = data.pages || [];
+    let md = '# Crawl: ' + url + '\n\n';
+    md += '**' + pages.length + ' pages** crawled | ';
+    md += (data.stop_reason || 'completed') + ' | ' + elapsed + 'ms\n\n';
+    let totalTokensIn = 0;
+    let totalTokensOut = 0;
+    pages.forEach((page, i) => {
+      md += '## ' + (i + 1) + '. ' + (page.url || '?') + '\n';
+      const nodes = page.nodes || page.top_nodes || [];
+      totalTokensIn += (page.total_dom_nodes || 0);
+      totalTokensOut += nodes.length;
+      nodes.forEach(n => {
+        md += '- [' + (n.role || '?') + '] ' + (n.label || '').slice(0, 200) + '\n';
+      });
+      if (page.marginal_gain !== undefined) {
+        md += '_gain: ' + page.marginal_gain.toFixed(3) + '_\n';
+      }
+      md += '\n';
+    });
+    document.getElementById('markdown-body').textContent = md;
+
+    // Metrics
+    const savings = totalTokensIn > 0 ? ((1 - totalTokensOut / totalTokensIn) * 100).toFixed(1) + '%' : '-';
+    document.getElementById('meta-nodes').textContent = pages.length + ' pages';
+    document.getElementById('meta-time').textContent = elapsed + 'ms';
+    document.getElementById('meta-tokens').textContent = totalTokensIn + ' DOM → ' + totalTokensOut + ' nodes';
+    document.getElementById('meta-savings').textContent = savings;
   } catch(err) {
     document.getElementById('response-body').textContent = '// Error: ' + err.message;
   } finally { stopLoading(); }
