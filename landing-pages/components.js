@@ -57,6 +57,92 @@ footer{position:relative;overflow:hidden;border-top:1px solid var(--border,rgba(
     document.head.appendChild(css);
   }
 
+  // ── MOBILE DRAWER (injected on all pages EXCEPT playground which has its own) ──
+  if (!document.getElementById('global-drawer') && !document.getElementById('drawer')) {
+    // CSS
+    var drawerCss = document.createElement('style');
+    drawerCss.textContent = `
+.drawer-btn{display:none;background:none;border:none;color:#fff;font-size:1.3rem;cursor:pointer;padding:.25rem;line-height:1}
+.g-drawer-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;opacity:0;transition:opacity .25s ease}
+.g-drawer-overlay.open{display:block;opacity:1}
+.g-drawer{position:fixed;top:0;left:-280px;width:280px;height:100%;background:#111;z-index:210;overflow-y:auto;transition:left .3s cubic-bezier(0.4,0,0.2,1);border-right:1px solid rgba(255,255,255,0.08)}
+.g-drawer.open{left:0}
+.g-drawer-head{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-bottom:1px solid rgba(255,255,255,0.08)}
+.g-drawer-close{background:none;border:none;color:#888;font-size:1.3rem;cursor:pointer;padding:.25rem}
+.g-drawer-section{padding:.75rem 1rem}
+.g-drawer-label{font-size:.65rem;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem}
+.g-drawer-link{display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;border-radius:7px;font-size:.85rem;color:#888;cursor:pointer;transition:all .15s;text-decoration:none}
+.g-drawer-link:hover{background:rgba(255,255,255,0.04);color:#f5f5f5}
+.g-drawer-link.active{background:rgba(59,130,246,0.1);color:#fff;font-weight:500}
+.g-drawer-divider{height:1px;background:rgba(255,255,255,0.08);margin:.25rem 1rem}
+@media(max-width:600px){.drawer-btn{display:block}}
+`;
+    document.head.appendChild(drawerCss);
+
+    // Determine current page for active highlight
+    var path = location.pathname;
+    function activeIf(p) { return path === p || path.startsWith(p + '/') ? ' active' : ''; }
+
+    // Inject drawer HTML
+    var drawerHtml = document.createElement('div');
+    drawerHtml.id = 'global-drawer';
+    drawerHtml.innerHTML = `
+<div class="g-drawer-overlay" id="g-drawer-overlay" onclick="window._toggleDrawer()"></div>
+<div class="g-drawer" id="g-drawer">
+  <div class="g-drawer-head">
+    <span style="font-size:1.1rem;font-weight:700;color:#fff">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</span>
+    <button class="g-drawer-close" onclick="window._toggleDrawer()">&times;</button>
+  </div>
+  <div class="g-drawer-section">
+    <div class="g-drawer-label">Navigate</div>
+    <a class="g-drawer-link${activeIf('/playground')}" href="/playground">&#9655; Playground</a>
+    <a class="g-drawer-link${activeIf('/keys')}" href="/keys">&#47;&middot; API Keys</a>
+    <a class="g-drawer-link${activeIf('/usage')}" href="/usage">&equiv; Usage</a>
+    <a class="g-drawer-link${activeIf('/docs')}" href="/docs">? Docs</a>
+  </div>
+  <div class="g-drawer-divider"></div>
+  <div class="g-drawer-section">
+    <div class="g-drawer-label">Resources</div>
+    <a class="g-drawer-link" href="/docs/quickstart">&rarr; Quickstart</a>
+    <a class="g-drawer-link" href="/docs/api">&lt;/&gt; API Reference</a>
+    <a class="g-drawer-link" href="/docs/mcp">&#9881; MCP Integration</a>
+    <a class="g-drawer-link" href="/docs/guide">&#9733; Guide</a>
+  </div>
+  <div class="g-drawer-divider"></div>
+  <div class="g-drawer-section">
+    <div class="g-drawer-label">Slaash</div>
+    <a class="g-drawer-link" href="/mission">Mission</a>
+    <a class="g-drawer-link" href="/timeline">Timeline</a>
+    <a class="g-drawer-link" href="/live">Live Dashboard</a>
+  </div>
+</div>`;
+    document.body.appendChild(drawerHtml);
+
+    // Inject hamburger button into existing nav (first <nav> on page)
+    var pageNav = document.querySelector('nav');
+    if (pageNav) {
+      var firstChild = pageNav.firstElementChild || pageNav.firstChild;
+      if (firstChild && !pageNav.querySelector('.drawer-btn')) {
+        var btn = document.createElement('button');
+        btn.className = 'drawer-btn';
+        btn.setAttribute('aria-label', 'Menu');
+        btn.innerHTML = '&#9776;';
+        btn.onclick = function() { window._toggleDrawer(); };
+        pageNav.insertBefore(btn, firstChild);
+      }
+    }
+
+    // Global toggle function
+    window._toggleDrawer = function() {
+      var d = document.getElementById('g-drawer');
+      var o = document.getElementById('g-drawer-overlay');
+      var isOpen = d.classList.contains('open');
+      d.classList.toggle('open');
+      o.classList.toggle('open');
+      document.body.style.overflow = isOpen ? '' : 'hidden';
+    };
+  }
+
   // ── NAV ──
   const nav = document.querySelector('nav[data-component="nav"]');
   if(nav){
