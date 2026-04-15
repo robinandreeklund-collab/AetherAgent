@@ -110,7 +110,6 @@ a:hover{color:var(--text)}
 /* Tablet: ≤900px */
 @media(max-width:900px){
   .sidebar{display:none}
-  .mobile-tabs{display:flex}
   .app{flex-direction:column}
   .main{flex:1;min-height:0}
   .split{flex-direction:column}
@@ -131,9 +130,6 @@ a:hover{color:var(--text)}
   .top-nav-links .nav-hide-phone{display:none}
   .btn-sm{padding:.35rem .7rem;font-size:.72rem}
   .app{height:auto;min-height:calc(100vh - 48px);flex-direction:column}
-  .mobile-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;gap:0;padding:0 .5rem;scrollbar-width:none}
-  .mobile-tabs::-webkit-scrollbar{display:none}
-  .mobile-tab{padding:.5rem .65rem;font-size:.7rem;white-space:nowrap;flex-shrink:0}
   .main{overflow:visible}
   .toolbar{padding:.5rem .75rem}
   .toolbar h2{font-size:.85rem}
@@ -176,17 +172,32 @@ a:hover{color:var(--text)}
 @media(max-width:380px){
   html{font-size:14px}
   .top-nav{padding:0 .5rem}
-  .mobile-tab{padding:.45rem .5rem;font-size:.65rem}
   .welcome-inner h1{font-size:1.35rem}
   .panel-left{padding:.5rem}
 }
 
-/* MOBILE TAB BAR — replaces sidebar on ≤900px */
-.mobile-tabs{display:none;border-bottom:1px solid var(--border);background:var(--surface2);overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
-.mobile-tabs::-webkit-scrollbar{display:none}
-.mobile-tab{padding:.55rem .85rem;font-size:.75rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;flex-shrink:0;transition:color .15s}
-.mobile-tab:hover{color:var(--text)}
-.mobile-tab.active{color:#fff;border-bottom-color:var(--accent)}
+/* MOBILE TAB BAR — removed, replaced by drawer */
+
+/* MOBILE DRAWER */
+.drawer-toggle{display:none;background:none;border:none;color:var(--text);font-size:1.3rem;cursor:pointer;padding:.25rem;line-height:1}
+.drawer-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;opacity:0;transition:opacity .25s ease}
+.drawer-overlay.open{display:block;opacity:1}
+.drawer{position:fixed;top:0;left:-280px;width:280px;height:100%;background:var(--surface);z-index:210;overflow-y:auto;transition:left .3s cubic-bezier(0.4,0,0.2,1);border-right:1px solid var(--border)}
+.drawer.open{left:0}
+.drawer-header{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-bottom:1px solid var(--border)}
+.drawer-header .wordmark{font-size:1.1rem}
+.drawer-close{background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;padding:.25rem}
+.drawer .sidebar-section{padding:0 .75rem;margin-bottom:1.25rem}
+.drawer .sidebar-section:first-of-type{margin-top:.5rem}
+.drawer .sidebar-label{font-size:.65rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:0 .5rem;margin-bottom:.4rem}
+.drawer .sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;border-radius:7px;font-size:.85rem;color:var(--muted);cursor:pointer;transition:all .15s}
+.drawer .sidebar-link:hover{background:rgba(255,255,255,0.04);color:var(--text)}
+.drawer .sidebar-link.active{background:var(--accent-glow);color:#fff;font-weight:500}
+.drawer .sidebar-icon{font-size:.9rem;width:1.2rem;text-align:center}
+.drawer-divider{height:1px;background:var(--border);margin:.5rem .75rem}
+@media(max-width:900px){
+  .drawer-toggle{display:block}
+}
 
 /* CUSTOM SCROLLBARS — dark, minimal */
 ::-webkit-scrollbar{width:6px;height:6px}
@@ -226,13 +237,47 @@ a:hover{color:var(--text)}
 
 <!-- TOP NAV -->
 <div class="top-nav">
-  <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  <div style="display:flex;align-items:center;gap:.75rem">
+    <button class="drawer-toggle" onclick="toggleDrawer()" aria-label="Menu">&#9776;</button>
+    <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  </div>
   <div class="top-nav-links">
     <a href="/docs" class="nav-hide-phone">Docs</a>
-    <a href="/playground" class="active">Playground</a>
+    <a href="/playground" class="active nav-hide-phone">Playground</a>
     <a href="/keys" class="nav-hide-mobile">API Keys</a>
     <span class="nav-hide-mobile" style="font-size:.75rem;color:var(--muted)"><span class="status-dot"></span>Operational</span>
-    <button class="btn-sm" onclick="window.location='/keys'">Get API Key</button>
+    <button class="btn-sm nav-hide-phone" onclick="window.location='/keys'">Get API Key</button>
+  </div>
+</div>
+
+<!-- MOBILE DRAWER -->
+<div class="drawer-overlay" id="drawer-overlay" onclick="toggleDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <span class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</span>
+    <button class="drawer-close" onclick="toggleDrawer()">&times;</button>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">Tools</div>
+    <div class="sidebar-link active" onclick="drawerSwitch('extract')"><span class="sidebar-icon" style="color:var(--accent)">/</span> Extract</div>
+    <div class="sidebar-link" onclick="drawerSwitch('search')"><span class="sidebar-icon" style="color:var(--accent)">?</span> Search</div>
+    <div class="sidebar-link" onclick="drawerSwitch('act')"><span class="sidebar-icon" style="color:#22c55e">&gt;</span> Act</div>
+    <div class="sidebar-link" onclick="drawerSwitch('crawl')"><span class="sidebar-icon" style="color:#8b5cf6">&raquo;</span> Crawl</div>
+    <div class="sidebar-link" onclick="drawerSwitch('stream')"><span class="sidebar-icon" style="color:#22c55e">&darr;</span> Stream</div>
+    <div class="sidebar-link" onclick="drawerSwitch('plan')"><span class="sidebar-icon" style="color:#f59e0b">&#x25A3;</span> Plan</div>
+    <div class="sidebar-link" onclick="drawerSwitch('diff')"><span class="sidebar-icon" style="color:#ef4444">&Delta;</span> Diff</div>
+    <div class="sidebar-link" onclick="drawerSwitch('render')"><span class="sidebar-icon" style="color:var(--muted)">&lt;/&gt;</span> Render</div>
+    <div class="sidebar-link" onclick="drawerSwitch('links')"><span class="sidebar-icon" style="color:var(--accent)">&harr;</span> Links</div>
+    <div class="sidebar-link" onclick="drawerSwitch('explore')"><span class="sidebar-icon" style="color:#f59e0b">~</span> Explore</div>
+    <div class="sidebar-link" onclick="drawerSwitch('learn')"><span class="sidebar-icon" style="color:#22c55e">+</span> Learn</div>
+    <div class="sidebar-link" onclick="drawerSwitch('inspect')"><span class="sidebar-icon" style="color:#ef4444">!</span> Inspect</div>
+  </div>
+  <div class="drawer-divider"></div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">Account</div>
+    <div class="sidebar-link" onclick="window.location='/keys'"><span class="sidebar-icon" style="color:var(--muted)">/&middot;</span> API Keys</div>
+    <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon" style="color:var(--muted)">&equiv;</span> Usage</div>
+    <div class="sidebar-link" onclick="window.location='/docs'"><span class="sidebar-icon" style="color:var(--muted)">?</span> Docs</div>
   </div>
 </div>
 
@@ -266,22 +311,6 @@ a:hover{color:var(--text)}
       <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon" style="color:var(--muted)">&equiv;</span> Usage</div>
       <div class="sidebar-link"><span class="sidebar-icon" style="color:var(--muted)">*</span> Settings</div>
     </div>
-  </div>
-
-  <!-- MOBILE TAB BAR (visible ≤900px) -->
-  <div class="mobile-tabs" id="mobile-tabs">
-    <div class="mobile-tab active" onclick="mobileSwitchTab('extract',this)">/&thinsp;Extract</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('search',this)">?&thinsp;Search</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('act',this)">&gt;&thinsp;Act</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('crawl',this)">&raquo;&thinsp;Crawl</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('stream',this)">&darr;&thinsp;Stream</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('plan',this)">&#x25A3;&thinsp;Plan</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('diff',this)">&Delta;&thinsp;Diff</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('render',this)">&lt;/&gt;&thinsp;Render</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('links',this)">&harr;&thinsp;Links</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('explore',this)">~&thinsp;Explore</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('learn',this)">+&thinsp;Learn</div>
-    <div class="mobile-tab" onclick="mobileSwitchTab('inspect',this)">!&thinsp;Inspect</div>
   </div>
 
   <!-- MAIN -->
@@ -625,9 +654,9 @@ function switchTab(tab) {
   document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
   const links = document.querySelectorAll('.sidebar-link');
   links.forEach(l => { if(l.textContent.trim().toLowerCase().startsWith(tab)) l.classList.add('active'); });
-  // Sync mobile tab bar
-  document.querySelectorAll('.mobile-tab').forEach(t => {
-    t.classList.toggle('active', t.textContent.trim().toLowerCase().includes(tab));
+  // Sync drawer sidebar links
+  document.querySelectorAll('#drawer .sidebar-link').forEach(l => {
+    l.classList.toggle('active', l.textContent.trim().toLowerCase().includes(tab));
   });
   document.getElementById('toolbar-title').textContent = 'slaash.' + tab;
   const allForms = ['form-extract','form-search','form-act','form-crawl','form-stream','form-plan','form-diff','form-render','form-links','form-explore','form-learn','form-inspect'];
@@ -1194,12 +1223,23 @@ function startPlayground() {
   document.getElementById('welcome-panel').classList.add('hidden');
 }
 
-function mobileSwitchTab(tab, el) {
-  document.querySelectorAll('.mobile-tab').forEach(t => t.classList.remove('active'));
-  if (el) el.classList.add('active');
+function toggleDrawer() {
+  const drawer = document.getElementById('drawer');
+  const overlay = document.getElementById('drawer-overlay');
+  const isOpen = drawer.classList.contains('open');
+  drawer.classList.toggle('open');
+  overlay.classList.toggle('open');
+  document.body.style.overflow = isOpen ? '' : 'hidden';
+}
+
+function drawerSwitch(tab) {
+  // Update active state in drawer
+  document.querySelectorAll('#drawer .sidebar-link').forEach(l => l.classList.remove('active'));
+  document.querySelectorAll('#drawer .sidebar-link').forEach(l => {
+    if (l.textContent.trim().toLowerCase().includes(tab)) l.classList.add('active');
+  });
   switchTab(tab);
-  // Scroll active tab into view
-  if (el) el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  toggleDrawer();
 }
 
 function getPlaygroundUser() {
