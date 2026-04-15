@@ -128,6 +128,7 @@ async function loginAndLoad() {
     if (data.status === 'ok') {
       usageUser = data.user;
       localStorage.setItem('slaash_user', JSON.stringify(data.user));
+      if (data.session_token) localStorage.setItem('slaash_session_token', data.session_token);
       document.getElementById('login-prompt').style.display = 'none';
       document.getElementById('dashboard').style.display = '';
       document.getElementById('dash-email').textContent = usageUser.email;

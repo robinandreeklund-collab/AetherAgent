@@ -7289,16 +7289,29 @@ fn build_router(state: AppState) -> Router {
                 return next.run(req).await;
             }
 
-            // Extract API key from Authorization header
-            let key_info = req
+            // Extract Bearer token from Authorization header
+            let bearer = req
                 .headers()
                 .get("authorization")
                 .and_then(|v| v.to_str().ok())
                 .filter(|v| v.starts_with("Bearer "))
-                .map(|v| &v[7..])
-                .and_then(|key| aether_agent::auth::validate_api_key(key));
+                .map(|v| v[7..].to_string());
 
-            // Fallback: check X-Slaash-User-Id header (playground session)
+            // Try in order: API key (sk-...), session token (session_...), OAuth (slaash_...)
+            let key_info = bearer.as_deref().and_then(|token| {
+                aether_agent::auth::validate_api_key(token)
+                    .or_else(|| aether_agent::auth::validate_session_token(token))
+                    .or_else(|| {
+                        aether_agent::auth::validate_oauth_token(token).map(|(user_id, _client)| {
+                            // OAuth: find key for usage attribution
+                            let key_id =
+                                aether_agent::auth::get_default_key_id(user_id).unwrap_or(0);
+                            (key_id, user_id)
+                        })
+                    })
+            });
+
+            // X-Slaash-User-Id for usage attribution only (NOT rate limit upgrade)
             let session_key_id = if key_info.is_none() {
                 req.headers()
                     .get("x-slaash-user-id")
@@ -8133,10 +8146,12 @@ async fn auth_signup(
 
     match aether_agent::auth::signup(&req.email, &req.password, &req.name) {
         Ok((user, api_key)) => {
+            let session_token = aether_agent::auth::create_session_token(user.id);
             let body = serde_json::json!({
                 "status": "ok",
                 "user": user,
                 "api_key": api_key,
+                "session_token": session_token,
                 "message": "Save your API key — it won't be shown again."
             });
             (StatusCode::OK, body.to_string())
@@ -8152,10 +8167,12 @@ async fn auth_login(Json(req): Json<LoginRequest>) -> impl IntoResponse {
     match aether_agent::auth::login(&req.email, &req.password) {
         Ok(user) => {
             let keys = aether_agent::auth::list_api_keys(user.id);
+            let session_token = aether_agent::auth::create_session_token(user.id);
             let body = serde_json::json!({
                 "status": "ok",
                 "user": user,
                 "api_keys": keys,
+                "session_token": session_token,
             });
             (StatusCode::OK, body.to_string())
         }

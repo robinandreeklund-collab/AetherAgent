@@ -1203,11 +1203,17 @@ function getPlaygroundUser() {
   } catch(e) { return null; }
 }
 
-// Common headers for all API calls — includes user ID for usage tracking
+// Common headers for all API calls — uses session token for auth + rate limits
 function apiHeaders() {
   const h = {'Content-Type':'application/json'};
-  const u = getPlaygroundUser();
-  if (u && u.id) h['X-Slaash-User-Id'] = String(u.id);
+  const token = localStorage.getItem('slaash_session_token');
+  if (token) {
+    h['Authorization'] = 'Bearer ' + token;
+  } else {
+    // Fallback: user ID for usage attribution (anonymous rate limits)
+    const u = getPlaygroundUser();
+    if (u && u.id) h['X-Slaash-User-Id'] = String(u.id);
+  }
   return h;
 }
 

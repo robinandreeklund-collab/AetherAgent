@@ -146,9 +146,10 @@ try {
   }
 } catch(e) {}
 
-function saveSession(user) {
+function saveSession(user, sessionToken) {
   currentUser = user;
   localStorage.setItem('slaash_user', JSON.stringify(user));
+  if (sessionToken) localStorage.setItem('slaash_session_token', sessionToken);
 }
 
 function showAuth(tab) {
@@ -169,7 +170,7 @@ async function doSignup() {
     const res = await fetch('/api/auth/signup', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name,website})});
     const data = await res.json();
     if (data.status === 'ok') {
-      saveSession(data.user);
+      saveSession(data.user, data.session_token);
       showKeys(data.api_key);
     } else {
       document.getElementById('auth-msg').innerHTML = '<span style="color:var(--red)">' + data.message + '</span>';
@@ -184,7 +185,7 @@ async function doLogin() {
     const res = await fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     const data = await res.json();
     if (data.status === 'ok') {
-      saveSession(data.user);
+      saveSession(data.user, data.session_token);
       showKeys();
       renderKeys(data.api_keys || []);
     } else {
@@ -207,6 +208,7 @@ function showKeys(newKeyValue) {
 function logout() {
   currentUser = null;
   localStorage.removeItem('slaash_user');
+  localStorage.removeItem('slaash_session_token');
   document.getElementById('auth-section').style.display = '';
   document.getElementById('keys-section').style.display = 'none';
   document.getElementById('new-key-alert').style.display = 'none';

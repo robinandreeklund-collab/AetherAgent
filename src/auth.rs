@@ -354,6 +354,51 @@ pub fn login(email: &str, password: &str) -> Result<User, String> {
     }
 }
 
+// ─── Session tokens (playground login → Bearer auth) ─────────────────────
+
+/// Session entry: (user_id, key_id, expires_at)
+type SessionEntry = (i64, i64, u64);
+type SessionMap = HashMap<String, SessionEntry>;
+
+/// In-memory session store: token → SessionEntry
+static SESSION_STORE: Mutex<Option<SessionMap>> = Mutex::new(None);
+
+fn session_store() -> std::sync::MutexGuard<'static, Option<SessionMap>> {
+    let mut guard = SESSION_STORE.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = Some(HashMap::new());
+    }
+    guard
+}
+
+/// Create a session token for a logged-in user. Returns token string.
+/// Token is valid for 24 hours.
+pub fn create_session_token(user_id: i64) -> Option<String> {
+    let key_id = get_default_key_id(user_id)?;
+    let token = format!("session_{}", generate_random_hex(32));
+    let expires = now_secs() + 86400; // 24h
+    let mut guard = session_store();
+    let store = guard.as_mut().unwrap();
+    // Limit sessions per user to prevent memory bloat
+    store.retain(|_, (_, _, exp)| *exp > now_secs());
+    store.insert(token.clone(), (user_id, key_id, expires));
+    Some(token)
+}
+
+/// Validate a session token. Returns (key_id, user_id) if valid.
+pub fn validate_session_token(token: &str) -> Option<(i64, i64)> {
+    if !token.starts_with("session_") {
+        return None;
+    }
+    let guard = session_store();
+    let store = guard.as_ref()?;
+    let (user_id, key_id, expires) = store.get(token)?;
+    if now_secs() > *expires {
+        return None;
+    }
+    Some((*key_id, *user_id))
+}
+
 // ─── API Key operations ───────────────────────────────────────────────────
 
 #[cfg(feature = "persist")]
