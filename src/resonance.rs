@@ -3455,7 +3455,7 @@ impl ResonanceField {
     /// Regenerate text_hv for all nodes from node_labels.
     /// Called after deserialization since text_hv is #[serde(skip)].
     /// Takes <1ms per 1000 nodes.
-    fn regenerate_text_hvs(&mut self) {
+    pub fn regenerate_text_hvs(&mut self) {
         for (&nid, state) in self.nodes.iter_mut() {
             if let Some(label) = self.node_labels.get(&nid) {
                 if !label.is_empty() {
