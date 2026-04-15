@@ -44,6 +44,7 @@ a:hover{color:var(--text)}
       <div style="margin-bottom:1rem"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">Email</label><input type="email" id="signup-email" placeholder="you@example.com" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
       <div style="margin-bottom:1rem"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">Password</label><input type="password" id="signup-password" placeholder="Min 6 characters" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
       <div style="margin-bottom:1rem"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">Name (optional)</label><input type="text" id="signup-name" placeholder="Your name" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
+      <div style="position:absolute;left:-9999px;opacity:0;height:0;overflow:hidden" aria-hidden="true"><label>Website</label><input type="text" id="signup-website" tabindex="-1" autocomplete="off"></div>
       <button onclick="doSignup()" style="padding:.7rem 2rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;background:var(--accent);color:#fff;cursor:pointer">Create Account</button>
     </div>
 
@@ -108,7 +109,8 @@ async function doSignup() {
   const password = document.getElementById('signup-password').value;
   const name = document.getElementById('signup-name').value;
   try {
-    const res = await fetch('/api/auth/signup', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name})});
+    const website = document.getElementById('signup-website').value;
+    const res = await fetch('/api/auth/signup', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name,website})});
     const data = await res.json();
     if (data.status === 'ok') {
       currentUser = data.user;

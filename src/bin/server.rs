@@ -6,7 +6,7 @@
 ///
 /// Run: cargo run --features server --bin aether-server
 use axum::{
-    extract::{DefaultBodyLimit, Json},
+    extract::{ConnectInfo, DefaultBodyLimit, Json},
     http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -7595,6 +7595,9 @@ struct SignupRequest {
     password: String,
     #[serde(default)]
     name: String,
+    /// Honeypot field — must be empty. Bots fill this in, humans don't see it.
+    #[serde(default)]
+    website: String,
 }
 
 #[derive(Deserialize)]
@@ -7631,7 +7634,30 @@ fn default_since() -> i64 {
     24
 }
 
-async fn auth_signup(Json(req): Json<SignupRequest>) -> impl IntoResponse {
+async fn auth_signup(
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    Json(req): Json<SignupRequest>,
+) -> impl IntoResponse {
+    // Anti-spam: honeypot field must be empty
+    if !req.website.is_empty() {
+        let body = serde_json::json!({"status": "ok", "message": "Account created"});
+        return (StatusCode::OK, body.to_string());
+    }
+
+    // Anti-spam: rate limit signups per IP (3 per hour)
+    let ip_key = format!("signup-ip:{}", addr.ip());
+    let ip_limits = aether_agent::auth::RateLimits {
+        requests_per_minute: 1,
+        requests_per_day: 3,
+    };
+    if let Err(retry) = aether_agent::auth::check_rate_limit(&ip_key, &ip_limits) {
+        let body = serde_json::json!({
+            "status": "error",
+            "message": format!("Too many signup attempts. Try again in {} seconds.", retry)
+        });
+        return (StatusCode::TOO_MANY_REQUESTS, body.to_string());
+    }
+
     match aether_agent::auth::signup(&req.email, &req.password, &req.name) {
         Ok((user, api_key)) => {
             let body = serde_json::json!({
@@ -8009,7 +8035,10 @@ async fn async_main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind");
-    axum::serve(listener, build_router(state))
-        .await
-        .expect("Server error");
+    axum::serve(
+        listener,
+        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Server error");
 }

@@ -234,11 +234,49 @@ pub fn init_auth_tables() {}
 
 #[cfg(feature = "persist")]
 pub fn signup(email: &str, password: &str, name: &str) -> Result<(User, String), String> {
-    if email.is_empty() || !email.contains('@') {
+    if email.is_empty() || !email.contains('@') || !email.contains('.') {
         return Err("Invalid email".to_string());
     }
     if password.len() < 6 {
         return Err("Password must be at least 6 characters".to_string());
+    }
+
+    // Anti-spam: block disposable/temporary email providers
+    let domain = email.rsplit('@').next().unwrap_or("").to_lowercase();
+    let disposable = [
+        "tempmail.com",
+        "throwaway.email",
+        "guerrillamail.com",
+        "mailinator.com",
+        "10minutemail.com",
+        "trashmail.com",
+        "yopmail.com",
+        "sharklasers.com",
+        "guerrillamailblock.com",
+        "grr.la",
+        "dispostable.com",
+        "maildrop.cc",
+        "temp-mail.org",
+        "fakeinbox.com",
+        "tempail.com",
+        "mohmal.com",
+        "getnada.com",
+        "emailondeck.com",
+        "crazymailing.com",
+        "tmail.ws",
+    ];
+    if disposable.contains(&domain.as_str()) {
+        return Err("Disposable email addresses are not allowed".to_string());
+    }
+
+    // Anti-spam: rate limit signups per email domain (max 10 per domain per hour)
+    let domain_key = format!("signup-domain:{}", domain);
+    let domain_limits = RateLimits {
+        requests_per_minute: 5,
+        requests_per_day: 10,
+    };
+    if let Err(_) = check_rate_limit(&domain_key, &domain_limits) {
+        return Err("Too many signups from this email domain. Try again later.".to_string());
     }
 
     let pool = crate::persist::get_db_lock().ok_or("DB not initialized")?;
