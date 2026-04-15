@@ -77,6 +77,18 @@ a:hover{color:var(--text)}
 <script>
 let usageUser = null;
 
+// Restore session
+try {
+  const saved = localStorage.getItem('slaash_user');
+  if (saved) {
+    usageUser = JSON.parse(saved);
+    document.getElementById('login-prompt').style.display = 'none';
+    document.getElementById('dashboard').style.display = '';
+    document.getElementById('dash-email').textContent = usageUser.email;
+    loadUsage();
+  }
+} catch(e) {}
+
 async function loginAndLoad() {
   const email = document.getElementById('usage-email').value;
   const password = document.getElementById('usage-password').value;
@@ -85,6 +97,7 @@ async function loginAndLoad() {
     const data = await res.json();
     if (data.status === 'ok') {
       usageUser = data.user;
+      localStorage.setItem('slaash_user', JSON.stringify(data.user));
       document.getElementById('login-prompt').style.display = 'none';
       document.getElementById('dashboard').style.display = '';
       document.getElementById('dash-email').textContent = usageUser.email;

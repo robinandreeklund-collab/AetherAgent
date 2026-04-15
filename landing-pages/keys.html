@@ -95,6 +95,21 @@ a:hover{color:var(--text)}
 <script>
 let currentUser = null;
 
+// Restore session from localStorage
+try {
+  const saved = localStorage.getItem('slaash_user');
+  if (saved) {
+    currentUser = JSON.parse(saved);
+    showKeys();
+    loadKeys();
+  }
+} catch(e) {}
+
+function saveSession(user) {
+  currentUser = user;
+  localStorage.setItem('slaash_user', JSON.stringify(user));
+}
+
 function showAuth(tab) {
   document.getElementById('form-signup').style.display = tab === 'signup' ? '' : 'none';
   document.getElementById('form-login').style.display = tab === 'login' ? '' : 'none';
@@ -113,7 +128,7 @@ async function doSignup() {
     const res = await fetch('/api/auth/signup', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name,website})});
     const data = await res.json();
     if (data.status === 'ok') {
-      currentUser = data.user;
+      saveSession(data.user);
       showKeys(data.api_key);
     } else {
       document.getElementById('auth-msg').innerHTML = '<span style="color:var(--red)">' + data.message + '</span>';
@@ -128,7 +143,7 @@ async function doLogin() {
     const res = await fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
     const data = await res.json();
     if (data.status === 'ok') {
-      currentUser = data.user;
+      saveSession(data.user);
       showKeys();
       renderKeys(data.api_keys || []);
     } else {
@@ -150,6 +165,7 @@ function showKeys(newKeyValue) {
 
 function logout() {
   currentUser = null;
+  localStorage.removeItem('slaash_user');
   document.getElementById('auth-section').style.display = '';
   document.getElementById('keys-section').style.display = 'none';
   document.getElementById('new-key-alert').style.display = 'none';
