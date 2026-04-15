@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Slaash API Playground — Developer Tools</title>
+<meta name="description" content="Interactive API playground for Slaash. Try extract, search, crawl, and more — live, with code generation.">
+<link rel="canonical" href="https://www.slaash.ai/playground">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111;--surface2:#161616;--border:rgba(255,255,255,0.08);
+  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.15);
+  --green:#22c55e;--red:#ef4444;--amber:#f59e0b;
+  --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+  --sidebar-w:220px;
+}
+html{font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;min-height:100vh}
+a{color:var(--muted);text-decoration:none;transition:color .2s}
+a:hover{color:var(--text)}
+
+/* TOP NAV */
+.top-nav{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid var(--border);background:var(--surface)}
+.wordmark{font-size:1.15rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.top-nav-links{display:flex;align-items:center;gap:1.5rem;font-size:.82rem}
+.top-nav-links a{color:var(--muted);font-weight:500}
+.top-nav-links a:hover{color:#fff}
+.top-nav-links a.active{color:#fff}
+.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:5px}
+.btn-sm{padding:.4rem 1rem;border-radius:7px;font-size:.78rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s}
+.btn-sm:hover{background:#2563eb}
+
+/* LAYOUT */
+.app{display:flex;height:calc(100vh - 52px)}
+
+/* SIDEBAR */
+.sidebar{width:var(--sidebar-w);border-right:1px solid var(--border);background:var(--surface);padding:1rem 0;flex-shrink:0;overflow-y:auto}
+.sidebar-section{padding:0 .75rem;margin-bottom:1.25rem}
+.sidebar-label{font-size:.65rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:0 .5rem;margin-bottom:.4rem}
+.sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.45rem .75rem;border-radius:7px;font-size:.82rem;color:var(--muted);cursor:pointer;transition:all .15s}
+.sidebar-link:hover{background:rgba(255,255,255,0.04);color:var(--text)}
+.sidebar-link.active{background:var(--accent-glow);color:#fff;font-weight:500}
+.sidebar-icon{font-size:.9rem;width:1.2rem;text-align:center}
+
+/* MAIN AREA */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* TOOLBAR */
+.toolbar{display:flex;align-items:center;gap:1rem;padding:.6rem 1.25rem;border-bottom:1px solid var(--border);background:var(--surface2)}
+.toolbar h2{font-size:.95rem;font-weight:600;flex:1}
+.toolbar .api-ver{font-size:.7rem;color:var(--muted);font-family:var(--mono);background:rgba(255,255,255,0.05);padding:.2rem .5rem;border-radius:4px}
+
+/* TABS */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1.25rem}
+.tab{padding:.55rem 1.1rem;font-size:.8rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:#fff;border-bottom-color:var(--accent)}
+
+/* SPLIT PANELS */
+.split{display:flex;flex:1;overflow:hidden}
+.panel-left{flex:1;padding:1.25rem;overflow-y:auto;border-right:1px solid var(--border)}
+.panel-right{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* FORM */
+.field{margin-bottom:1rem}
+.field label{display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.35rem}
+.field input,.field textarea,.field select{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none;transition:border-color .2s}
+.field input:focus,.field textarea:focus{border-color:var(--accent)}
+.field-row{display:flex;gap:.75rem}
+.field-row .field{flex:1}
+.btn-run{width:100%;padding:.7rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s;margin-top:.25rem}
+.btn-run:hover{background:#2563eb}
+.btn-run:disabled{opacity:.5;cursor:not-allowed}
+.advanced-toggle{font-size:.75rem;color:var(--accent);cursor:pointer;margin-bottom:.75rem;display:inline-block}
+.advanced-opts{display:none}
+.advanced-opts.visible{display:block}
+.examples{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem}
+.example-chip{padding:.25rem .65rem;border-radius:14px;font-size:.7rem;font-weight:500;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.15);color:#93b4f5;cursor:pointer;transition:all .15s}
+.example-chip:hover{background:rgba(59,130,246,0.18);border-color:rgba(59,130,246,0.3)}
+
+/* RESPONSE PANEL */
+.response-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1rem}
+.response-tab{padding:.45rem .9rem;font-size:.75rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.response-tab:hover{color:var(--text)}
+.response-tab.active{color:#fff;border-bottom-color:var(--green)}
+.response-body{flex:1;overflow-y:auto;padding:1rem;font-family:var(--mono);font-size:.78rem;white-space:pre-wrap;color:#c9d1d9}
+.response-meta{display:flex;gap:1rem;padding:.5rem 1rem;border-top:1px solid var(--border);font-size:.7rem;color:var(--muted);background:var(--surface2)}
+.response-meta .val{color:var(--green);font-weight:600}
+
+/* CODE PANEL */
+.code-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1rem}
+.code-tab{padding:.45rem .9rem;font-size:.72rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.code-tab:hover{color:var(--text)}
+.code-tab.active{color:#fff;border-bottom-color:var(--accent)}
+.code-body{flex:1;overflow-y:auto;padding:1rem;font-family:var(--mono);font-size:.75rem;white-space:pre-wrap;color:#c9d1d9;background:var(--bg)}
+
+/* LOADING */
+.loading-bar{height:2px;background:var(--accent);position:absolute;top:0;left:0;width:0;transition:width .3s;z-index:10}
+.loading-bar.active{animation:load-progress 8s ease-out forwards}
+@keyframes load-progress{0%{width:0}50%{width:60%}90%{width:85%}100%{width:92%}}
+
+/* RESPONSIVE */
+@media(max-width:900px){
+  .sidebar{display:none}
+  .split{flex-direction:column}
+  .panel-left{border-right:none;border-bottom:1px solid var(--border)}
+}
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<div class="top-nav">
+  <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  <div class="top-nav-links">
+    <a href="/docs">Docs</a>
+    <a href="/playground" class="active">Playground</a>
+    <a href="/mcp">MCP</a>
+    <a href="/try">Try</a>
+    <span style="font-size:.75rem;color:var(--muted)"><span class="status-dot"></span>Operational</span>
+    <button class="btn-sm" onclick="alert('Coming soon: Sign up for API key')">Get API Key</button>
+  </div>
+</div>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Playground</div>
+      <div class="sidebar-link active" onclick="switchTab('extract')"><span class="sidebar-icon">&#9889;</span> Extract</div>
+      <div class="sidebar-link" onclick="switchTab('search')"><span class="sidebar-icon">&#128269;</span> Search</div>
+      <div class="sidebar-link" onclick="switchTab('act')"><span class="sidebar-icon">&#9654;</span> Act</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Advanced</div>
+      <div class="sidebar-link" onclick="switchTab('crawl')"><span class="sidebar-icon">&#128279;</span> Crawl</div>
+      <div class="sidebar-link" onclick="switchTab('stream')"><span class="sidebar-icon">&#9776;</span> Stream</div>
+      <div class="sidebar-link" onclick="switchTab('plan')"><span class="sidebar-icon">&#128203;</span> Plan</div>
+      <div class="sidebar-link" onclick="switchTab('diff')"><span class="sidebar-icon">&#8800;</span> Diff</div>
+      <div class="sidebar-link" onclick="switchTab('render')"><span class="sidebar-icon">&#128247;</span> Render</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Account</div>
+      <div class="sidebar-link"><span class="sidebar-icon">&#128273;</span> API Keys</div>
+      <div class="sidebar-link"><span class="sidebar-icon">&#128200;</span> Usage</div>
+      <div class="sidebar-link"><span class="sidebar-icon">&#9881;</span> Settings</div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main" style="position:relative">
+    <div class="loading-bar" id="loading-bar"></div>
+    <div class="toolbar">
+      <h2 id="toolbar-title">slaash.extract</h2>
+      <span class="api-ver">api.slaash.ai/v1</span>
+    </div>
+
+    <div class="split">
+      <!-- LEFT: Request Builder -->
+      <div class="panel-left" id="panel-left">
+        <!-- Extract form (default) -->
+        <div id="form-extract">
+          <div class="examples">
+            <span class="example-chip" onclick="fillExample('https://news.ycombinator.com','top tech stories programming articles')">HN: top stories</span>
+            <span class="example-chip" onclick="fillExample('https://www.nasa.gov','space exploration missions Artemis astronauts')">NASA: missions</span>
+            <span class="example-chip" onclick="fillExample('https://docs.python.org/3/','python documentation tutorial reference library')">Python docs</span>
+          </div>
+          <div class="field">
+            <label>URL</label>
+            <input type="url" id="inp-url" placeholder="https://example.com" value="https://news.ycombinator.com">
+          </div>
+          <div class="field">
+            <label>Goal</label>
+            <input type="text" id="inp-goal" placeholder="What are you looking for?" value="top tech stories programming articles">
+          </div>
+          <span class="advanced-toggle" onclick="this.nextElementSibling.classList.toggle('visible')">&#9660; Advanced options</span>
+          <div class="advanced-opts">
+            <div class="field-row">
+              <div class="field"><label>Top N</label><input type="number" id="inp-topn" value="10" min="1" max="50"></div>
+              <div class="field"><label>Format</label><select id="inp-format"><option value="json">JSON</option><option value="markdown">Markdown</option></select></div>
+              <div class="field"><label>Run JS</label><select id="inp-js"><option value="false">No</option><option value="true">Yes</option></select></div>
+            </div>
+          </div>
+          <button class="btn-run" id="btn-run" onclick="runExtract()">Run slaash.extract</button>
+        </div>
+
+        <!-- Search form -->
+        <div id="form-search" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='latest AI news 2026'">AI news 2026</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='best Rust web frameworks'">Rust frameworks</span>
+          </div>
+          <div class="field">
+            <label>Search Query</label>
+            <input type="text" id="inp-query" placeholder="What do you want to find?" value="latest AI news 2026">
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Max Results</label><input type="number" id="inp-maxres" value="5" min="1" max="10"></div>
+            <div class="field"><label>Deep Parse</label><select id="inp-deep"><option value="true">Yes</option><option value="false">No</option></select></div>
+          </div>
+          <button class="btn-run" onclick="runSearch()">Run slaash.search</button>
+        </div>
+
+        <!-- Act form -->
+        <div id="form-act" style="display:none">
+          <div class="field">
+            <label>URL</label>
+            <input type="url" id="inp-act-url" placeholder="https://shop.example.com">
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Action</label><select id="inp-action"><option value="extract">Extract data</option><option value="click">Click element</option><option value="fill">Fill form</option></select></div>
+            <div class="field"><label>Target</label><input type="text" id="inp-target" placeholder="price, title, Add to Cart..."></div>
+          </div>
+          <div class="field">
+            <label>Goal</label>
+            <input type="text" id="inp-act-goal" placeholder="What are you trying to do?">
+          </div>
+          <button class="btn-run" onclick="runAct()">Run slaash.act</button>
+        </div>
+
+        <!-- Feedback section -->
+        <div id="feedback-section" style="display:none;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
+          <div style="font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:.5rem">Was this helpful?</div>
+          <div style="display:flex;gap:.5rem">
+            <button class="btn-sm" style="background:var(--green)" onclick="sendFeedback(true)">Yes, correct</button>
+            <button class="btn-sm" style="background:var(--red)" onclick="sendFeedback(false)">No, wrong</button>
+          </div>
+          <div id="feedback-msg" style="font-size:.72rem;color:var(--muted);margin-top:.35rem"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Response + Code -->
+      <div class="panel-right">
+        <div class="response-tabs">
+          <div class="response-tab active" onclick="showResponseTab('response')">Response</div>
+          <div class="response-tab" onclick="showResponseTab('code')">Code</div>
+        </div>
+
+        <!-- Response view -->
+        <div id="view-response" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+          <div class="response-body" id="response-body">
+            <span style="color:var(--muted)">// Run a query to see results here</span>
+          </div>
+          <div class="response-meta" id="response-meta">
+            <span>Tokens: <span class="val" id="meta-tokens">-</span></span>
+            <span>Savings: <span class="val" id="meta-savings">-</span></span>
+            <span>Time: <span class="val" id="meta-time">-</span></span>
+            <span>Nodes: <span class="val" id="meta-nodes">-</span></span>
+          </div>
+        </div>
+
+        <!-- Code view -->
+        <div id="view-code" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+          <div class="code-tabs">
+            <div class="code-tab active" onclick="showCodeLang('python')">Python</div>
+            <div class="code-tab" onclick="showCodeLang('javascript')">JavaScript</div>
+            <div class="code-tab" onclick="showCodeLang('curl')">cURL</div>
+          </div>
+          <div class="code-body" id="code-body">
+            <span style="color:var(--muted)"># Select a tab and run a query</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentTab = 'extract';
+let lastResult = null;
+let lastUrl = '';
+let lastGoal = '';
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+  const links = document.querySelectorAll('.sidebar-link');
+  links.forEach(l => { if(l.textContent.trim().toLowerCase().startsWith(tab)) l.classList.add('active'); });
+  document.getElementById('toolbar-title').textContent = 'slaash.' + tab;
+  ['form-extract','form-search','form-act'].forEach(id => document.getElementById(id).style.display = 'none');
+  const formId = 'form-' + (tab === 'extract' || tab === 'crawl' || tab === 'stream' || tab === 'diff' || tab === 'render' || tab === 'plan' ? 'extract' : tab);
+  document.getElementById(formId).style.display = '';
+  document.getElementById('feedback-section').style.display = 'none';
+  updateCodePreview();
+}
+
+function fillExample(url, goal) {
+  document.getElementById('inp-url').value = url;
+  document.getElementById('inp-goal').value = goal;
+  updateCodePreview();
+}
+
+function showResponseTab(view) {
+  document.querySelectorAll('.response-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('view-response').style.display = view === 'response' ? 'flex' : 'none';
+  document.getElementById('view-code').style.display = view === 'code' ? 'flex' : 'none';
+}
+
+function showCodeLang(lang) {
+  document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  updateCodePreview(lang);
+}
+
+function updateCodePreview(lang) {
+  lang = lang || 'python';
+  const url = document.getElementById('inp-url')?.value || '';
+  const goal = document.getElementById('inp-goal')?.value || '';
+  const topN = document.getElementById('inp-topn')?.value || '10';
+  let code = '';
+  if (lang === 'python') {
+    code = `from slaash import Slaash\n\ns = Slaash(api_key="sk-...")\n\nresult = s.extract(\n    url="${url}",\n    goal="${goal}",\n    top_n=${topN}\n)\n\nfor node in result.nodes:\n    print(f"[{node.role}] {node.label}")`;
+  } else if (lang === 'javascript') {
+    code = `import Slaash from 'slaash'\n\nconst s = new Slaash({ apiKey: 'sk-...' })\n\nconst result = await s.extract('${url}', {\n  goal: '${goal}',\n  topN: ${topN}\n})\n\nresult.nodes.forEach(n => console.log(\`[\${n.role}] \${n.label}\`))`;
+  } else {
+    code = `curl -X POST https://api.slaash.ai/v1/extract \\\n  -H "Authorization: Bearer sk-..." \\\n  -H "Content-Type: application/json" \\\n  -d '{\n    "url": "${url}",\n    "goal": "${goal}",\n    "options": { "top_n": ${topN} }\n  }'`;
+  }
+  document.getElementById('code-body').textContent = code;
+}
+
+function startLoading() {
+  const bar = document.getElementById('loading-bar');
+  bar.classList.remove('active');
+  void bar.offsetWidth;
+  bar.classList.add('active');
+  document.getElementById('btn-run').disabled = true;
+}
+
+function stopLoading() {
+  const bar = document.getElementById('loading-bar');
+  bar.style.width = '100%';
+  setTimeout(() => { bar.classList.remove('active'); bar.style.width = '0'; }, 300);
+  document.getElementById('btn-run').disabled = false;
+}
+
+async function runExtract() {
+  const url = document.getElementById('inp-url').value.trim();
+  const goal = document.getElementById('inp-goal').value.trim();
+  if (!url || !goal) return;
+  lastUrl = url; lastGoal = goal;
+  startLoading();
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/api/parse-crfr', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url, goal,
+        top_n: parseInt(document.getElementById('inp-topn').value) || 10,
+        output_format: document.getElementById('inp-format').value,
+        run_js: document.getElementById('inp-js').value === 'true'
+      })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('meta-tokens').textContent = (data.total_nodes || 0) + ' DOM -> ' + (data.node_count || 0) + ' nodes';
+    const savings = data.total_nodes > 0 ? ((1 - (data.node_count || 0) / data.total_nodes) * 100).toFixed(1) + '%' : '-';
+    document.getElementById('meta-savings').textContent = savings;
+    document.getElementById('meta-time').textContent = elapsed + 'ms';
+    document.getElementById('meta-nodes').textContent = data.node_count || 0;
+    document.getElementById('feedback-section').style.display = '';
+    updateCodePreview();
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+async function runSearch() {
+  const query = document.getElementById('inp-query').value.trim();
+  if (!query) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/search', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        query, goal: query,
+        top_n: parseInt(document.getElementById('inp-maxres').value) || 5,
+        deep: document.getElementById('inp-deep').value === 'true'
+      })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+async function runAct() {
+  startLoading();
+  try {
+    const res = await fetch('/api/act', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        url: document.getElementById('inp-act-url').value,
+        goal: document.getElementById('inp-act-goal').value,
+        action: document.getElementById('inp-action').value,
+        target: document.getElementById('inp-target').value
+      })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+async function sendFeedback(positive) {
+  if (!lastResult || !lastResult.nodes || !lastUrl) return;
+  const ids = positive ? lastResult.nodes.slice(0,3).map(n => n.id) : [];
+  try {
+    await fetch('/api/crfr-feedback', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ url: lastUrl, goal: lastGoal, successful_node_ids: ids })
+    });
+    document.getElementById('feedback-msg').textContent = positive
+      ? 'Thanks! Slaash will rank these nodes higher next time.'
+      : 'Noted. Results will be adjusted on next query.';
+  } catch(e) {
+    document.getElementById('feedback-msg').textContent = 'Feedback failed: ' + e.message;
+  }
+}
+
+// Init
+updateCodePreview();
+</script>
+<script src="/components.js"></script>
+</body>
+</html>
