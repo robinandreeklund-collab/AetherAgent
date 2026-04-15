@@ -7189,6 +7189,38 @@ fn build_router(state: AppState) -> Router {
         },
     );
 
+    // Usage tracking middleware: extract API key, validate, log per request
+    let usage_layer = axum::middleware::from_fn(
+        |req: axum::extract::Request, next: axum::middleware::Next| async move {
+            let t0 = std::time::Instant::now();
+
+            // Extract API key from Authorization header
+            let key_info = req
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .filter(|v| v.starts_with("Bearer "))
+                .map(|v| &v[7..])
+                .and_then(|key| aether_agent::auth::validate_api_key(key));
+
+            // Extract endpoint path for logging
+            let endpoint = req.uri().path().to_string();
+
+            let resp = next.run(req).await;
+
+            // Log usage if authenticated
+            if let Some((key_id, _user_id)) = key_info {
+                let elapsed = t0.elapsed().as_millis() as i64;
+                // Only log /api/ endpoints (not static pages)
+                if endpoint.starts_with("/api/") || endpoint == "/mcp" {
+                    aether_agent::auth::log_usage(key_id, &endpoint, elapsed, 0, 0);
+                }
+            }
+
+            resp
+        },
+    );
+
     Router::new()
         // Root = landing page
         .route("/", get(landing_concept_1))
@@ -7444,6 +7476,7 @@ fn build_router(state: AppState) -> Router {
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .route("/mcp/events", get(mcp_events_poll))
         .with_state(state)
+        .layer(usage_layer)
         .layer(count_layer)
         .layer(cors)
         // 50 MB body limit — ONNX-modeller + screenshots kräver mer än Axums default (2 MB)
