@@ -1,0 +1,64 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>MCP Integration — Slaash Docs</title><meta name="description" content="Connect Slaash to Claude Desktop, Cursor, or VS Code via MCP protocol. 12 agent primitives."><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><style>*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}:root{--bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);--text:#f5f5f5;--muted:#888;--accent:#3b82f6;--green:#22c55e;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}.doc{max-width:760px;margin:0 auto;padding:6rem 2rem 4rem}.doc h1{font-size:2rem;font-weight:800;letter-spacing:-0.03em;margin-bottom:.5rem}.doc .sub{color:var(--muted);font-size:1rem;margin-bottom:2.5rem}.doc h2{font-size:1.25rem;font-weight:700;margin:2.5rem 0 .75rem}.doc p{color:var(--muted);margin-bottom:1rem;font-size:.9rem}.doc strong{color:var(--text)}.doc code{font-family:var(--mono);font-size:.82rem;background:rgba(255,255,255,0.05);padding:.15rem .4rem;border-radius:4px}.doc pre{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:1.25rem;font-family:var(--mono);font-size:.8rem;line-height:1.6;overflow-x:auto;margin-bottom:1.5rem;color:#e6edf3}.doc table{width:100%;border-collapse:collapse;margin-bottom:1.5rem;font-size:.85rem}.doc th{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--border);color:var(--muted);font-weight:600;font-size:.75rem;text-transform:uppercase}.doc td{padding:.6rem .8rem;border-bottom:1px solid rgba(255,255,255,0.03);color:var(--muted)}.doc td:first-child{color:var(--text);font-family:var(--mono);font-size:.82rem}.warn{background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:1rem;margin-bottom:1.5rem;font-size:.85rem;color:#fcd34d}</style></head><body>
+<nav style="position:fixed;top:0;left:0;right:0;z-index:100;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;backdrop-filter:blur(16px);background:rgba(10,10,10,0.85);border-bottom:1px solid var(--border)"><a href="/" style="font-size:1.25rem;font-weight:700;color:#fff;text-decoration:none">sl<span style="color:var(--accent);font-weight:800">/</span>sh</a><div style="display:flex;gap:2rem;font-size:.875rem"><a href="/docs" style="color:var(--muted)">Docs</a><a href="/playground" style="color:var(--muted)">Playground</a><a href="/keys" style="color:var(--muted)">API Keys</a></div></nav>
+<div class="doc">
+<p style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem"><a href="/docs">&larr; Back to Docs</a></p>
+<h1>MCP Integration</h1>
+<p class="sub">Connect Slaash to Claude Desktop, Cursor, or VS Code via the Model Context Protocol.</p>
+
+<div class="warn"><strong>API key required.</strong> The MCP endpoint at <code>api.slaash.ai/mcp</code> requires authentication. Get your key at <a href="/keys">/keys</a>.</div>
+
+<h2>Setup</h2>
+<p>Add Slaash to your MCP client configuration:</p>
+
+<h3 style="font-size:1rem;font-weight:600;margin:1.5rem 0 .5rem">Claude Desktop</h3>
+<p>Edit <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>:</p>
+<pre>{
+  "mcpServers": {
+    "slaash": {
+      "url": "https://api.slaash.ai/mcp",
+      "headers": {
+        "Authorization": "Bearer sk-your-key-here"
+      }
+    }
+  }
+}</pre>
+
+<h3 style="font-size:1rem;font-weight:600;margin:1.5rem 0 .5rem">Cursor / VS Code</h3>
+<p>Add to your MCP settings (Settings &rarr; MCP Servers):</p>
+<pre>{
+  "name": "slaash",
+  "url": "https://api.slaash.ai/mcp",
+  "headers": { "Authorization": "Bearer sk-your-key-here" }
+}</pre>
+
+<h2>Available Tools</h2>
+<p>12 agent primitives exposed as MCP tools:</p>
+<table>
+<tr><th>Tool</th><th>Description</th></tr>
+<tr><td>slaash.extract</td><td>URL + goal &rarr; ranked answer nodes (CRFR)</td></tr>
+<tr><td>slaash.search</td><td>Web search + deep parse</td></tr>
+<tr><td>slaash.crawl</td><td>Multi-page intelligent crawl</td></tr>
+<tr><td>slaash.act</td><td>Click, fill forms, extract structured data</td></tr>
+<tr><td>slaash.plan</td><td>Decompose goals into action steps</td></tr>
+<tr><td>slaash.stream</td><td>Token-efficient streaming for large pages</td></tr>
+<tr><td>slaash.diff</td><td>Compare page snapshots, return changes</td></tr>
+<tr><td>slaash.render</td><td>Screenshot a page (Blitz or Chrome)</td></tr>
+<tr><td>slaash.links</td><td>Discover and rank links</td></tr>
+<tr><td>slaash.explore</td><td>Find hidden API endpoints (XHR/fetch)</td></tr>
+<tr><td>slaash.learn</td><td>Teach which nodes were correct (feedback)</td></tr>
+<tr><td>slaash.inspect</td><td>Security scan (injection + firewall)</td></tr>
+</table>
+
+<h2>Example conversation</h2>
+<p>Once connected, Claude can use Slaash tools directly:</p>
+<pre>User: "What's the current Bitcoin price?"
+
+Claude: I'll use slaash.extract to check.
+[calls slaash.extract with url=coinmarketcap.com, goal="bitcoin price USD"]
+
+Result: $67,432.15 (from 3 ranked nodes, 99.2% token savings)</pre>
+
+<h2>Rate limits</h2>
+<p>MCP requests count against your API key's rate limits (60 req/min, 1,000 req/day on free tier). Monitor usage at <a href="/usage">/usage</a>.</p>
+</div>
+<div data-component="footer"></div><script src="/components.js"></script></body></html>

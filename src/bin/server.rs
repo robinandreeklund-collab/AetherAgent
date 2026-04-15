@@ -7055,6 +7055,41 @@ async fn landing_docs() -> impl IntoResponse {
     ])
     .await
 }
+async fn doc_quickstart() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-quickstart.html",
+        "landing-pages/docs-quickstart.html",
+    ])
+    .await
+}
+async fn doc_mcp() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-mcp.html",
+        "landing-pages/docs-mcp.html",
+    ])
+    .await
+}
+async fn doc_api() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-api.html",
+        "landing-pages/docs-api.html",
+    ])
+    .await
+}
+async fn doc_guide() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-guide.html",
+        "landing-pages/docs-guide.html",
+    ])
+    .await
+}
+async fn doc_trust_shield() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-trust-shield.html",
+        "landing-pages/docs-trust-shield.html",
+    ])
+    .await
+}
 
 async fn favicon_svg() -> impl IntoResponse {
     let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><text x=\"8\" y=\"26\" font-family=\"Inter,system-ui,sans-serif\" font-weight=\"800\" font-size=\"28\" fill=\"#3b82f6\">/</text></svg>";
@@ -7127,6 +7162,11 @@ fn build_router(state: AppState) -> Router {
         .route("/timeline", get(landing_timeline))
         .route("/live", get(landing_live))
         .route("/docs", get(landing_docs))
+        .route("/docs/quickstart", get(doc_quickstart))
+        .route("/docs/mcp", get(doc_mcp))
+        .route("/docs/api", get(doc_api))
+        .route("/docs/guide", get(doc_guide))
+        .route("/docs/trust-shield", get(doc_trust_shield))
         // Dashboard
         .route("/dashboard", get(dashboard_html))
         .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))
