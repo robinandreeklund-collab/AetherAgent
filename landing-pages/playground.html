@@ -1171,15 +1171,22 @@ async function sendFeedback() {
     return;
   }
   try {
-    await fetch('/api/crfr-feedback', {
+    const res = await fetch('/api/crfr-feedback', {
       method:'POST', headers:apiHeaders(),
       body: JSON.stringify({ url: lastUrl, goal: lastGoal, successful_node_ids: ids, user_id: user.id })
     });
-    document.getElementById('feedback-msg').textContent =
-      'Sent! Nodes #' + ids.join(', #') + ' will rank higher in your personal model.';
-    document.getElementById('feedback-msg').style.color = 'var(--green)';
+    const data = await res.json();
+    if (data.status === 'ok') {
+      document.getElementById('feedback-msg').textContent =
+        'Sent! Nodes #' + ids.join(', #') + ' will rank higher in your personal model.';
+      document.getElementById('feedback-msg').style.color = 'var(--green)';
+    } else {
+      document.getElementById('feedback-msg').textContent = 'Feedback error: ' + (data.message || JSON.stringify(data));
+      document.getElementById('feedback-msg').style.color = 'var(--red)';
+    }
   } catch(e) {
     document.getElementById('feedback-msg').textContent = 'Feedback failed: ' + e.message;
+    document.getElementById('feedback-msg').style.color = 'var(--red)';
   }
 }
 

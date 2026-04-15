@@ -3744,12 +3744,12 @@ pub fn get_field_for_feedback(url: &str, js_variant: bool) -> Option<ResonanceFi
     };
     let url_hash = hash_url(&variant_url);
 
-    // Check RAM cache
-    let mut cache = match FIELD_CACHE.write() {
+    // Check RAM cache (peek = clone without removing)
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Some(field) = cache.take(url_hash) {
+    if let Some(field) = cache.peek(url_hash) {
         return Some(field);
     }
     drop(cache);
@@ -3997,13 +3997,14 @@ pub fn hash_url_user_pub(url: &str, user_id: i64, js_variant: bool) -> u64 {
     hash_url_user(&variant_url, user_id)
 }
 
-/// Get a field by its exact hash (for user-specific lookups)
+/// Get a field by its exact hash (for user-specific lookups).
+/// Uses peek (clone) to avoid removing the field from cache.
 pub fn get_field_by_hash(url_hash: u64) -> Option<ResonanceField> {
-    let mut cache = match FIELD_CACHE.write() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Some(field) = cache.take(url_hash) {
+    if let Some(field) = cache.peek(url_hash) {
         return Some(field);
     }
     drop(cache);
