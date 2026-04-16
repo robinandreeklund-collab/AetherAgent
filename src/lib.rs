@@ -2020,46 +2020,36 @@ pub fn crfr_feedback_user(
         return r#"{"status":"no_ids"}"#.to_string();
     }
 
-    // Try to find user-specific field
-    let user_hash_js = resonance::hash_url_user_pub(url, user_id, true);
-    let user_hash_no = resonance::hash_url_user_pub(url, user_id, false);
-
-    eprintln!(
-        "[FEEDBACK_USER] url={}, user_id={}, hash_js={}, hash_no={}",
-        url, user_id, user_hash_js, user_hash_no
-    );
-
-    let mut field = if let Some(f) = resonance::get_field_by_hash(user_hash_js) {
-        eprintln!("[FEEDBACK_USER] Found user field via hash_js");
+    // Find global field to get node labels for the boosted nodes
+    let field = if let Some(f) = resonance::get_field_for_feedback(url, true) {
         f
-    } else if let Some(f) = resonance::get_field_by_hash(user_hash_no) {
-        eprintln!("[FEEDBACK_USER] Found user field via hash_no");
+    } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
         f
     } else {
-        // No user field yet — try global and clone for this user
-        let global = if let Some(f) = resonance::get_field_for_feedback(url, true) {
-            eprintln!("[FEEDBACK_USER] Cloning from global JS field");
-            f
-        } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
-            eprintln!("[FEEDBACK_USER] Cloning from global non-JS field");
-            f
-        } else {
-            eprintln!(
-                "[FEEDBACK_USER] NO FIELD FOUND — global cache empty for url={}",
-                url
-            );
-            return r#"{"status":"no_field","message":"No cached field. Run parse_crfr first."}"#
-                .to_string();
-        };
-        let mut user_field = global.clone();
-        user_field.url_hash = user_hash_no;
-        // Clear global causal memory — user starts fresh
-        user_field.clear_causal_memory();
-        user_field
+        eprintln!(
+            "[FEEDBACK_USER] NO FIELD FOUND — global cache empty for url={}",
+            url
+        );
+        return r#"{"status":"no_field","message":"No cached field. Run parse_crfr first."}"#
+            .to_string();
     };
 
-    field.feedback(goal, &ids);
-    resonance::save_field(&field);
+    // Collect labels for the feedback nodes
+    let goal_hv = scoring::hdc::Hypervector::from_text_ngrams(goal);
+    let mut node_labels: Vec<(u32, &str)> = Vec::new();
+    for &nid in &ids {
+        if let Some(label) = field.node_labels_ref().get(&nid) {
+            node_labels.push((nid, label));
+        }
+    }
+
+    if node_labels.is_empty() {
+        return r#"{"status":"error","message":"No matching node labels found for given IDs"}"#
+            .to_string();
+    }
+
+    // Store user boost by label hash — simple, direct, no transfer needed
+    resonance::record_user_boost(url, user_id, &node_labels, &goal_hv);
 
     serde_json::json!({
         "status": "ok",

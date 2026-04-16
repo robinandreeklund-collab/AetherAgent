@@ -3483,6 +3483,11 @@ impl ResonanceField {
     /// Regenerate text_hv for all nodes from node_labels.
     /// Called after deserialization since text_hv is #[serde(skip)].
     /// Takes <1ms per 1000 nodes.
+    /// Public read access to node_labels.
+    pub fn node_labels_ref(&self) -> &HashMap<u32, String> {
+        &self.node_labels
+    }
+
     /// Clear all causal memory from nodes (for creating fresh per-user fields).
     pub fn clear_causal_memory(&mut self) {
         for state in self.nodes.values_mut() {
@@ -3878,7 +3883,6 @@ pub fn get_or_build_field_for_user(
     let (mut field, hit) = get_or_build_field_with_variant(tree_nodes, url, js_variant);
 
     // Always save the global field to cache (even for user queries)
-    // so that crfr_feedback can find it later via get_field_for_feedback.
     if !hit {
         save_field(&field);
     }
@@ -3887,43 +3891,86 @@ pub fn get_or_build_field_for_user(
         return (field, hit);
     }
 
-    // Look up user-specific field and merge causal weights
-    let user_hash_js = hash_url_user_pub(url, user_id, true);
-    let user_hash_no = hash_url_user_pub(url, user_id, false);
-
-    // Search BOTH js and non-js variants — feedback may save with either
-    let user_field = get_field_by_hash(user_hash_js).or_else(|| get_field_by_hash(user_hash_no));
-
-    if let Some(uf) = user_field {
-        // BUG-CRFR-002 fix: Use label-based transfer instead of node_id matching.
-        // Node IDs are unstable on dynamic/SPA sites (SVT, CNN etc) — they change
-        // between fetches. transfer_from uses 3-strategy label matching (exact,
-        // prefix, HV similarity) which survives DOM restructuring.
-        let transferred = field.transfer_from(&uf, 0.3);
-
-        // Also merge propagation_stats (Bayesian role weights)
-        for (key, (user_alpha, user_beta)) in &uf.propagation_stats {
-            let entry = field
-                .propagation_stats
-                .entry(key.clone())
-                .or_insert((1.0, 1.0));
-            entry.0 += user_alpha - 1.0;
-            entry.1 += user_beta - 1.0;
+    // Apply per-user boosts directly from USER_BOOSTS store
+    let url_hash = hash_url(url);
+    let boosts = get_user_boosts(url_hash, user_id);
+    if !boosts.is_empty() {
+        let mut applied = 0usize;
+        // Pre-compute label hashes (can't borrow nodes + node_labels simultaneously)
+        let label_hashes: HashMap<u32, u64> = field
+            .node_labels
+            .iter()
+            .map(|(&nid, label)| (nid, hash_url(label)))
+            .collect();
+        for (node_id, state) in field.nodes.iter_mut() {
+            let label_hash = label_hashes.get(node_id).copied().unwrap_or(0);
+            if let Some(&(boost_count, ref goal_hv)) = boosts.get(&label_hash) {
+                // Apply causal memory directly — same as feedback() does
+                state.causal_memory = goal_hv.clone();
+                state.hit_count = state.hit_count.max(boost_count);
+                state.last_hit_ms = now_ms();
+                applied += 1;
+            }
         }
         eprintln!(
-            "[CRFR] User {} merge: {} nodes transferred (label-based), {} prop stats",
+            "[CRFR] User {} direct boost: {} nodes boosted out of {} in boosts store",
             user_id,
-            transferred,
-            uf.propagation_stats.len()
+            applied,
+            boosts.len()
         );
     } else {
-        eprintln!(
-            "[CRFR] No user field found for user {} (hash_js={}, hash_no={})",
-            user_id, user_hash_js, user_hash_no
-        );
+        eprintln!("[CRFR] No user boosts found for user {}", user_id);
     }
 
     (field, hit)
+}
+
+// ─── Per-user boost store ──────────────────────────────────────────────────
+// Simple: (url_hash, user_id) → HashMap<label_hash, (feedback_count, goal_hv)>
+// No transfer_from needed. Survives cache eviction. Direct application.
+
+use std::sync::RwLock;
+
+type UserBoostKey = (u64, i64); // (url_hash, user_id)
+type UserBoostMap = HashMap<UserBoostKey, HashMap<u64, (u32, crate::scoring::hdc::Hypervector)>>;
+
+static USER_BOOSTS: std::sync::LazyLock<RwLock<UserBoostMap>> =
+    std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Record a user boost for specific node labels.
+pub fn record_user_boost(
+    url: &str,
+    user_id: i64,
+    node_labels: &[(u32, &str)],
+    goal_hv: &crate::scoring::hdc::Hypervector,
+) {
+    let url_hash = hash_url(url);
+    let key = (url_hash, user_id);
+    let mut store = USER_BOOSTS.write().unwrap_or_else(|e| e.into_inner());
+    let entry = store.entry(key).or_default();
+    for &(_node_id, label) in node_labels {
+        let label_hash = hash_url(label);
+        let boost = entry.entry(label_hash).or_insert((0, goal_hv.clone()));
+        boost.0 += 1; // increment feedback count
+                      // Strengthen causal memory with each feedback
+        boost.1 = crate::scoring::hdc::Hypervector::bundle(&[&boost.1, goal_hv]);
+    }
+    eprintln!(
+        "[USER_BOOST] Recorded {} boosts for user {} on url_hash {}",
+        node_labels.len(),
+        user_id,
+        url_hash
+    );
+}
+
+/// Get user boosts for a URL.
+pub fn get_user_boosts(
+    url_hash: u64,
+    user_id: i64,
+) -> HashMap<u64, (u32, crate::scoring::hdc::Hypervector)> {
+    let key = (url_hash, user_id);
+    let store = USER_BOOSTS.read().unwrap_or_else(|e| e.into_inner());
+    store.get(&key).cloned().unwrap_or_default()
 }
 
 /// Save a resonance field back to the cache (preserves causal memory).
