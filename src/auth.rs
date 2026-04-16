@@ -222,6 +222,12 @@ pub fn init_auth_tables() {
             CREATE INDEX IF NOT EXISTS idx_usage_key ON usage_log(api_key_id);
             CREATE INDEX IF NOT EXISTS idx_usage_time ON usage_log(timestamp);
             CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(key_hash);
+            CREATE TABLE IF NOT EXISTS session_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                key_id INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
+            );
             ",
         );
     }
@@ -362,6 +368,10 @@ pub fn login(email: &str, password: &str) -> Result<User, String> {
 #[cfg(feature = "persist")]
 pub fn create_session_token(user_id: i64) -> Option<String> {
     let key_id = get_default_key_id(user_id)?;
+    eprintln!(
+        "[AUTH] create_session_token: user_id={}, key_id={}",
+        user_id, key_id
+    );
     let token = format!("session_{}", generate_random_hex(32));
     let expires = now_secs() + 86400; // 24h
     let token_hash = hash_password(&token);
@@ -416,8 +426,13 @@ pub fn validate_session_token(token: &str) -> Option<(i64, i64)> {
         .ok()?;
     let (user_id, key_id, expires_at) = result;
     if now_secs() as i64 > expires_at {
+        eprintln!("[AUTH] Session token expired for user_id={}", user_id);
         return None;
     }
+    eprintln!(
+        "[AUTH] Session token valid: user_id={}, key_id={}",
+        user_id, key_id
+    );
     Some((key_id, user_id))
 }
 
