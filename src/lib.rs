@@ -2021,17 +2021,31 @@ pub fn crfr_feedback_user(
     }
 
     // Find global field to get node labels for the boosted nodes
-    let field = if let Some(f) = resonance::get_field_for_feedback(url, true) {
-        f
-    } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
-        f
-    } else {
-        eprintln!(
-            "[FEEDBACK_USER] NO FIELD FOUND — global cache empty for url={}",
-            url
-        );
-        return r#"{"status":"no_field","message":"No cached field. Run parse_crfr first."}"#
-            .to_string();
+    // Try multiple URL variants (with/without trailing slash, www)
+    let url_variants = {
+        let mut v = vec![url.to_string()];
+        // Add/remove trailing slash
+        if url.ends_with('/') {
+            v.push(url.trim_end_matches('/').to_string());
+        } else {
+            v.push(format!("{}/", url));
+        }
+        v
+    };
+    let field = url_variants.iter().find_map(|u| {
+        resonance::get_field_for_feedback(u, true)
+            .or_else(|| resonance::get_field_for_feedback(u, false))
+    });
+    let field = match field {
+        Some(f) => f,
+        None => {
+            eprintln!(
+                "[FEEDBACK_USER] NO FIELD FOUND — global cache empty for url={}",
+                url
+            );
+            return r#"{"status":"no_field","message":"No cached field. Run parse_crfr first."}"#
+                .to_string();
+        }
     };
 
     // Collect labels for the feedback nodes

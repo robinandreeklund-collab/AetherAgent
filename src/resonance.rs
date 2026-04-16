@@ -3893,9 +3893,10 @@ pub fn get_or_build_field_for_user(
     }
 
     // Apply per-user boosts directly from USER_BOOSTS store
-    // Search both url variants (with and without #__js_eval)
-    let url_hash = hash_url(url);
-    let url_hash_js = hash_url(&format!("{}#__js_eval", url));
+    // Normalize URL for consistent hash (trailing slash, www)
+    let norm_url = normalize_url_for_boost(url);
+    let url_hash = hash_url(&norm_url);
+    let url_hash_js = hash_url(&format!("{}#__js_eval", norm_url));
     let mut boosts = get_user_boosts(url_hash, user_id);
     if boosts.is_empty() {
         boosts = get_user_boosts(url_hash_js, user_id);
@@ -3942,6 +3943,18 @@ type UserBoostMap = HashMap<UserBoostKey, HashMap<u64, (u32, crate::scoring::hdc
 static USER_BOOSTS: std::sync::LazyLock<RwLock<UserBoostMap>> =
     std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
 
+/// Normalize URL for consistent boost hash matching.
+fn normalize_url_for_boost(url: &str) -> String {
+    let mut u = url.trim().to_string();
+    // Remove trailing slash for consistency
+    if u.ends_with('/') && u.len() > 1 {
+        u.pop();
+    }
+    // Remove www. prefix
+    u = u.replace("://www.", "://");
+    u
+}
+
 /// Record a user boost for specific node labels.
 pub fn record_user_boost(
     url: &str,
@@ -3949,7 +3962,7 @@ pub fn record_user_boost(
     node_labels: &[(u32, &str)],
     goal_hv: &crate::scoring::hdc::Hypervector,
 ) {
-    let url_hash = hash_url(url);
+    let url_hash = hash_url(&normalize_url_for_boost(url));
     let key = (url_hash, user_id);
     let mut store = USER_BOOSTS.write().unwrap_or_else(|e| e.into_inner());
     let entry = store.entry(key).or_default();
