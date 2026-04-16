@@ -3861,6 +3861,12 @@ pub fn get_or_build_field_for_user(
 ) -> (ResonanceField, bool) {
     let (mut field, hit) = get_or_build_field_with_variant(tree_nodes, url, js_variant);
 
+    // Always save the global field to cache (even for user queries)
+    // so that crfr_feedback can find it later via get_field_for_feedback.
+    if !hit {
+        save_field(&field);
+    }
+
     if user_id <= 0 {
         return (field, hit);
     }
