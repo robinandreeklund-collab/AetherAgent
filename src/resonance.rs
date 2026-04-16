@@ -3356,10 +3356,19 @@ impl ResonanceField {
             }
 
             if let Some(donor_state) = matched_donor {
-                recipient.causal_memory =
-                    Hypervector::bundle(&[&recipient.causal_memory, &donor_state.causal_memory]);
-                recipient.hit_count = 1;
-                recipient.last_hit_ms = now_ms();
+                // If recipient has no causal memory (hit_count=0), COPY donor's memory.
+                // If recipient already has memory, bundle (additive).
+                // This prevents exponential dilution on repeated transfers.
+                if recipient.hit_count == 0 {
+                    recipient.causal_memory = donor_state.causal_memory.clone();
+                } else {
+                    recipient.causal_memory = Hypervector::bundle(&[
+                        &recipient.causal_memory,
+                        &donor_state.causal_memory,
+                    ]);
+                }
+                recipient.hit_count = recipient.hit_count.max(donor_state.hit_count).max(1);
+                recipient.last_hit_ms = donor_state.last_hit_ms.max(recipient.last_hit_ms);
                 transferred += 1;
             }
         }
