@@ -653,6 +653,7 @@ mod tests {
             },
             concepts: std::collections::HashMap::new(),
             field_count: 3,
+            answer_zone: Default::default(),
         };
 
         save_domain_profile(12345, &profile);

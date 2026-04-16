@@ -237,10 +237,22 @@ pub fn init_auth_tables() {
             );
             ",
         );
-        // Migrate: add locale column to existing users table if missing
-        // (ignore error if already exists — SQLite has no IF NOT EXISTS for ADD COLUMN)
+        // Migrations: add columns if missing (SQLite has no IF NOT EXISTS for ADD COLUMN)
         let _ = conn.execute(
             "ALTER TABLE users ADD COLUMN locale TEXT NOT NULL DEFAULT 'en-US'",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE users ADD COLUMN oauth_provider TEXT DEFAULT NULL",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE users ADD COLUMN oauth_id TEXT DEFAULT NULL",
+            [],
+        );
+        // Index for OAuth lookups
+        let _ = conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_oauth ON users(oauth_provider, oauth_id)",
             [],
         );
     }
@@ -468,6 +480,132 @@ pub fn get_user_locale(user_id: i64) -> Option<String> {
 #[cfg(not(feature = "persist"))]
 pub fn get_user_locale(_user_id: i64) -> Option<String> {
     None
+}
+
+// ─── OAuth signup/login (GitHub, Google) ────────────────────────────────
+
+/// Find existing user by OAuth provider/id, or create new one.
+/// Returns (User, api_key_on_new_user_or_empty).
+#[cfg(feature = "persist")]
+pub fn find_or_create_oauth_user(
+    provider: &str,
+    oauth_id: &str,
+    email: &str,
+    name: &str,
+) -> Result<(User, String), String> {
+    let pool = crate::persist::get_db_lock().ok_or("DB not initialized")?;
+    let conn = pool.writer.as_ref().ok_or("No DB writer")?;
+
+    // Try to find existing user by oauth_provider + oauth_id
+    let existing: Option<(i64, String, String, i64, String)> = conn
+        .query_row(
+            "SELECT id, email, name, created_at, COALESCE(locale, 'en-US') FROM users WHERE oauth_provider = ?1 AND oauth_id = ?2",
+            params![provider, oauth_id],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .ok();
+
+    if let Some((id, email, name, created_at, locale)) = existing {
+        return Ok((
+            User {
+                id,
+                email,
+                name,
+                created_at,
+                locale,
+            },
+            String::new(),
+        ));
+    }
+
+    // Also try match by email (account linking: user previously signed up with email)
+    let by_email: Option<(i64, String, i64, String, Option<String>)> = conn
+        .query_row(
+            "SELECT id, name, created_at, COALESCE(locale, 'en-US'), oauth_provider FROM users WHERE email = ?1",
+            params![email],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            },
+        )
+        .ok();
+
+    if let Some((id, existing_name, created_at, locale, _existing_provider)) = by_email {
+        // Link OAuth to this existing user
+        let _ = conn.execute(
+            "UPDATE users SET oauth_provider = ?1, oauth_id = ?2 WHERE id = ?3",
+            params![provider, oauth_id, id],
+        );
+        return Ok((
+            User {
+                id,
+                email: email.to_string(),
+                name: existing_name,
+                created_at,
+                locale,
+            },
+            String::new(),
+        ));
+    }
+
+    // Create new user with OAuth (empty password_hash, provider set)
+    let now = now_secs() as i64;
+    conn.execute(
+        "INSERT INTO users (email, password_hash, name, created_at, locale, oauth_provider, oauth_id) VALUES (?1, '', ?2, ?3, 'en-US', ?4, ?5)",
+        params![email, name, now, provider, oauth_id],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("UNIQUE") {
+            "Email already registered with different OAuth provider".to_string()
+        } else {
+            format!("OAuth signup failed: {e}")
+        }
+    })?;
+
+    let user_id = conn.last_insert_rowid();
+    let user = User {
+        id: user_id,
+        email: email.to_string(),
+        name: name.to_string(),
+        created_at: now,
+        locale: default_locale(),
+    };
+
+    // Auto-create first API key (same as regular signup)
+    let api_key = generate_api_key();
+    let key_hash = hash_api_key(&api_key);
+    let key_prefix = api_key[..15].to_string();
+
+    conn.execute(
+        "INSERT INTO api_keys (user_id, key_hash, key_prefix, name, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![user_id, key_hash, key_prefix, "default", now],
+    )
+    .map_err(|e| format!("Key creation failed: {e}"))?;
+
+    Ok((user, api_key))
+}
+
+#[cfg(not(feature = "persist"))]
+pub fn find_or_create_oauth_user(
+    _provider: &str,
+    _oauth_id: &str,
+    _email: &str,
+    _name: &str,
+) -> Result<(User, String), String> {
+    Err("Persist feature not enabled".to_string())
 }
 
 // ─── Session tokens (playground login → Bearer auth) ─────────────────────

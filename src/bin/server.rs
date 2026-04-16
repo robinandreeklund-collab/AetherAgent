@@ -7570,6 +7570,10 @@ fn build_router(state: AppState) -> Router {
         .route("/api/auth/keys/delete", post(auth_delete_key))
         .route("/api/auth/usage", post(auth_usage))
         .route("/api/auth/profile", post(auth_update_profile))
+        .route("/auth/github", get(oauth_github_redirect))
+        .route("/auth/github/callback", get(oauth_github_callback))
+        .route("/auth/google", get(oauth_google_redirect))
+        .route("/auth/google/callback", get(oauth_google_callback))
         .route("/settings", get(landing_settings))
         .route("/mission", get(landing_mission))
         .route("/timeline", get(landing_timeline))
@@ -8569,6 +8573,310 @@ async fn landing_settings() -> impl IntoResponse {
         "landing-pages/settings.html",
     ])
     .await
+}
+
+// ─── OAuth: GitHub + Google ─────────────────────────────────────────────
+
+fn oauth_base_url() -> String {
+    std::env::var("SLAASH_OAUTH_BASE_URL").unwrap_or_else(|_| "https://www.slaash.ai".to_string())
+}
+
+fn oauth_error_redirect(msg: &str) -> axum::response::Redirect {
+    let url = format!("/keys?oauth_error={}", urlencode(msg));
+    axum::response::Redirect::to(&url)
+}
+
+fn oauth_success_redirect(
+    user: &aether_agent::auth::User,
+    session_token: &str,
+    api_key: &str,
+) -> axum::response::Redirect {
+    let user_json = serde_json::to_string(user).unwrap_or_default();
+    let user_b64 = B64.encode(user_json.as_bytes());
+    let mut url = format!(
+        "/keys?oauth_success=1&session_token={}&user={}",
+        urlencode(session_token),
+        urlencode(&user_b64)
+    );
+    if !api_key.is_empty() {
+        url.push_str(&format!("&api_key={}", urlencode(api_key)));
+    }
+    axum::response::Redirect::to(&url)
+}
+
+fn urlencode(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
+                c.to_string()
+            } else {
+                let mut buf = [0u8; 4];
+                c.encode_utf8(&mut buf)
+                    .bytes()
+                    .map(|b| format!("%{:02X}", b))
+                    .collect()
+            }
+        })
+        .collect()
+}
+
+async fn oauth_github_redirect() -> axum::response::Redirect {
+    let client_id = match std::env::var("SLAASH_GITHUB_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("GitHub OAuth not configured"),
+    };
+    let redirect = format!("{}/auth/github/callback", oauth_base_url());
+    let url = format!(
+        "https://github.com/login/oauth/authorize?client_id={}&scope=read:user+user:email&redirect_uri={}",
+        urlencode(&client_id),
+        urlencode(&redirect)
+    );
+    axum::response::Redirect::to(&url)
+}
+
+async fn oauth_github_callback(
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> axum::response::Redirect {
+    let code = match params.get("code") {
+        Some(c) if !c.is_empty() => c.clone(),
+        _ => return oauth_error_redirect("Missing authorization code"),
+    };
+    let client_id = match std::env::var("SLAASH_GITHUB_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("GitHub OAuth not configured"),
+    };
+    let client_secret = match std::env::var("SLAASH_GITHUB_CLIENT_SECRET") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("GitHub OAuth not configured"),
+    };
+
+    let client = match reqwest::Client::builder()
+        .user_agent("slaash-oauth")
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return oauth_error_redirect(&format!("HTTP client: {}", e)),
+    };
+
+    let token_res = client
+        .post("https://github.com/login/oauth/access_token")
+        .header("Accept", "application/json")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", code.as_str()),
+        ])
+        .send()
+        .await;
+
+    let access_token = match token_res {
+        Ok(r) => match r.text().await {
+            Ok(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(j) => match j.get("access_token").and_then(|v| v.as_str()) {
+                    Some(t) => t.to_string(),
+                    None => return oauth_error_redirect("GitHub token exchange failed"),
+                },
+                Err(_) => return oauth_error_redirect("GitHub token parse failed"),
+            },
+            Err(_) => return oauth_error_redirect("GitHub token body read failed"),
+        },
+        Err(e) => return oauth_error_redirect(&format!("GitHub token error: {}", e)),
+    };
+
+    let user_res = client
+        .get("https://api.github.com/user")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await;
+
+    let gh_user: serde_json::Value = match user_res {
+        Ok(r) => match r.text().await {
+            Ok(body) => match serde_json::from_str(&body) {
+                Ok(j) => j,
+                Err(_) => return oauth_error_redirect("GitHub user parse failed"),
+            },
+            Err(_) => return oauth_error_redirect("GitHub user body read failed"),
+        },
+        Err(e) => return oauth_error_redirect(&format!("GitHub user error: {}", e)),
+    };
+
+    let gh_id = gh_user
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let name = gh_user
+        .get("name")
+        .and_then(|v| v.as_str())
+        .or_else(|| gh_user.get("login").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+    let mut email = gh_user
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if email.is_empty() {
+        // Fetch from /user/emails (private/unverified not shown on /user)
+        if let Ok(r) = client
+            .get("https://api.github.com/user/emails")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            if let Ok(body) = r.text().await {
+                if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if let Some(list) = arr.as_array() {
+                        for item in list {
+                            let primary = item
+                                .get("primary")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            let verified = item
+                                .get("verified")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            if primary && verified {
+                                if let Some(e) = item.get("email").and_then(|v| v.as_str()) {
+                                    email = e.to_string();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if email.is_empty() || gh_id.is_empty() {
+        return oauth_error_redirect("GitHub did not return an email");
+    }
+
+    match aether_agent::auth::find_or_create_oauth_user("github", &gh_id, &email, &name) {
+        Ok((user, api_key)) => {
+            let session_token =
+                aether_agent::auth::create_session_token(user.id).unwrap_or_default();
+            oauth_success_redirect(&user, &session_token, &api_key)
+        }
+        Err(e) => oauth_error_redirect(&e),
+    }
+}
+
+async fn oauth_google_redirect() -> axum::response::Redirect {
+    let client_id = match std::env::var("SLAASH_GOOGLE_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("Google OAuth not configured"),
+    };
+    let redirect = format!("{}/auth/google/callback", oauth_base_url());
+    let url = format!(
+        "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id={}&scope={}&redirect_uri={}&access_type=online&prompt=select_account",
+        urlencode(&client_id),
+        urlencode("openid email profile"),
+        urlencode(&redirect)
+    );
+    axum::response::Redirect::to(&url)
+}
+
+async fn oauth_google_callback(
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> axum::response::Redirect {
+    let code = match params.get("code") {
+        Some(c) if !c.is_empty() => c.clone(),
+        _ => return oauth_error_redirect("Missing authorization code"),
+    };
+    let client_id = match std::env::var("SLAASH_GOOGLE_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("Google OAuth not configured"),
+    };
+    let client_secret = match std::env::var("SLAASH_GOOGLE_CLIENT_SECRET") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("Google OAuth not configured"),
+    };
+    let redirect_uri = format!("{}/auth/google/callback", oauth_base_url());
+
+    let client = match reqwest::Client::builder()
+        .user_agent("slaash-oauth")
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return oauth_error_redirect(&format!("HTTP client: {}", e)),
+    };
+
+    let token_res = client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", code.as_str()),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send()
+        .await;
+
+    let access_token = match token_res {
+        Ok(r) => match r.text().await {
+            Ok(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(j) => match j.get("access_token").and_then(|v| v.as_str()) {
+                    Some(t) => t.to_string(),
+                    None => return oauth_error_redirect("Google token exchange failed"),
+                },
+                Err(_) => return oauth_error_redirect("Google token parse failed"),
+            },
+            Err(_) => return oauth_error_redirect("Google token body read failed"),
+        },
+        Err(e) => return oauth_error_redirect(&format!("Google token error: {}", e)),
+    };
+
+    let user_res = client
+        .get("https://openidconnect.googleapis.com/v1/userinfo")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await;
+
+    let g_user: serde_json::Value = match user_res {
+        Ok(r) => match r.text().await {
+            Ok(body) => match serde_json::from_str(&body) {
+                Ok(j) => j,
+                Err(_) => return oauth_error_redirect("Google user parse failed"),
+            },
+            Err(_) => return oauth_error_redirect("Google user body read failed"),
+        },
+        Err(e) => return oauth_error_redirect(&format!("Google user error: {}", e)),
+    };
+
+    let g_id = g_user
+        .get("sub")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let email = g_user
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let name = g_user
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if email.is_empty() || g_id.is_empty() {
+        return oauth_error_redirect("Google did not return an email");
+    }
+
+    match aether_agent::auth::find_or_create_oauth_user("google", &g_id, &email, &name) {
+        Ok((user, api_key)) => {
+            let session_token =
+                aether_agent::auth::create_session_token(user.id).unwrap_or_default();
+            oauth_success_redirect(&user, &session_token, &api_key)
+        }
+        Err(e) => oauth_error_redirect(&e),
+    }
 }
 
 async fn landing_keys() -> impl IntoResponse {
