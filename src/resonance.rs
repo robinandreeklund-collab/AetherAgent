@@ -3884,11 +3884,8 @@ pub fn get_or_build_field_for_user(
     let user_hash_js = hash_url_user_pub(url, user_id, true);
     let user_hash_no = hash_url_user_pub(url, user_id, false);
 
-    let user_field = get_field_by_hash(if js_variant {
-        user_hash_js
-    } else {
-        user_hash_no
-    });
+    // Search BOTH js and non-js variants — feedback may save with either
+    let user_field = get_field_by_hash(user_hash_js).or_else(|| get_field_by_hash(user_hash_no));
 
     if let Some(uf) = user_field {
         // BUG-CRFR-002 fix: Use label-based transfer instead of node_id matching.
