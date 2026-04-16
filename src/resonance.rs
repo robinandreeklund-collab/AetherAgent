@@ -3262,12 +3262,20 @@ impl ResonanceField {
     pub fn transfer_from(&mut self, donor: &ResonanceField, min_similarity: f32) -> u32 {
         let mut transferred = 0u32;
 
-        // Collect donor nodes with learning (hit_count > 0)
+        // Collect donor nodes with ACTUAL causal learning (non-zero causal_memory)
+        // hit_count > 0 alone is not sufficient — some nodes get hit_count via
+        // global migration without real causal signal.
         let donor_learned: Vec<(&u32, &ResonanceState)> = donor
             .nodes
             .iter()
-            .filter(|(_, s)| s.hit_count > 0)
+            .filter(|(_, s)| s.hit_count > 0 && s.causal_memory.bits_raw().iter().any(|&b| b != 0))
             .collect();
+
+        eprintln!(
+            "[TRANSFER] donor has {} learned nodes out of {} total",
+            donor_learned.len(),
+            donor.nodes.len()
+        );
 
         if donor_learned.is_empty() {
             return 0;
