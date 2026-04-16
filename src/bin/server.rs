@@ -7463,6 +7463,12 @@ fn build_router(state: AppState) -> Router {
                 } else {
                     "none"
                 };
+                if log_auth.is_none() && endpoint.starts_with("/api/") {
+                    eprintln!(
+                        "[USAGE] UNTRACKED {} auth={} — no key found, usage not logged",
+                        endpoint, auth_source
+                    );
+                }
                 if let Some((key_id, _user_id)) = log_auth {
                     eprintln!(
                         "[USAGE] {} auth={} key_id={} user_id={}",
