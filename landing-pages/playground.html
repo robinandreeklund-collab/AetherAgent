@@ -788,14 +788,17 @@ async function runExtract() {
     const fbDiv = document.getElementById('feedback-nodes');
     fbDiv.innerHTML = '';
     if (data.nodes && data.nodes.length > 0) {
-      data.nodes.forEach(n => {
+      data.nodes.forEach((n, i) => {
         const label = (n.label || '').substring(0, 80);
+        const rel = (n.relevance || 0).toFixed(2);
+        const boost = n.causal_boost > 0.01 ? ' *' + n.causal_boost.toFixed(2) : '';
         const el = document.createElement('label');
         el.style.cssText = 'display:flex;align-items:center;gap:.5rem;padding:.3rem .5rem;border-radius:6px;cursor:pointer;font-size:.78rem;color:var(--muted);transition:background .15s';
         el.onmouseenter = () => el.style.background = 'rgba(255,255,255,0.03)';
         el.onmouseleave = () => el.style.background = '';
         el.innerHTML = '<input type="checkbox" value="' + n.id + '" style="accent-color:var(--green)">'
-          + '<span style="color:var(--accent);font-family:var(--mono);font-size:.7rem;min-width:1.5rem">#' + n.id + '</span>'
+          + '<span style="color:var(--accent);font-family:var(--mono);font-size:.65rem;min-width:1.5rem">#' + (i+1) + '</span>'
+          + '<span style="color:var(--green);font-family:var(--mono);font-size:.65rem;min-width:2.2rem">' + rel + boost + '</span>'
           + '<span style="color:var(--text);font-weight:500">[' + (n.role||'?') + ']</span> '
           + '<span>' + label + (label.length >= 80 ? '\u2026' : '') + '</span>';
         fbDiv.appendChild(el);
