@@ -6503,26 +6503,25 @@ async fn mcp_post(
 
             match result {
                 Ok(ref content_blocks) => {
-                    // Log MCP tool usage with actual tool name and token count
+                    // Log MCP tool usage with tool name and token counts
+                    let result_chars: usize = content_blocks
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|b| b["text"].as_str())
+                                .map(|s| s.len())
+                                .sum()
+                        })
+                        .unwrap_or(0);
+                    let tokens_out = (result_chars / 4) as i64;
                     if mcp_user_id > 0 {
                         let key_id =
                             aether_agent::auth::get_default_key_id(mcp_user_id).unwrap_or(0);
                         if key_id > 0 {
-                            let result_text: String = content_blocks
-                                .as_array()
-                                .map(|arr| {
-                                    arr.iter()
-                                        .filter_map(|b| b["text"].as_str())
-                                        .map(|s| s.len())
-                                        .sum::<usize>()
-                                })
-                                .unwrap_or(0)
-                                .to_string();
-                            let tokens_out = result_text.parse::<i64>().unwrap_or(0) / 4;
-                            let endpoint = format!("/mcp/{}", tool_name);
+                            let ep = format!("/mcp/{}", tool_name);
                             aether_agent::auth::log_usage(
                                 key_id,
-                                &endpoint,
+                                &ep,
                                 call_ms as i64,
                                 0,
                                 tokens_out,
@@ -7454,47 +7453,51 @@ fn build_router(state: AppState) -> Router {
 
             let resp = next.run(req).await;
 
-            // Log usage: Bearer key OR session (for dashboard attribution)
-            let log_auth = key_info.or(session_key_id);
-            let auth_source = if key_info.is_some() {
-                "bearer"
-            } else if session_key_id.is_some() {
-                "x-user-id"
-            } else {
-                "none"
-            };
-            if let Some((key_id, _user_id)) = log_auth {
-                eprintln!(
-                    "[USAGE] {} auth={} key_id={} user_id={}",
-                    endpoint, auth_source, key_id, _user_id
-                );
-                let elapsed = t0.elapsed().as_millis() as i64;
-                // Prefer handler-provided token counts (X-Tokens-In/Out)
-                // which reflect actual CRFR savings, not HTTP body sizes
-                let tokens_in = resp
-                    .headers()
-                    .get("x-tokens-in")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.parse::<i64>().ok())
-                    .unwrap_or(req_content_len / 4);
-                let tokens_out = resp
-                    .headers()
-                    .get("x-tokens-out")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.parse::<i64>().ok())
-                    .unwrap_or(0);
-                aether_agent::auth::log_usage(key_id, &endpoint, elapsed, tokens_in, tokens_out);
-                // Increment key counters for ALL auth methods that bypass
-                // validate_api_key (which does its own increment).
-                // Session tokens and OAuth tokens need explicit increment.
-                if bearer
-                    .as_deref()
-                    .map(|t| !t.starts_with("sk-"))
-                    .unwrap_or(true)
-                {
-                    aether_agent::auth::increment_key_counters(key_id);
+            // Log usage: skip /mcp (handler logs tools/call as /mcp/<tool_name>)
+            if endpoint != "/mcp" {
+                let log_auth = key_info.or(session_key_id);
+                let auth_source = if key_info.is_some() {
+                    "bearer"
+                } else if session_key_id.is_some() {
+                    "x-user-id"
+                } else {
+                    "none"
+                };
+                if let Some((key_id, _user_id)) = log_auth {
+                    eprintln!(
+                        "[USAGE] {} auth={} key_id={} user_id={}",
+                        endpoint, auth_source, key_id, _user_id
+                    );
+                    let elapsed = t0.elapsed().as_millis() as i64;
+                    // Prefer handler-provided token counts (X-Tokens-In/Out)
+                    // which reflect actual CRFR savings, not HTTP body sizes
+                    let tokens_in = resp
+                        .headers()
+                        .get("x-tokens-in")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .unwrap_or(req_content_len / 4);
+                    let tokens_out = resp
+                        .headers()
+                        .get("x-tokens-out")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    aether_agent::auth::log_usage(
+                        key_id, &endpoint, elapsed, tokens_in, tokens_out,
+                    );
+                    // Increment key counters for ALL auth methods that bypass
+                    // validate_api_key (which does its own increment).
+                    // Session tokens and OAuth tokens need explicit increment.
+                    if bearer
+                        .as_deref()
+                        .map(|t| !t.starts_with("sk-"))
+                        .unwrap_or(true)
+                    {
+                        aether_agent::auth::increment_key_counters(key_id);
+                    }
                 }
-            }
+            } // end if endpoint != "/mcp"
 
             resp
         },
