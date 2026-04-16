@@ -355,48 +355,80 @@ pub fn login(email: &str, password: &str) -> Result<User, String> {
 }
 
 // ─── Session tokens (playground login → Bearer auth) ─────────────────────
-
-/// Session entry: (user_id, key_id, expires_at)
-type SessionEntry = (i64, i64, u64);
-type SessionMap = HashMap<String, SessionEntry>;
-
-/// In-memory session store: token → SessionEntry
-static SESSION_STORE: Mutex<Option<SessionMap>> = Mutex::new(None);
-
-fn session_store() -> std::sync::MutexGuard<'static, Option<SessionMap>> {
-    let mut guard = SESSION_STORE.lock().unwrap_or_else(|e| e.into_inner());
-    if guard.is_none() {
-        *guard = Some(HashMap::new());
-    }
-    guard
-}
+// Stored in SQLite so they survive server restarts/deploys.
 
 /// Create a session token for a logged-in user. Returns token string.
 /// Token is valid for 24 hours.
+#[cfg(feature = "persist")]
 pub fn create_session_token(user_id: i64) -> Option<String> {
     let key_id = get_default_key_id(user_id)?;
     let token = format!("session_{}", generate_random_hex(32));
     let expires = now_secs() + 86400; // 24h
-    let mut guard = session_store();
-    let store = guard.as_mut().unwrap();
-    // Limit sessions per user to prevent memory bloat
-    store.retain(|_, (_, _, exp)| *exp > now_secs());
-    store.insert(token.clone(), (user_id, key_id, expires));
+    let token_hash = hash_password(&token);
+
+    let pool = crate::persist::get_db_lock()?;
+    if let Some(writer) = pool.writer.as_ref() {
+        // Create table if not exists
+        let _ = writer.execute_batch(
+            "CREATE TABLE IF NOT EXISTS session_tokens (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                key_id INTEGER NOT NULL,
+                expires_at INTEGER NOT NULL
+            )",
+        );
+        // Clean expired tokens
+        let now = now_secs() as i64;
+        let _ = writer.execute(
+            "DELETE FROM session_tokens WHERE expires_at < ?1",
+            params![now],
+        );
+        // Insert new token
+        let _ = writer.execute(
+            "INSERT OR REPLACE INTO session_tokens (token_hash, user_id, key_id, expires_at) VALUES (?1, ?2, ?3, ?4)",
+            params![token_hash, user_id, key_id, expires as i64],
+        );
+    }
     Some(token)
 }
 
 /// Validate a session token. Returns (key_id, user_id) if valid.
+#[cfg(feature = "persist")]
 pub fn validate_session_token(token: &str) -> Option<(i64, i64)> {
     if !token.starts_with("session_") {
         return None;
     }
-    let guard = session_store();
-    let store = guard.as_ref()?;
-    let (user_id, key_id, expires) = store.get(token)?;
-    if now_secs() > *expires {
+    let token_hash = hash_password(token);
+    let pool = crate::persist::get_db_lock()?;
+    let conn = pool.next_reader()?;
+    let result = conn
+        .query_row(
+            "SELECT user_id, key_id, expires_at FROM session_tokens WHERE token_hash = ?1",
+            params![token_hash],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )
+        .ok()?;
+    let (user_id, key_id, expires_at) = result;
+    if now_secs() as i64 > expires_at {
         return None;
     }
-    Some((*key_id, *user_id))
+    Some((key_id, user_id))
+}
+
+#[cfg(not(feature = "persist"))]
+pub fn create_session_token(_user_id: i64) -> Option<String> {
+    None
+}
+
+#[cfg(not(feature = "persist"))]
+pub fn validate_session_token(_token: &str) -> Option<(i64, i64)> {
+    None
 }
 
 // ─── API Key operations ───────────────────────────────────────────────────
