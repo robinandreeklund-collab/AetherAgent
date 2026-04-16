@@ -1644,9 +1644,10 @@ impl ResonanceField {
                     let norm_causal = ((raw_causal + 1.0) / 2.0).clamp(0.0, 1.0);
                     let elapsed_s = (now.saturating_sub(state.last_hit_ms) as f64) / 1000.0;
                     let decay = (-CAUSAL_DECAY_LAMBDA * elapsed_s).exp() as f32;
-                    // v18: Removed norm² squashing — linear similarity preserves signal
-                    // strength for moderate matches (sim=0.5 now gives 0.15 instead of 0.075)
-                    norm_causal * CAUSAL_WEIGHT * decay
+                    // Scale boost with repeated feedback: log2(hit_count+1) multiplier
+                    // 1 feedback → 1.0x, 2 → 1.58x, 4 → 2.32x, 8 → 3.17x
+                    let hit_multiplier = (state.hit_count as f32 + 1.0).log2().max(1.0);
+                    norm_causal * CAUSAL_WEIGHT * decay * hit_multiplier
                 } else {
                     0.0
                 };
@@ -3892,11 +3893,15 @@ pub fn get_or_build_field_for_user(
     }
 
     // Apply per-user boosts directly from USER_BOOSTS store
+    // Search both url variants (with and without #__js_eval)
     let url_hash = hash_url(url);
-    let boosts = get_user_boosts(url_hash, user_id);
+    let url_hash_js = hash_url(&format!("{}#__js_eval", url));
+    let mut boosts = get_user_boosts(url_hash, user_id);
+    if boosts.is_empty() {
+        boosts = get_user_boosts(url_hash_js, user_id);
+    }
     if !boosts.is_empty() {
         let mut applied = 0usize;
-        // Pre-compute label hashes (can't borrow nodes + node_labels simultaneously)
         let label_hashes: HashMap<u32, u64> = field
             .node_labels
             .iter()
@@ -3905,7 +3910,7 @@ pub fn get_or_build_field_for_user(
         for (node_id, state) in field.nodes.iter_mut() {
             let label_hash = label_hashes.get(node_id).copied().unwrap_or(0);
             if let Some(&(boost_count, ref goal_hv)) = boosts.get(&label_hash) {
-                // Apply causal memory directly — same as feedback() does
+                // Scale boost strength by feedback count
                 state.causal_memory = goal_hv.clone();
                 state.hit_count = state.hit_count.max(boost_count);
                 state.last_hit_ms = now_ms();
