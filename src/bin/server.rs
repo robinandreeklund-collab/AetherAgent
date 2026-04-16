@@ -1601,6 +1601,12 @@ async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl Int
         .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string())
     };
 
+    eprintln!(
+        "[FEEDBACK] user_id={} result={}",
+        user_id,
+        &result[..result.len().min(120)]
+    );
+
     (StatusCode::OK, result)
 }
 

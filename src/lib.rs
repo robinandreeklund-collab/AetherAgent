@@ -2024,17 +2024,30 @@ pub fn crfr_feedback_user(
     let user_hash_js = resonance::hash_url_user_pub(url, user_id, true);
     let user_hash_no = resonance::hash_url_user_pub(url, user_id, false);
 
+    eprintln!(
+        "[FEEDBACK_USER] url={}, user_id={}, hash_js={}, hash_no={}",
+        url, user_id, user_hash_js, user_hash_no
+    );
+
     let mut field = if let Some(f) = resonance::get_field_by_hash(user_hash_js) {
+        eprintln!("[FEEDBACK_USER] Found user field via hash_js");
         f
     } else if let Some(f) = resonance::get_field_by_hash(user_hash_no) {
+        eprintln!("[FEEDBACK_USER] Found user field via hash_no");
         f
     } else {
         // No user field yet — try global and clone for this user
         let global = if let Some(f) = resonance::get_field_for_feedback(url, true) {
+            eprintln!("[FEEDBACK_USER] Cloning from global JS field");
             f
         } else if let Some(f) = resonance::get_field_for_feedback(url, false) {
+            eprintln!("[FEEDBACK_USER] Cloning from global non-JS field");
             f
         } else {
+            eprintln!(
+                "[FEEDBACK_USER] NO FIELD FOUND — global cache empty for url={}",
+                url
+            );
             return r#"{"status":"no_field","message":"No cached field. Run parse_crfr first."}"#
                 .to_string();
         };
