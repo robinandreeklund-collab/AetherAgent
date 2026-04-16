@@ -3876,38 +3876,26 @@ pub fn get_or_build_field_for_user(
     });
 
     if let Some(uf) = user_field {
-        // Merge user causal memory into global field (additive).
-        // Also merge propagation_stats (learned per-role weights).
-        let mut merged_count = 0usize;
-        for (node_id, user_state) in &uf.nodes {
-            if let Some(global_state) = field.nodes.get_mut(node_id) {
-                // Merge causal memory (HDC vectors)
-                global_state.causal_memory = crate::scoring::hdc::Hypervector::bundle(&[
-                    &global_state.causal_memory,
-                    &user_state.causal_memory,
-                ]);
-                // Merge hit tracking — needed for causal_boost activation
-                global_state.hit_count = global_state.hit_count.max(user_state.hit_count);
-                if user_state.last_hit_ms > global_state.last_hit_ms {
-                    global_state.last_hit_ms = user_state.last_hit_ms;
-                }
-                merged_count += 1;
-            }
-        }
-        // Merge propagation_stats (Bayesian role weights)
+        // BUG-CRFR-002 fix: Use label-based transfer instead of node_id matching.
+        // Node IDs are unstable on dynamic/SPA sites (SVT, CNN etc) — they change
+        // between fetches. transfer_from uses 3-strategy label matching (exact,
+        // prefix, HV similarity) which survives DOM restructuring.
+        let transferred = field.transfer_from(&uf, 0.3);
+
+        // Also merge propagation_stats (Bayesian role weights)
         for (key, (user_alpha, user_beta)) in &uf.propagation_stats {
             let entry = field
                 .propagation_stats
                 .entry(key.clone())
                 .or_insert((1.0, 1.0));
-            entry.0 += user_alpha - 1.0; // add user's learned successes
-            entry.1 += user_beta - 1.0; // add user's learned failures
+            entry.0 += user_alpha - 1.0;
+            entry.1 += user_beta - 1.0;
         }
         eprintln!(
-            "[CRFR] Merged {} user node states + {} propagation stats for user {}",
-            merged_count,
-            uf.propagation_stats.len(),
-            user_id
+            "[CRFR] User {} merge: {} nodes transferred (label-based), {} prop stats",
+            user_id,
+            transferred,
+            uf.propagation_stats.len()
         );
     } else {
         eprintln!(
