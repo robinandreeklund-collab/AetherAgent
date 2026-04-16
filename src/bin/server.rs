@@ -6502,12 +6502,41 @@ async fn mcp_post(
             }
 
             match result {
-                Ok(content_blocks) => jsonrpc_result(
-                    id,
-                    serde_json::json!({
-                        "content": content_blocks
-                    }),
-                ),
+                Ok(ref content_blocks) => {
+                    // Log MCP tool usage with actual tool name and token count
+                    if mcp_user_id > 0 {
+                        let key_id =
+                            aether_agent::auth::get_default_key_id(mcp_user_id).unwrap_or(0);
+                        if key_id > 0 {
+                            let result_text: String = content_blocks
+                                .as_array()
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|b| b["text"].as_str())
+                                        .map(|s| s.len())
+                                        .sum::<usize>()
+                                })
+                                .unwrap_or(0)
+                                .to_string();
+                            let tokens_out = result_text.parse::<i64>().unwrap_or(0) / 4;
+                            let endpoint = format!("/mcp/{}", tool_name);
+                            aether_agent::auth::log_usage(
+                                key_id,
+                                &endpoint,
+                                call_ms as i64,
+                                0,
+                                tokens_out,
+                            );
+                            aether_agent::auth::increment_key_counters(key_id);
+                        }
+                    }
+                    jsonrpc_result(
+                        id,
+                        serde_json::json!({
+                            "content": content_blocks
+                        }),
+                    )
+                }
                 Err(e) => jsonrpc_result(
                     id,
                     serde_json::json!({
