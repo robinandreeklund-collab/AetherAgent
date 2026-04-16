@@ -3353,12 +3353,11 @@ impl ResonanceField {
                             matched_donor = Some(donor_state);
                         }
                     }
-                    // Require minimum transfer strength for HV-only matches
-                    if matched_donor.is_some() {
-                        let transfer_strength = best_sim * 0.5;
-                        if transfer_strength <= 0.1 {
-                            matched_donor = None;
-                        }
+                    // Require HIGH similarity for HV-only matches to prevent
+                    // mass-matching on large pages (Wikipedia: 2257/6033 nodes matched).
+                    // Only exact semantic matches should transfer causal memory.
+                    if matched_donor.is_some() && best_sim < 0.85 {
+                        matched_donor = None;
                     }
                 }
             }
