@@ -822,7 +822,7 @@ async function runSearch() {
   if (!query) return;
   startLoading();
   try {
-    const res = await fetch('/api/search', {
+    const res = await fetch('/api/fetch/search', {
       method:'POST', headers:apiHeaders(),
       body: JSON.stringify({
         query, goal: query,
@@ -841,7 +841,7 @@ async function runSearch() {
 async function runAct() {
   startLoading();
   try {
-    const res = await fetch('/api/act', {
+    const res = await fetch('/api/fetch/act', {
       method:'POST', headers:apiHeaders(),
       body: JSON.stringify({
         url: document.getElementById('inp-act-url').value,
@@ -1016,7 +1016,7 @@ async function runPlan() {
   try {
     const body = { goal };
     if (url) body.url = url;
-    const res = await fetch('/api/compile-goal', {
+    const res = await fetch('/api/compile', {
       method:'POST', headers:apiHeaders(),
       body: JSON.stringify(body)
     });
@@ -1130,7 +1130,7 @@ async function runLinks() {
   if (!url) return;
   startLoading();
   try {
-    const res = await fetch('/api/extract-links', {
+    const res = await fetch('/api/fetch/extract-links', {
       method:'POST', headers:apiHeaders(),
       body: JSON.stringify({ url, goal: document.getElementById('inp-links-goal').value, max_links: parseInt(document.getElementById('inp-links-max').value)||20 })
     });
@@ -1150,7 +1150,7 @@ async function runExplore() {
   if (!url) return;
   startLoading();
   try {
-    const res = await fetch('/api/detect-xhr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({ url }) });
+    const res = await fetch('/api/fetch/detect-xhr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({ url }) });
     const data = await res.json();
     lastResult = data;
     document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);

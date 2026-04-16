@@ -423,6 +423,21 @@ struct DetectXhrRequest {
 }
 
 #[derive(Deserialize)]
+struct FetchDetectXhrRequest {
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct FetchActRequest {
+    url: String,
+    goal: String,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    target: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct ParseScreenshotRequest {
     png_base64: String,
     model_base64: String,
@@ -2378,6 +2393,61 @@ async fn collab_fetch(Json(req): Json<CollabFetchRequest>) -> impl IntoResponse 
 
 async fn detect_xhr(Json(req): Json<DetectXhrRequest>) -> impl IntoResponse {
     let result = aether_agent::detect_xhr_urls(&req.html);
+    (StatusCode::OK, result)
+}
+
+async fn fetch_detect_xhr(Json(req): Json<FetchDetectXhrRequest>) -> impl IntoResponse {
+    let config = aether_agent::types::FetchConfig::default();
+    let html = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r.body,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+    let result = aether_agent::detect_xhr_urls(&html);
+    (StatusCode::OK, result)
+}
+
+async fn fetch_act(Json(req): Json<FetchActRequest>) -> impl IntoResponse {
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+
+    let action = req.action.as_deref().unwrap_or("click");
+    let target = req.target.as_deref().unwrap_or("");
+    let final_url = &fetch_result.final_url;
+    let html = &fetch_result.body;
+
+    let result = match action {
+        "click" => aether_agent::find_and_click(html, &req.goal, final_url, target),
+        "extract" => {
+            let keys = if target.is_empty() {
+                "[]".to_string()
+            } else {
+                serde_json::to_string(&[target]).unwrap_or_else(|_| "[]".to_string())
+            };
+            aether_agent::extract_data(html, &req.goal, final_url, &keys)
+        }
+        _ => aether_agent::find_and_click(html, &req.goal, final_url, target),
+    };
+
     (StatusCode::OK, result)
 }
 
@@ -7673,6 +7743,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/collab/fetch", post(collab_fetch))
         // Fas 10: XHR Interception
         .route("/api/detect-xhr", post(detect_xhr))
+        .route("/api/fetch/detect-xhr", post(fetch_detect_xhr))
+        .route("/api/fetch/act", post(fetch_act))
         // Fas 17: DDG Search
         .route("/api/search", post(search_handler))
         .route("/api/fetch/search", post(fetch_search_handler))
