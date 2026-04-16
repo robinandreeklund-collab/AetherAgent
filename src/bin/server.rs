@@ -82,6 +82,10 @@ struct ParseCrfrRequest {
     /// User ID for per-user causal weight personalization.
     #[serde(default)]
     user_id: i64,
+    /// Optional locale (e.g. "sv-SE", "en-US") — sets Accept-Language at fetch.
+    /// If omitted and user_id > 0, user's default locale is used.
+    #[serde(default)]
+    locale: Option<String>,
 }
 
 fn default_crfr_top_n() -> u32 {
@@ -1167,12 +1171,36 @@ async fn parse_crfr_handler(
     let mut html = html;
     #[allow(unused_mut)]
     let mut fetch_ms: u64 = 0;
+
+    // Resolve locale: explicit > user's default > en-US
+    let effective_locale = req
+        .locale
+        .clone()
+        .filter(|l| !l.is_empty())
+        .or_else(|| {
+            if user_id > 0 {
+                aether_agent::auth::get_user_locale(user_id)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "en-US".to_string());
+
     #[cfg(feature = "fetch")]
     if html.is_empty() && !url.is_empty() {
         let fetch_start = std::time::Instant::now();
-        match aether_agent::fetch::fetch_page(&url, &aether_agent::types::FetchConfig::default())
-            .await
-        {
+        let mut fetch_config = aether_agent::types::FetchConfig::default();
+        // Set Accept-Language based on locale
+        let accept_language = if effective_locale.contains('-') {
+            let base = effective_locale.split('-').next().unwrap_or("en");
+            format!("{},{};q=0.9,en;q=0.8", effective_locale, base)
+        } else {
+            format!("{},en;q=0.8", effective_locale)
+        };
+        fetch_config
+            .extra_headers
+            .insert("Accept-Language".to_string(), accept_language);
+        match aether_agent::fetch::fetch_page(&url, &fetch_config).await {
             Ok(fetched) => {
                 fetch_ms = fetch_start.elapsed().as_millis() as u64;
                 html = fetched.body;
@@ -7541,6 +7569,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/auth/keys/list", post(auth_list_keys))
         .route("/api/auth/keys/delete", post(auth_delete_key))
         .route("/api/auth/usage", post(auth_usage))
+        .route("/api/auth/profile", post(auth_update_profile))
+        .route("/settings", get(landing_settings))
         .route("/mission", get(landing_mission))
         .route("/timeline", get(landing_timeline))
         .route("/live", get(landing_live))
@@ -8479,6 +8509,66 @@ async fn auth_usage(Json(req): Json<UsageRequest>) -> impl IntoResponse {
         "period_hours": req.since_hours,
     });
     (StatusCode::OK, body.to_string())
+}
+
+#[derive(Deserialize)]
+struct UpdateProfileRequest {
+    user_id: i64,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    locale: Option<String>,
+}
+
+async fn auth_update_profile(
+    headers: HeaderMap,
+    Json(req): Json<UpdateProfileRequest>,
+) -> impl IntoResponse {
+    // Require session token or Bearer key matching this user_id
+    let authed_user = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.starts_with("Bearer "))
+        .and_then(|v| {
+            let token = &v[7..];
+            aether_agent::auth::validate_session_token(token)
+                .or_else(|| aether_agent::auth::validate_api_key(token))
+        })
+        .map(|(_k, u)| u);
+
+    if authed_user != Some(req.user_id) {
+        let body = serde_json::json!({
+            "status": "error",
+            "message": "Not authorized to update this user"
+        });
+        return (StatusCode::UNAUTHORIZED, body.to_string());
+    }
+
+    match aether_agent::auth::update_profile(
+        req.user_id,
+        req.name.as_deref(),
+        req.email.as_deref(),
+        req.locale.as_deref(),
+    ) {
+        Ok(user) => {
+            let body = serde_json::json!({"status": "ok", "user": user});
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::BAD_REQUEST, body.to_string())
+        }
+    }
+}
+
+async fn landing_settings() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/settings.html",
+        "landing-pages/settings.html",
+    ])
+    .await
 }
 
 async fn landing_keys() -> impl IntoResponse {

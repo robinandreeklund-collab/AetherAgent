@@ -18,6 +18,12 @@ pub struct User {
     pub email: String,
     pub name: String,
     pub created_at: i64,
+    #[serde(default = "default_locale")]
+    pub locale: String,
+}
+
+fn default_locale() -> String {
+    "en-US".to_string()
 }
 
 /// API key metadata (never expose the full key after creation)
@@ -195,7 +201,8 @@ pub fn init_auth_tables() {
                 email TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 name TEXT NOT NULL DEFAULT '',
-                created_at INTEGER NOT NULL
+                created_at INTEGER NOT NULL,
+                locale TEXT NOT NULL DEFAULT 'en-US'
             );
             CREATE TABLE IF NOT EXISTS api_keys (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,6 +236,12 @@ pub fn init_auth_tables() {
                 expires_at INTEGER NOT NULL
             );
             ",
+        );
+        // Migrate: add locale column to existing users table if missing
+        // (ignore error if already exists — SQLite has no IF NOT EXISTS for ADD COLUMN)
+        let _ = conn.execute(
+            "ALTER TABLE users ADD COLUMN locale TEXT NOT NULL DEFAULT 'en-US'",
+            [],
         );
     }
 }
@@ -308,6 +321,7 @@ pub fn signup(email: &str, password: &str, name: &str) -> Result<(User, String),
         email: email.to_string(),
         name: name.to_string(),
         created_at: now,
+        locale: default_locale(),
     };
 
     // Auto-create first API key
@@ -330,7 +344,7 @@ pub fn login(email: &str, password: &str) -> Result<User, String> {
     let conn = pool.next_reader().ok_or("No DB reader")?;
 
     let result = conn.query_row(
-        "SELECT id, email, password_hash, name, created_at FROM users WHERE email = ?1",
+        "SELECT id, email, password_hash, name, created_at, COALESCE(locale, 'en-US') FROM users WHERE email = ?1",
         params![email],
         |row| {
             Ok((
@@ -339,18 +353,20 @@ pub fn login(email: &str, password: &str) -> Result<User, String> {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
             ))
         },
     );
 
     match result {
-        Ok((id, email, pw_hash, name, created_at)) => {
+        Ok((id, email, pw_hash, name, created_at, locale)) => {
             if verify_password(password, &pw_hash) {
                 Ok(User {
                     id,
                     email,
                     name,
                     created_at,
+                    locale,
                 })
             } else {
                 Err("Invalid password".to_string())
@@ -358,6 +374,100 @@ pub fn login(email: &str, password: &str) -> Result<User, String> {
         }
         Err(_) => Err("User not found".to_string()),
     }
+}
+
+/// Update user profile (name, email, locale). Returns updated User or error.
+#[cfg(feature = "persist")]
+pub fn update_profile(
+    user_id: i64,
+    name: Option<&str>,
+    email: Option<&str>,
+    locale: Option<&str>,
+) -> Result<User, String> {
+    let pool = crate::persist::get_db_lock().ok_or("DB not initialized")?;
+    let conn = pool.writer.as_ref().ok_or("No DB writer")?;
+
+    // Validate inputs
+    if let Some(e) = email {
+        if e.is_empty() || !e.contains('@') || !e.contains('.') {
+            return Err("Invalid email".to_string());
+        }
+    }
+    if let Some(l) = locale {
+        if l.is_empty() || l.len() > 10 {
+            return Err("Invalid locale".to_string());
+        }
+    }
+
+    if let Some(n) = name {
+        let _ = conn.execute(
+            "UPDATE users SET name = ?1 WHERE id = ?2",
+            params![n, user_id],
+        );
+    }
+    if let Some(e) = email {
+        conn.execute(
+            "UPDATE users SET email = ?1 WHERE id = ?2",
+            params![e, user_id],
+        )
+        .map_err(|er| {
+            if er.to_string().contains("UNIQUE") {
+                "Email already taken".to_string()
+            } else {
+                format!("Update failed: {er}")
+            }
+        })?;
+    }
+    if let Some(l) = locale {
+        let _ = conn.execute(
+            "UPDATE users SET locale = ?1 WHERE id = ?2",
+            params![l, user_id],
+        );
+    }
+
+    // Return updated user
+    let result = conn.query_row(
+        "SELECT id, email, name, created_at, COALESCE(locale, 'en-US') FROM users WHERE id = ?1",
+        params![user_id],
+        |row| {
+            Ok(User {
+                id: row.get(0)?,
+                email: row.get(1)?,
+                name: row.get(2)?,
+                created_at: row.get(3)?,
+                locale: row.get(4)?,
+            })
+        },
+    );
+    result.map_err(|e| format!("User not found: {e}"))
+}
+
+#[cfg(not(feature = "persist"))]
+pub fn update_profile(
+    _user_id: i64,
+    _name: Option<&str>,
+    _email: Option<&str>,
+    _locale: Option<&str>,
+) -> Result<User, String> {
+    Err("Persist feature not enabled".to_string())
+}
+
+/// Get user's locale by user_id (used to inject Accept-Language at fetch).
+#[cfg(feature = "persist")]
+pub fn get_user_locale(user_id: i64) -> Option<String> {
+    let pool = crate::persist::get_db_lock()?;
+    let conn = pool.next_reader()?;
+    conn.query_row(
+        "SELECT COALESCE(locale, 'en-US') FROM users WHERE id = ?1",
+        params![user_id],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+}
+
+#[cfg(not(feature = "persist"))]
+pub fn get_user_locale(_user_id: i64) -> Option<String> {
+    None
 }
 
 // ─── Session tokens (playground login → Bearer auth) ─────────────────────

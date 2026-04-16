@@ -277,6 +277,7 @@ a:hover{color:var(--text)}
     <div class="sidebar-label">Account</div>
     <div class="sidebar-link" onclick="window.location='/keys'"><span class="sidebar-icon" style="color:var(--muted)">/&middot;</span> API Keys</div>
     <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon" style="color:var(--muted)">&equiv;</span> Usage</div>
+    <div class="sidebar-link" onclick="window.location='/settings'"><span class="sidebar-icon" style="color:var(--muted)">*</span> Settings</div>
     <div class="sidebar-link" onclick="window.location='/docs'"><span class="sidebar-icon" style="color:var(--muted)">?</span> Docs</div>
   </div>
 </div>
@@ -309,7 +310,7 @@ a:hover{color:var(--text)}
       <div class="sidebar-label">Account</div>
       <div class="sidebar-link" onclick="window.location='/keys'"><span class="sidebar-icon" style="color:var(--muted)">/&middot;</span> API Keys</div>
       <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon" style="color:var(--muted)">&equiv;</span> Usage</div>
-      <div class="sidebar-link"><span class="sidebar-icon" style="color:var(--muted)">*</span> Settings</div>
+      <div class="sidebar-link" onclick="window.location='/settings'"><span class="sidebar-icon" style="color:var(--muted)">*</span> Settings</div>
     </div>
   </div>
 
@@ -749,6 +750,7 @@ async function runExtract() {
       run_js: document.getElementById('inp-js').value === 'true',
       follow_links: document.getElementById('inp-follow').value === 'true',
       user_id: u ? u.id : 0,
+      locale: u && u.locale ? u.locale : undefined,
       output_format: 'json'
     };
     const res = await fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify(reqBody) });
