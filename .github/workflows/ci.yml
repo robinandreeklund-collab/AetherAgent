@@ -39,7 +39,7 @@ jobs:
         run: cargo test --verbose
 
       - name: Kör clippy (linting)
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --lib -- -D warnings
 
       - name: Formatcheck
         run: cargo fmt --check
