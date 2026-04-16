@@ -3787,11 +3787,11 @@ pub fn get_or_build_field_with_variant(
         url.to_string()
     };
     let url_hash = hash_url(&variant_url);
-    let mut cache = match FIELD_CACHE.write() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Some(cached) = cache.take(url_hash) {
+    if let Some(cached) = cache.peek(url_hash) {
         // BUG-4 fix: verify content hasn't changed since cached
         let new_hash = compute_content_hash(tree_nodes);
         if cached.content_hash != 0 && cached.content_hash != new_hash {
