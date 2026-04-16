@@ -166,13 +166,13 @@ impl AttrCache {
                     "data-product" => cache.has_data_product = true,
                     "data-item-id" => cache.has_data_item_id = true,
                     "data-src" | "data-lazy-src" | "data-original" | "data-image"
-                    | "data-thumb" | "data-thumbnail" => {
-                        if cache.lazy_src.is_none() {
-                            let v = val();
-                            let trimmed = v.trim();
-                            if !trimmed.is_empty() {
-                                cache.lazy_src = Some(trimmed.to_string());
-                            }
+                    | "data-thumb" | "data-thumbnail"
+                        if cache.lazy_src.is_none() =>
+                    {
+                        let v = val();
+                        let trimmed = v.trim();
+                        if !trimmed.is_empty() {
+                            cache.lazy_src = Some(trimmed.to_string());
                         }
                     }
                     _ => {}

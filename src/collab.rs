@@ -193,7 +193,7 @@ impl SharedDiffStore {
             agent.consume_count += count;
         }
 
-        new_deltas.sort_by(|a, b| a.timestamp_ms.cmp(&b.timestamp_ms));
+        new_deltas.sort_by_key(|a| a.timestamp_ms);
 
         let saved = new_deltas.len() as u32;
         let summary = if new_deltas.is_empty() {

@@ -4445,7 +4445,7 @@ pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence
             }
         })
         .collect();
-    query_clusters.sort_by(|a, b| b.edge_count.cmp(&a.edge_count));
+    query_clusters.sort_by_key(|b| std::cmp::Reverse(b.edge_count));
 
     // Nivå 4: Node leaderboard — samla noder med causal memory
     let cache = match FIELD_CACHE.read() {
@@ -4484,7 +4484,7 @@ pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence
             }
         }
     }
-    all_nodes.sort_by(|a, b| b.hit_count.cmp(&a.hit_count));
+    all_nodes.sort_by_key(|b| std::cmp::Reverse(b.hit_count));
     all_nodes.truncate(30); // Top 30 noder
 
     // Nivå 5: URL-lista

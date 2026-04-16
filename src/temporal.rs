@@ -213,7 +213,7 @@ impl TemporalMemory {
                 .iter()
                 .map(|(&id, &count)| (id, count))
                 .collect();
-            obs_vec.sort_by(|a, b| b.1.cmp(&a.1));
+            obs_vec.sort_by_key(|b| std::cmp::Reverse(b.1));
             let keep: std::collections::HashSet<u32> = obs_vec
                 .iter()
                 .take(MAX_NODE_HISTORY_ENTRIES)
