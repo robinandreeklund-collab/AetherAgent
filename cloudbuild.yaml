@@ -20,6 +20,9 @@ substitutions:
   _REGION: us-central1
   _REPO: cloud-run-source-deploy
   _SERVICE: aetheragent
+  # GCS-bucket för Litestream SQLite-replikering. Lämna tomt för ingen persistens.
+  # Skapa bucket med: gcloud storage buckets create gs://<name> --location=${_REGION}
+  _LITESTREAM_BUCKET: ''
 
 steps:
   # 1. Bygg Docker-image (Dockerfile i repo-roten)
@@ -56,7 +59,7 @@ steps:
       - --port=10000
       - --concurrency=40
       - --max-instances=3
-      - --set-env-vars=RUST_LOG=info,CHROME_PATH=/usr/bin/google-chrome
+      - --set-env-vars=RUST_LOG=info,CHROME_PATH=/usr/bin/google-chrome,LITESTREAM_BUCKET=${_LITESTREAM_BUCKET}
 
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}

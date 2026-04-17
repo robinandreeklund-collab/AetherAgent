@@ -137,6 +137,20 @@ ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp
 
+# ── Litestream för kontinuerlig SQLite-replikering till GCS ──────────────────
+# Cloud Run har ephemeral disk — containers kan dödas när som helst. Litestream
+# streamar varje WAL-write till en GCS-bucket så DB:n överlever restarts.
+# Sätt LITESTREAM_BUCKET env-var i Cloud Run för att aktivera; lämna tomt för
+# att köra utan persistens (t.ex. lokalt).
+ARG LITESTREAM_VERSION=0.3.13
+RUN curl -fsSL "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-amd64.tar.gz" \
+      | tar -xz -C /usr/local/bin litestream \
+    && chmod +x /usr/local/bin/litestream
+
+COPY litestream.yml /etc/litestream.yml
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # ── Static HTML assets (served from disk at runtime) ─────────────────────────
 # Changes to these files do NOT trigger Rust recompilation — only this layer
 # is rebuilt, which takes seconds instead of minutes.
@@ -161,4 +175,4 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:10000/health || exit 1
 
-CMD ["aether-server"]
+CMD ["/usr/local/bin/entrypoint.sh"]
