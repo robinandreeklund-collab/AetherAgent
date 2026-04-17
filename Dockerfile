@@ -9,6 +9,12 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::https::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries
 
+# Byt archive.ubuntu.com → mirrors.ubuntu.com (auto-väljer närmaste spegel).
+# Cloud Build us-central1 kan inte alltid nå archive.ubuntu.com direkt, så
+# mirror+-schemat ger apt en lista att prova i turordning.
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|mirror+http://mirrors.ubuntu.com/mirrors.txt|g' \
+    /etc/apt/sources.list.d/ubuntu.sources
+
 RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     curl ca-certificates \
     pkg-config libssl-dev python3 \
@@ -79,6 +85,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::https::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries
+
+# Byt archive.ubuntu.com → mirrors.ubuntu.com (auto-väljer närmaste spegel).
+# Cloud Build us-central1 kan inte alltid nå archive.ubuntu.com direkt, så
+# mirror+-schemat ger apt en lista att prova i turordning.
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|mirror+http://mirrors.ubuntu.com/mirrors.txt|g' \
+    /etc/apt/sources.list.d/ubuntu.sources
 
 RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     ca-certificates \
