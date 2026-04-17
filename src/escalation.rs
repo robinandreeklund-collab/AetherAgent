@@ -311,6 +311,10 @@ fn check_layout_dependency(html_lower: &str) -> bool {
 /// Kolla om statisk HTML redan har tillräckligt med content.
 /// Räknar substantiella text-element i body (inte scripts/styles/nav).
 /// Returnerar true om ≥5 content-element hittas — JS-eval är då onödig.
+///
+/// Phase 1.1 fix: Räknar bara element med ≥30 tecken synlig text.
+/// Tidigare räknades ALLA content-tags, inklusive korta nav-items som
+/// `<li><a href="/">Home</a></li>`. Nu krävs faktiskt textinnehåll.
 fn has_sufficient_static_content(html_lower: &str) -> bool {
     let body_start = match html_lower.find("<body") {
         Some(s) => s,
@@ -322,32 +326,39 @@ fn has_sufficient_static_content(html_lower: &str) -> bool {
         None => return false,
     };
 
-    // Räkna content-tags som typiskt innehåller text
-    let content_tags = [
-        "<p>",
-        "<p ",
-        "<h1",
-        "<h2",
-        "<h3",
-        "<h4",
-        "<li>",
-        "<li ",
-        "<td>",
-        "<td ",
-        "<th>",
-        "<th ",
-        "<article",
-        "<figcaption",
-        "<blockquote",
-    ];
-    let mut content_count: usize = 0;
-    for tag in content_tags {
-        content_count += body.matches(tag).count();
+    // Phase 1.1: Count substantive content — paragraphs/articles with real text.
+    // Nav <li> and short <td> don't count. We look for <p>, <article>,
+    // <blockquote>, <figcaption> tags that contain ≥30 chars of text.
+    let substantive_tags = ["<p>", "<p ", "<article", "<blockquote", "<figcaption"];
+    let mut substantive_count: usize = 0;
+    for tag in substantive_tags {
+        let mut search_pos = 0;
+        while let Some(idx) = body[search_pos..].find(tag) {
+            let abs = search_pos + idx;
+            // Find closing tag or next opening tag
+            let close_tag = match tag.chars().nth(1) {
+                Some('p') if tag.len() <= 3 => "</p>",
+                _ => "</",
+            };
+            if let Some(end) = body[abs..].find(close_tag) {
+                let content = &body[abs..abs + end];
+                // Rough text length — subtract estimated tag overhead
+                let tag_chars = content.matches('<').count() * 8; // avg tag ~8 chars
+                let text_len = content.len().saturating_sub(tag_chars);
+                if text_len >= 30 {
+                    substantive_count += 1;
+                }
+            }
+            search_pos = abs + tag.len();
+        }
     }
 
-    // Om det finns ≥5 content-element har sidan tillräcklig statisk content
-    // Undantag: om body har en SPA-mount och väldigt lite content runt den
-    content_count >= 5
+    // Also count headings — these indicate structured content
+    let heading_tags = ["<h1", "<h2", "<h3"];
+    let heading_count: usize = heading_tags.iter().map(|t| body.matches(t).count()).sum();
+
+    // Need ≥5 substantive paragraphs/articles OR ≥3 headings + ≥2 paragraphs
+    substantive_count >= 5 || (heading_count >= 3 && substantive_count >= 2)
 }
 
 /// Detektera SPA-skelett (tom body med bara en mount-point)

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Quickstart — Slaash Docs</title>
+<meta name="description" content="Send your first Slaash request in 60 seconds. Python, JavaScript, and cURL examples.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);--text:#f5f5f5;--muted:#888;--accent:#3b82f6;--green:#22c55e;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+/* Nav — matches /docs */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.5);border-bottom:1px solid transparent;transition:padding .4s ease,background .4s ease,border-color .4s ease}
+nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-color:var(--border)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.wordmark .s{color:var(--accent);font-weight:800}
+.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease;text-decoration:none}
+.nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}
+.nav-links a:not(.btn-sm):hover{color:#fff}
+.nav-links a:not(.btn-sm):hover::after{width:100%}
+.nav-links a.active{color:#fff}
+.nav-links a.btn-sm{color:#fff}
+.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .25s ease;text-decoration:none}
+.btn-sm:hover{background:#2563eb;color:#fff;transform:translateY(-1px)}
+.doc{max-width:900px;margin:0 auto;padding:6rem 2rem 4rem}
+.doc h1{font-size:clamp(2rem,4vw,2.75rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:.5rem}
+.doc .sub{color:var(--muted);font-size:1rem;margin-bottom:2.5rem}
+.doc h2{font-size:1.5rem;font-weight:700;margin:2.5rem 0 .75rem;letter-spacing:-0.02em}
+.doc h3{font-size:1rem;font-weight:600;margin:1.5rem 0 .5rem}
+.doc p{color:var(--muted);margin-bottom:1rem;font-size:.9rem}
+.doc strong{color:var(--text)}
+.doc code{font-family:var(--mono);font-size:.82rem;background:rgba(255,255,255,0.05);padding:.15rem .4rem;border-radius:4px}
+.doc pre{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:1.25rem;font-family:var(--mono);font-size:.8rem;line-height:1.6;overflow-x:auto;margin-bottom:1.5rem;color:#e6edf3}
+.step{display:flex;gap:1rem;margin-bottom:2rem;align-items:flex-start}
+.step-num{background:var(--accent);color:#fff;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;flex-shrink:0;margin-top:.15rem}
+.step-body{flex:1}
+.step-body h3{margin-top:0}
+.badge{display:inline-block;padding:.2rem .6rem;border-radius:4px;font-size:.7rem;font-weight:600;margin-right:.5rem}
+.badge-py{background:rgba(59,130,246,0.15);color:#93b4f5}
+.badge-js{background:rgba(245,158,11,0.15);color:#fcd34d}
+.badge-sh{background:rgba(34,197,94,0.15);color:#86efac}
+/* Responsive */
+@media(max-width:600px){
+  .doc{padding:4.5rem 1rem 2rem}
+  .doc h1{font-size:1.5rem}
+  .doc pre{padding:.75rem;font-size:.72rem;border-radius:8px}
+  .step{flex-direction:column;gap:.5rem}
+  .step-num{width:24px;height:24px;font-size:.72rem}
+  nav>div{gap:1rem !important;font-size:.8rem !important}
+  nav{padding:0 .75rem !important}
+}
+</style>
+</head>
+<body>
+<nav>
+  <a href="/" class="wordmark">sl<span class="s">/</span>sh</a>
+  <div class="nav-links">
+    <a href="/mission">Mission</a>
+    <a href="/timeline">Timeline</a>
+    <a href="/playground">Playground</a>
+    <a href="/docs" class="active">Docs</a>
+    <a class="btn-sm" href="/playground">Try Playground</a>
+  </div>
+</nav>
+
+<div class="doc">
+  <p style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem"><a href="/docs">&larr; Back to Docs</a></p>
+  <h1>Quickstart</h1>
+  <p class="sub">Send your first request in under 60 seconds.</p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h3>Get an API key</h3>
+      <p>Sign up at <a href="/keys">/keys</a> to get your <code>sk-...</code> API key. Free tier: 1,000 requests/day.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h3>Extract your first answer</h3>
+      <p>Send a URL and a question. Slaash returns only the relevant nodes — 99% fewer tokens than raw HTML.</p>
+
+      <p><span class="badge badge-sh">cURL</span></p>
+<pre>curl -X POST https://api.slaash.ai/v1/extract \
+  -H "Authorization: Bearer sk-your-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+    "goal": "when was Rust created and by whom"
+  }'</pre>
+
+      <p><span class="badge badge-py">Python</span></p>
+<pre>from slaash import Slaash
+
+s = Slaash(api_key="sk-your-key-here")
+
+result = s.extract(
+    url="https://en.wikipedia.org/wiki/Rust_(programming_language)",
+    goal="when was Rust created and by whom"
+)
+
+for node in result.nodes:
+    print(f"[{node.role}] {node.label}")</pre>
+
+      <p><span class="badge badge-js">JavaScript</span></p>
+<pre>import Slaash from 'slaash'
+
+const s = new Slaash({ apiKey: 'sk-your-key-here' })
+
+const result = await s.extract(
+  'https://en.wikipedia.org/wiki/Rust_(programming_language)',
+  { goal: 'when was Rust created and by whom' }
+)
+
+result.nodes.forEach(n => console.log(`[${n.role}] ${n.label}`))</pre>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <h3>Teach it (optional)</h3>
+      <p>Tell Slaash which nodes had the right answer. Next time, they'll rank higher automatically.</p>
+<pre>curl -X POST https://api.slaash.ai/v1/learn \
+  -H "Authorization: Bearer sk-your-key-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
+    "goal": "when was Rust created and by whom",
+    "node_ids": [142, 289]
+  }'</pre>
+    </div>
+  </div>
+
+  <h2>Output formats</h2>
+  <p>Every extract call supports 3 output formats:</p>
+  <p><strong>JSON</strong> — structured nodes with role, label, relevance, causal_boost. Best for programmatic access.</p>
+  <p><strong>Markdown</strong> — readable text with headings and links. Best for LLM consumption.</p>
+  <p><strong>TOON</strong> — Token-Oriented Object Notation. 86% smaller than JSON. Best for minimal token budgets.</p>
+
+  <h2>What's next?</h2>
+  <p><a href="/docs/api">REST API Reference</a> — all 12 primitives with request/response specs.</p>
+  <p><a href="/docs/guide">Slaash Guide</a> — how goal expansion, causal learning, and feedback work.</p>
+  <p><a href="/docs/mcp">MCP Integration</a> — connect to Claude Desktop, Cursor, VS Code.</p>
+  <p><a href="/playground">Playground</a> — try all primitives live in your browser.</p>
+</div>
+
+<div data-component="footer"></div>
+<script src="/components.js"></script>
+<script>window.addEventListener('scroll',()=>{const n=document.querySelector('nav');if(n)n.classList.toggle('scrolled',window.scrollY>10)});</script>
+</body>
+</html>

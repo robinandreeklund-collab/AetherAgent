@@ -119,6 +119,30 @@ pub fn hydration_to_nodes(data: &HydrationData, goal: &str) -> HydrationResult {
         .filter(|s| !s.is_empty())
         .collect();
 
+    // Phase 2.3: Build a lookup of title/headline values by JSON path prefix.
+    // This lets us enrich link nodes with their associated headline text.
+    // e.g., sections[0].content[0].title = "Headline" + sections[0].content[0].href = "/article"
+    // → link label becomes "Headline" instead of "/article"
+    let title_lookup: std::collections::HashMap<String, String> = entries
+        .iter()
+        .filter(|(key, value)| {
+            let last = key.rsplit('.').next().unwrap_or("").to_lowercase();
+            matches!(
+                last.as_str(),
+                "title" | "headline" | "heading" | "name" | "shortname"
+            ) && value.len() > 3
+                && value.len() < 300
+                && !value.starts_with("http")
+                && !value.starts_with('/')
+        })
+        .map(|(key, value)| {
+            // Key prefix: "sections[0].content[0].title" → "sections[0].content[0]"
+            let prefix = key.rsplit('.').skip(1).collect::<Vec<_>>();
+            let prefix = prefix.into_iter().rev().collect::<Vec<_>>().join(".");
+            (prefix, value.clone())
+        })
+        .collect();
+
     for (key, value) in &entries {
         // Skippa interna/metadata-nycklar
         if is_internal_key(key) {
@@ -126,7 +150,17 @@ pub fn hydration_to_nodes(data: &HydrationData, goal: &str) -> HydrationResult {
         }
 
         // Semantisk rollmappning baserat på JSON-fältnamn
-        let (role, label) = semantic_role_from_key(key, value);
+        let (role, mut label) = semantic_role_from_key(key, value);
+
+        // Phase 2.3: Enrich link labels with associated title from sibling JSON field.
+        // If the label is just a URL path, look up the title in the same JSON object.
+        if role == "link" && (label.starts_with('/') || label.starts_with("http")) {
+            let key_prefix = key.rsplit('.').skip(1).collect::<Vec<_>>();
+            let key_prefix = key_prefix.into_iter().rev().collect::<Vec<_>>().join(".");
+            if let Some(title) = title_lookup.get(&key_prefix) {
+                label = title.clone();
+            }
+        }
 
         // Trust shield — analysera text
         let (trust, warning) = analyze_text(next_id, &label);

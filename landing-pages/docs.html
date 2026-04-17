@@ -44,8 +44,9 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 .docs-hero p{color:var(--muted);font-size:1rem}
 
 .docs-grid{max-width:900px;margin:0 auto;padding:2rem;display:grid;grid-template-columns:repeat(2,1fr);gap:1.25rem}
-.doc-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2rem 1.5rem;transition:all .3s}
-.doc-card:hover{border-color:var(--accent);box-shadow:0 0 30px rgba(59,130,246,0.35)}
+.doc-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:2rem 1.5rem;transition:all .3s;display:block;text-decoration:none;color:inherit}
+.doc-card:hover{border-color:var(--accent);box-shadow:0 0 30px rgba(59,130,246,0.35);color:inherit}
+.doc-card.disabled{opacity:.5;pointer-events:none}
 .doc-card h3{font-size:1rem;font-weight:600;margin-bottom:.5rem;color:#fff}
 .doc-card p{font-size:.85rem;color:var(--muted);line-height:1.5;margin-bottom:.75rem}
 .doc-card .tag{font-size:.65rem;font-weight:600;color:#555;text-transform:uppercase;letter-spacing:.08em}
@@ -67,9 +68,9 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
   <div class="nav-links">
     <a href="/mission">Mission</a>
     <a href="/timeline">Timeline</a>
-    <a href="/live">Live</a>
+    <a href="/playground">Playground</a>
     <a href="/docs">Docs</a>
-    <a class="btn-sm" href="/try">Try alpha</a>
+    <a class="btn-sm" href="/playground">Try Playground</a>
   </div>
 </nav>
 
@@ -79,33 +80,33 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 </section>
 
 <div class="docs-grid">
-  <div class="doc-card">
+  <a class="doc-card" href="/docs/quickstart">
     <h3>Quickstart</h3>
-    <p>Send your first request in under 60 seconds. URL in, answer out.</p>
+    <p>Send your first request in under 60 seconds. URL in, answer out. Python, JavaScript, and cURL examples.</p>
     <span class="tag">Getting started</span>
-  </div>
-  <div class="doc-card">
+  </a>
+  <a class="doc-card" href="/docs/mcp">
     <h3>MCP Integration</h3>
-    <p>Connect Slaash to Claude, Cursor, or VS Code via 13 MCP tools.</p>
+    <p>Connect Slaash to Claude Desktop, Cursor, or VS Code. 12 agent primitives via MCP protocol. API key required.</p>
     <span class="tag">MCP Server</span>
-  </div>
-  <div class="doc-card">
-    <h3>CRFR Guide</h3>
-    <p>Goal expansion, feedback loops, causal learning, and broad mode for abstract queries.</p>
-    <span class="tag">Core algorithm</span>
-  </div>
-  <div class="doc-card">
+  </a>
+  <a class="doc-card" href="/docs/guide">
+    <h3>Slaash Guide</h3>
+    <p>How Slaash works: goal expansion, CRFR resonance fields, causal learning, feedback loops, output formats.</p>
+    <span class="tag">Core concepts</span>
+  </a>
+  <a class="doc-card" href="/docs/api">
     <h3>REST API</h3>
-    <p>Full endpoint reference — parse, extract, click, search, stream, vision.</p>
+    <p>Full endpoint reference for all 12 primitives: extract, search, crawl, act, plan, stream, diff, render, and more.</p>
     <span class="tag">API Reference</span>
-  </div>
-  <div class="doc-card">
+  </a>
+  <a class="doc-card" href="/docs/trust-shield">
     <h3>Trust Shield</h3>
-    <p>How prompt injection detection works. Trust levels, patterns, and customization.</p>
+    <p>How prompt injection detection works. 40+ attack patterns, trust levels, zero-width detection, multilingual.</p>
     <span class="tag">Security</span>
-  </div>
-  <div class="doc-card">
-    <h3>Self-Hosting</h3>
+  </a>
+  <div class="doc-card disabled">
+    <h3>Self-Hosting <span style="font-size:.7rem;color:var(--accent);font-weight:500;margin-left:.5rem">Coming soon</span></h3>
     <p>Run Slaash as a single binary. Docker, Render, or bare metal deployment.</p>
     <span class="tag">Deployment</span>
   </div>
@@ -114,24 +115,25 @@ nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-col
 <section class="docs-section">
   <h2>Quick example</h2>
   <div class="code-example">
-<span class="comment"># Parse any URL with a goal — get ranked nodes back</span>
-<span class="kw">curl</span> -X POST https://www.slaash.ai/api/parse-crfr \
+<span class="comment"># Extract answer from any URL — 99% token reduction</span>
+<span class="kw">curl</span> -X POST https://api.slaash.ai/v1/extract \
+  -H <span class="str">"Authorization: Bearer sk-..."</span> \
   -H <span class="str">"Content-Type: application/json"</span> \
   -d <span class="str">'{
     "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
-    "goal": "when was Rust first released and who created it",
-    "top_n": 5
+    "goal": "when was Rust first released and who created it"
   }'</span>
   </div>
 
   <div class="code-example">
-<span class="comment"># Give feedback to improve future queries on same URL</span>
-<span class="kw">curl</span> -X POST https://www.slaash.ai/api/crfr-feedback \
+<span class="comment"># Teach Slaash which nodes had the answer — improves future queries</span>
+<span class="kw">curl</span> -X POST https://api.slaash.ai/v1/learn \
+  -H <span class="str">"Authorization: Bearer sk-..."</span> \
   -H <span class="str">"Content-Type: application/json"</span> \
   -d <span class="str">'{
     "url": "https://en.wikipedia.org/wiki/Rust_(programming_language)",
     "goal": "when was Rust first released and who created it",
-    "successful_node_ids": [142, 289]
+    "node_ids": [142, 289]
   }'</span>
   </div>
 </section>

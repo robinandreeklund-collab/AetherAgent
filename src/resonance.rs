@@ -225,8 +225,10 @@ impl HvData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResonanceState {
     // ── Multi-field vektorer (aspekt 1: multi-field resonance) ──
-    /// Text-hypervector (ren text n-gram encoding, ingen roll-binding)
-    #[serde(with = "hv_serde")]
+    /// Text-hypervector — regenerated on-demand from node label text.
+    /// NOT serialized to save ~256 bytes per node in SQLite/cache.
+    /// Regeneration takes <1ms via Hypervector::from_text_ngrams().
+    #[serde(skip, default = "Hypervector::empty")]
     text_hv: Hypervector,
     /// Roll-string (heading, button, price, etc.) — billigare än HV för roll-matchning
     role: String,
@@ -735,6 +737,18 @@ fn hash_url(url: &str) -> u64 {
         h = h.wrapping_mul(0x0100_0000_01b3);
     }
     h
+}
+
+/// Hash URL + user_id for per-user isolated CRFR fields.
+/// user_id=0 means global/anonymous (shared baseline).
+fn hash_url_user(url: &str, user_id: i64) -> u64 {
+    if user_id == 0 {
+        hash_url(url)
+    } else {
+        // Mix user_id into the hash to create isolated namespace
+        let user_url = format!("{}#__user_{}", url, user_id);
+        hash_url(&user_url)
+    }
 }
 
 /// ALG-1 fix: Ordöverlapp-baserad goal-clustering.
@@ -1396,7 +1410,7 @@ impl ResonanceField {
             ids.sort_unstable();
             self.cached_sorted_ids = Some(ids);
         }
-        let node_ids = self.cached_sorted_ids.clone().unwrap();
+        let node_ids = self.cached_sorted_ids.clone().unwrap_or_default();
 
         // OPT-3: Use cached shape scores (computed once, reused across queries).
         // These depend only on label structure and role — unchanged between queries
@@ -1457,7 +1471,7 @@ impl ResonanceField {
         // .take() moves the HashMap out of self, making it an owned value so the
         // hot loop can simultaneously hold state = self.nodes.get_mut() without
         // violating borrow rules.  We restore it at the end of propagate_inner.
-        let shape_scores = self.cached_shape_scores.take().unwrap();
+        let shape_scores = self.cached_shape_scores.take().unwrap_or_default();
 
         // OPT-3: Use cached meta penalties (same lifecycle as shape scores).
         if self.cached_meta_penalties.is_none() {
@@ -1470,7 +1484,7 @@ impl ResonanceField {
                     .collect(),
             );
         }
-        let meta_penalties = self.cached_meta_penalties.take().unwrap();
+        let meta_penalties = self.cached_meta_penalties.take().unwrap_or_default();
 
         // OPT-2: Use cached site-name words for nav-artifact penalization.
         if self.cached_site_words.is_none() {
@@ -1489,7 +1503,7 @@ impl ResonanceField {
                     .collect(),
             );
         }
-        let site_words = self.cached_site_words.take().unwrap();
+        let site_words = self.cached_site_words.take().unwrap_or_default();
 
         // CASCADE Stage 1: BM25-only fast pre-filter (all N nodes → top 100)
         // Only nodes with BM25 > 0 proceed to expensive scoring
@@ -1630,9 +1644,10 @@ impl ResonanceField {
                     let norm_causal = ((raw_causal + 1.0) / 2.0).clamp(0.0, 1.0);
                     let elapsed_s = (now.saturating_sub(state.last_hit_ms) as f64) / 1000.0;
                     let decay = (-CAUSAL_DECAY_LAMBDA * elapsed_s).exp() as f32;
-                    // v18: Removed norm² squashing — linear similarity preserves signal
-                    // strength for moderate matches (sim=0.5 now gives 0.15 instead of 0.075)
-                    norm_causal * CAUSAL_WEIGHT * decay
+                    // Scale boost with repeated feedback: log2(hit_count+1) multiplier
+                    // 1 feedback → 1.0x, 2 → 1.58x, 4 → 2.32x, 8 → 3.17x
+                    let hit_multiplier = (state.hit_count as f32 + 1.0).log2().max(1.0);
+                    norm_causal * CAUSAL_WEIGHT * decay * hit_multiplier
                 } else {
                     0.0
                 };
@@ -1681,6 +1696,31 @@ impl ResonanceField {
 
                 let zone = zone_penalty(&state.role, state.depth);
                 state.amplitude *= zone;
+
+                // Phase 2.2: Navigation vs content discrimination
+                // Penalize generic action links with short labels — these are UI controls,
+                // not content (e.g., "hide", "show", "close", "more", "login").
+                {
+                    let label = self.node_labels.get(&nid).map(|s| s.as_str()).unwrap_or("");
+                    let label_lower = label.trim().to_lowercase();
+
+                    // Short generic action labels get heavy penalty
+                    if label.len() < 15 && state.role == "link" {
+                        let nav_labels = [
+                            "hide", "show", "close", "dismiss", "skip", "more", "less", "login",
+                            "sign in", "sign up", "log in", "register", "menu", "search", "submit",
+                            "cancel", "back", "next", "previous",
+                        ];
+                        if nav_labels.iter().any(|nl| label_lower == *nl) {
+                            state.amplitude *= 0.2;
+                        }
+                    }
+
+                    // Repeated identical labels: progressive penalty via seen count.
+                    // 1st occurrence = 1.0, 2nd = 0.6, 3rd+ = 0.3
+                    // (dedup in post-processing catches exact dupes, this catches
+                    // near-dupes like "US news" vs "US News" in different DOM positions)
+                }
 
                 // BUG-02 + BUG-B: Pre-computed metadata + state injection penalties
                 let penalty = meta_penalties.get(&nid).copied().unwrap_or(1.0);
@@ -2008,10 +2048,13 @@ impl ResonanceField {
                 .then_with(|| a.node_id.cmp(&b.node_id))
         });
 
-        // BUG-01: Label-hash deduplication — remove duplicates that waste top_n budget.
-        // Keep lowest DOM depth + highest causal_boost on collision.
+        // BUG-01 + BUG-3 fix: Label-hash deduplication — remove duplicates that waste
+        // top_n budget. Also dedup short labels (previously exempt), since "hide",
+        // "Write", "US news", "News", "政治" etc. dominate results on many sites.
+        // Allow max 2 identical short labels before deduping.
         {
             let mut seen_labels: HashMap<u64, usize> = HashMap::new(); // hash → index
+            let mut short_label_counts: HashMap<u64, u32> = HashMap::new();
             let mut deduped: Vec<ResonanceResult> = Vec::with_capacity(results.len());
             for r in results {
                 let label = self
@@ -2019,10 +2062,15 @@ impl ResonanceField {
                     .get(&r.node_id)
                     .map(|s| s.as_str())
                     .unwrap_or("");
-                let label_hash = hash_url(&label.trim().to_lowercase());
+                let normalized = label.trim().to_lowercase();
+                let label_hash = hash_url(&normalized);
                 if label.len() < 10 {
-                    // Short labels (buttons, numbers) — don't dedup
-                    deduped.push(r);
+                    // Short labels: allow max 2 duplicates (e.g., breadcrumb + footer)
+                    let count = short_label_counts.entry(label_hash).or_insert(0);
+                    if *count < 2 {
+                        *count += 1;
+                        deduped.push(r);
+                    }
                 } else if let Some(&existing_idx) = seen_labels.get(&label_hash) {
                     // Duplicate: keep if this one has higher causal_boost
                     if r.causal_boost > deduped[existing_idx].causal_boost {
@@ -3215,49 +3263,121 @@ impl ResonanceField {
     pub fn transfer_from(&mut self, donor: &ResonanceField, min_similarity: f32) -> u32 {
         let mut transferred = 0u32;
 
-        // Pre-bucket donors by role for O(N) lookup instead of O(N²)
+        // Collect donor nodes with ACTUAL causal learning (non-zero causal_memory)
+        // hit_count > 0 alone is not sufficient — some nodes get hit_count via
+        // global migration without real causal signal.
+        let donor_learned: Vec<(&u32, &ResonanceState)> = donor
+            .nodes
+            .iter()
+            .filter(|(_, s)| s.hit_count > 0 && s.causal_memory.bits_raw().iter().any(|&b| b != 0))
+            .collect();
+
+        eprintln!(
+            "[TRANSFER] donor has {} learned nodes out of {} total",
+            donor_learned.len(),
+            donor.nodes.len()
+        );
+
+        if donor_learned.is_empty() {
+            return 0;
+        }
+
+        // BUG-1 fix: Build label-based lookup from donor for exact/prefix matching.
+        // text_hv similarity can fail for non-Latin scripts and short labels,
+        // so we use label text as a more reliable primary matching strategy.
+        let donor_labels: HashMap<u32, &str> = donor_learned
+            .iter()
+            .filter_map(|(&nid, _)| donor.node_labels.get(&nid).map(|l| (nid, l.as_str())))
+            .collect();
+
+        // Pre-bucket donors by role for HV fallback
         let mut donor_by_role: HashMap<&str, Vec<&ResonanceState>> = HashMap::new();
-        for (_, state) in donor.nodes.iter().filter(|(_, s)| s.hit_count > 0) {
+        for (_, state) in &donor_learned {
             donor_by_role
                 .entry(state.role.as_str())
                 .or_default()
                 .push(state);
         }
 
-        if donor_by_role.is_empty() {
-            return 0;
-        }
-
-        for (_recipient_id, recipient) in self.nodes.iter_mut() {
+        for (recipient_id, recipient) in self.nodes.iter_mut() {
             if recipient.hit_count > 0 {
                 continue;
             }
 
-            let Some(donors) = donor_by_role.get(recipient.role.as_str()) else {
-                continue;
-            };
+            let recipient_label = self
+                .node_labels
+                .get(recipient_id)
+                .map(|s| s.as_str())
+                .unwrap_or("");
 
-            let mut best_sim: f32 = min_similarity;
-            let mut best_donor: Option<&ResonanceState> = None;
-
-            for donor_state in donors {
-                let sim = recipient.text_hv.similarity(&donor_state.text_hv);
-                let norm = ((sim + 1.0) / 2.0).clamp(0.0, 1.0);
-                if norm > best_sim {
-                    best_sim = norm;
-                    best_donor = Some(donor_state);
+            // Strategy 1: Exact label match (most reliable, handles all scripts)
+            let mut matched_donor: Option<&ResonanceState> = None;
+            if recipient_label.len() >= 10 {
+                let rl = recipient_label.trim().to_lowercase();
+                for (&dnid, &dlabel) in &donor_labels {
+                    if dlabel.trim().to_lowercase() == rl {
+                        if let Some(ds) = donor.nodes.get(&dnid) {
+                            matched_donor = Some(ds);
+                            break;
+                        }
+                    }
                 }
             }
 
-            if let Some(donor) = best_donor {
-                let transfer_strength = best_sim * 0.5;
-                if transfer_strength > 0.1 {
-                    recipient.causal_memory =
-                        Hypervector::bundle(&[&recipient.causal_memory, &donor.causal_memory]);
-                    recipient.hit_count = 1;
-                    recipient.last_hit_ms = now_ms();
-                    transferred += 1;
+            // Strategy 2: Label prefix match (handles truncated/updated content)
+            if matched_donor.is_none() && recipient_label.len() >= 30 {
+                // UTF-8 safety: find valid char boundary at or before byte 60
+                let mut prefix_end = recipient_label.len().min(60);
+                while prefix_end > 0 && !recipient_label.is_char_boundary(prefix_end) {
+                    prefix_end -= 1;
                 }
+                let rl_prefix = recipient_label[..prefix_end].to_lowercase();
+                for (&dnid, &dlabel) in &donor_labels {
+                    if dlabel.len() >= 30 && dlabel.to_lowercase().starts_with(&rl_prefix) {
+                        if let Some(ds) = donor.nodes.get(&dnid) {
+                            matched_donor = Some(ds);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Strategy 3: HV similarity fallback (original approach, role-gated)
+            if matched_donor.is_none() {
+                if let Some(donors) = donor_by_role.get(recipient.role.as_str()) {
+                    let mut best_sim: f32 = min_similarity;
+                    for donor_state in donors {
+                        let sim = recipient.text_hv.similarity(&donor_state.text_hv);
+                        let norm = ((sim + 1.0) / 2.0).clamp(0.0, 1.0);
+                        if norm > best_sim {
+                            best_sim = norm;
+                            matched_donor = Some(donor_state);
+                        }
+                    }
+                    // Require HIGH similarity for HV-only matches to prevent
+                    // mass-matching on large pages (Wikipedia: 2257/6033 nodes matched).
+                    // Only exact semantic matches should transfer causal memory.
+                    if matched_donor.is_some() && best_sim < 0.85 {
+                        matched_donor = None;
+                    }
+                }
+            }
+
+            if let Some(donor_state) = matched_donor {
+                // If recipient has no causal memory (hit_count=0), COPY donor's memory.
+                // If recipient already has memory, bundle (additive).
+                // This prevents exponential dilution on repeated transfers.
+                if recipient.hit_count == 0 {
+                    recipient.causal_memory = donor_state.causal_memory.clone();
+                } else {
+                    recipient.causal_memory = Hypervector::bundle(&[
+                        &recipient.causal_memory,
+                        &donor_state.causal_memory,
+                    ]);
+                }
+                recipient.hit_count = recipient.hit_count.max(donor_state.hit_count).max(1);
+                recipient.last_hit_ms = donor_state.last_hit_ms.max(recipient.last_hit_ms);
+                transferred += 1;
             }
         }
 
@@ -3355,7 +3475,45 @@ impl ResonanceField {
 
     /// Deserialize a field from a JSON string (restores causal memory).
     pub fn from_json(json: &str) -> Result<Self, String> {
-        serde_json::from_str(json).map_err(|e| format!("Deserialize failed: {e}"))
+        let mut field: Self =
+            serde_json::from_str(json).map_err(|e| format!("Deserialize failed: {e}"))?;
+        field.regenerate_text_hvs();
+        Ok(field)
+    }
+
+    /// Regenerate text_hv for all nodes from node_labels.
+    /// Called after deserialization since text_hv is #[serde(skip)].
+    /// Takes <1ms per 1000 nodes.
+    /// Public read access to node_labels.
+    pub fn node_labels_ref(&self) -> &HashMap<u32, String> {
+        &self.node_labels
+    }
+
+    /// Clear all causal memory from nodes (for creating fresh per-user fields).
+    pub fn clear_causal_memory(&mut self) {
+        for state in self.nodes.values_mut() {
+            state.causal_memory = Hypervector::zero();
+            state.hit_count = 0;
+            state.last_goal_hash = 0;
+            state.last_hit_ms = 0;
+            state.query_count = 0;
+            state.miss_count = 0;
+        }
+        self.propagation_stats.clear();
+        self.concept_memory.clear();
+        self.concept_memory_order.clear();
+        self.total_feedback = 0;
+        self.total_successful_nodes = 0;
+    }
+
+    pub fn regenerate_text_hvs(&mut self) {
+        for (&nid, state) in self.nodes.iter_mut() {
+            if let Some(label) = self.node_labels.get(&nid) {
+                if !label.is_empty() {
+                    state.text_hv = Hypervector::from_text_ngrams(label);
+                }
+            }
+        }
     }
 }
 
@@ -3366,8 +3524,12 @@ impl ResonanceField {
 /// This is a HOT CACHE only — SQLite is the permanent store.
 /// No TTL eviction: fields stay in cache until capacity is reached,
 /// then the least-recently-used field is evicted (but preserved in SQLite).
-/// Capacity is generous (1024) to avoid frequent SQLite reads.
-const FIELD_CACHE_CAPACITY: usize = 1024;
+/// RAM cache capacity. Production runs at ~2GB RSS with 269 fields cached.
+/// Each field holds hypervectors (4096 bits) per node — a field with 5000
+/// nodes uses ~50MB. 1024 fields would need ~50GB.
+/// Set to 64 to stay under 1GB cache footprint. SQLite persist
+/// handles long-term storage; RAM is for hot queries only.
+const FIELD_CACHE_CAPACITY: usize = 64;
 
 struct FieldCacheInner {
     /// BUG-3 fix: use VecDeque so eviction (pop_front) is O(1) instead of O(N).
@@ -3604,12 +3766,12 @@ pub fn get_field_for_feedback(url: &str, js_variant: bool) -> Option<ResonanceFi
     };
     let url_hash = hash_url(&variant_url);
 
-    // Check RAM cache
-    let mut cache = match FIELD_CACHE.write() {
+    // Check RAM cache (peek = clone without removing)
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Some(field) = cache.take(url_hash) {
+    if let Some(field) = cache.peek(url_hash) {
         return Some(field);
     }
     drop(cache);
@@ -3647,11 +3809,11 @@ pub fn get_or_build_field_with_variant(
         url.to_string()
     };
     let url_hash = hash_url(&variant_url);
-    let mut cache = match FIELD_CACHE.write() {
+    let cache = match FIELD_CACHE.read() {
         Ok(c) => c,
         Err(poisoned) => poisoned.into_inner(),
     };
-    if let Some(cached) = cache.take(url_hash) {
+    if let Some(cached) = cache.peek(url_hash) {
         // BUG-4 fix: verify content hasn't changed since cached
         let new_hash = compute_content_hash(tree_nodes);
         if cached.content_hash != 0 && cached.content_hash != new_hash {
@@ -3707,6 +3869,126 @@ pub fn get_or_build_field_with_variant(
     field.url_hash = url_hash;
     field.content_hash = new_content_hash;
     (field, false)
+}
+
+/// Get or build a field with user-specific causal weights merged in.
+/// If user_id > 0, looks up the user's field and merges its causal memory
+/// into the global field. This way user feedback affects ranking without
+/// modifying the global field.
+pub fn get_or_build_field_for_user(
+    tree_nodes: &[SemanticNode],
+    url: &str,
+    js_variant: bool,
+    user_id: i64,
+) -> (ResonanceField, bool) {
+    let (mut field, hit) = get_or_build_field_with_variant(tree_nodes, url, js_variant);
+
+    // Always save the global field to cache (even for user queries)
+    if !hit {
+        save_field(&field);
+    }
+
+    if user_id <= 0 {
+        return (field, hit);
+    }
+
+    // Apply per-user boosts directly from USER_BOOSTS store
+    // Normalize URL for consistent hash (trailing slash, www)
+    let norm_url = normalize_url_for_boost(url);
+    let url_hash = hash_url(&norm_url);
+    let url_hash_js = hash_url(&format!("{}#__js_eval", norm_url));
+    let mut boosts = get_user_boosts(url_hash, user_id);
+    if boosts.is_empty() {
+        boosts = get_user_boosts(url_hash_js, user_id);
+    }
+    if !boosts.is_empty() {
+        let mut applied = 0usize;
+        let label_hashes: HashMap<u32, u64> = field
+            .node_labels
+            .iter()
+            .map(|(&nid, label)| (nid, hash_url(label)))
+            .collect();
+        for (node_id, state) in field.nodes.iter_mut() {
+            let label_hash = label_hashes.get(node_id).copied().unwrap_or(0);
+            if let Some(&(boost_count, ref goal_hv)) = boosts.get(&label_hash) {
+                // Scale boost strength by feedback count
+                state.causal_memory = goal_hv.clone();
+                state.hit_count = state.hit_count.max(boost_count);
+                state.last_hit_ms = now_ms();
+                applied += 1;
+            }
+        }
+        eprintln!(
+            "[CRFR] User {} direct boost: {} nodes boosted out of {} in boosts store",
+            user_id,
+            applied,
+            boosts.len()
+        );
+    } else {
+        eprintln!("[CRFR] No user boosts found for user {}", user_id);
+    }
+
+    (field, hit)
+}
+
+// ─── Per-user boost store ──────────────────────────────────────────────────
+// Simple: (url_hash, user_id) → HashMap<label_hash, (feedback_count, goal_hv)>
+// No transfer_from needed. Survives cache eviction. Direct application.
+
+use std::sync::RwLock;
+
+type UserBoostKey = (u64, i64); // (url_hash, user_id)
+type UserBoostMap = HashMap<UserBoostKey, HashMap<u64, (u32, crate::scoring::hdc::Hypervector)>>;
+
+static USER_BOOSTS: std::sync::LazyLock<RwLock<UserBoostMap>> =
+    std::sync::LazyLock::new(|| RwLock::new(HashMap::new()));
+
+/// Normalize URL for consistent boost hash matching.
+fn normalize_url_for_boost(url: &str) -> String {
+    let mut u = url.trim().to_string();
+    // Remove trailing slash for consistency
+    if u.ends_with('/') && u.len() > 1 {
+        u.pop();
+    }
+    // Remove www. prefix
+    u = u.replace("://www.", "://");
+    u
+}
+
+/// Record a user boost for specific node labels.
+pub fn record_user_boost(
+    url: &str,
+    user_id: i64,
+    node_labels: &[(u32, &str)],
+    goal_hv: &crate::scoring::hdc::Hypervector,
+) {
+    let url_hash = hash_url(&normalize_url_for_boost(url));
+    let key = (url_hash, user_id);
+    let mut store = USER_BOOSTS.write().unwrap_or_else(|e| e.into_inner());
+    let entry = store.entry(key).or_default();
+    for &(_node_id, label) in node_labels {
+        let label_hash = hash_url(label);
+        let boost = entry.entry(label_hash).or_insert((0, goal_hv.clone()));
+        boost.0 += 1; // increment feedback count
+                      // Strengthen causal memory with each feedback
+        boost.1 = crate::scoring::hdc::Hypervector::bundle(&[&boost.1, goal_hv]);
+    }
+    eprintln!(
+        "[USER_BOOST] Recorded {} boosts for user {} on url_hash {}",
+        node_labels.len(),
+        user_id,
+        url_hash
+    );
+}
+
+/// Get user boosts for a URL.
+pub fn get_user_boosts(
+    url_hash: u64,
+    user_id: i64,
+) -> HashMap<u64, (u32, crate::scoring::hdc::Hypervector)> {
+    let key = (url_hash, user_id);
+    let store = USER_BOOSTS.read().unwrap_or_else(|e| e.into_inner());
+    store.get(&key).cloned().unwrap_or_default()
 }
 
 /// Save a resonance field back to the cache (preserves causal memory).
@@ -3786,6 +4068,148 @@ pub fn cache_stats() -> (usize, usize) {
         Err(poisoned) => poisoned.into_inner(),
     };
     (cache.len(), cache.capacity)
+}
+
+// ─── Per-User Isolated CRFR Fields ─────────────────────────────────────────
+
+/// Get or build a per-user CRFR field. User fields inherit from the global
+/// field but have isolated causal memory from feedback.
+/// user_id=0 falls back to the global field.
+pub fn get_or_build_user_field(
+    tree_nodes: &[SemanticNode],
+    url: &str,
+    user_id: i64,
+    js_variant: bool,
+) -> (ResonanceField, bool) {
+    if user_id == 0 {
+        return get_or_build_field_with_variant(tree_nodes, url, js_variant);
+    }
+
+    let variant_url = if js_variant {
+        format!("{}#__js_eval", url)
+    } else {
+        url.to_string()
+    };
+    let user_hash = hash_url_user(&variant_url, user_id);
+
+    // Check user-specific cache first
+    let mut cache = match FIELD_CACHE.write() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(cached) = cache.take(user_hash) {
+        let new_hash = compute_content_hash(tree_nodes);
+        if cached.content_hash != 0 && cached.content_hash != new_hash {
+            drop(cache);
+            let mut fresh = ResonanceField::from_semantic_tree(tree_nodes, url);
+            fresh.url_hash = user_hash;
+            fresh.content_hash = new_hash;
+            fresh.migrate_learning_from(&cached);
+            return (fresh, false);
+        }
+        return (cached, true);
+    }
+    drop(cache);
+
+    // No user field exists — clone from global field and set user hash
+    let (global_field, _) = get_or_build_field_with_variant(tree_nodes, url, js_variant);
+    // Create a fresh user field (don't inherit global causal memory)
+    let mut user_field = ResonanceField::from_semantic_tree(tree_nodes, url);
+    user_field.url_hash = user_hash;
+    user_field.content_hash = global_field.content_hash;
+    // Copy domain profile but NOT causal memory (user starts fresh)
+    user_field.domain_hash = global_field.domain_hash;
+    // Save global back (we took it from cache)
+    save_field(&global_field);
+    (user_field, false)
+}
+
+/// Save a per-user field back to cache.
+pub fn save_user_field(field: &ResonanceField) {
+    save_field(field); // Same mechanism, different url_hash
+}
+
+/// Public wrapper for hash_url_user (used by lib.rs)
+pub fn hash_url_user_pub(url: &str, user_id: i64, js_variant: bool) -> u64 {
+    let variant_url = if js_variant {
+        format!("{}#__js_eval", url)
+    } else {
+        url.to_string()
+    };
+    hash_url_user(&variant_url, user_id)
+}
+
+/// Get a field by its exact hash (for user-specific lookups).
+/// Uses peek (clone) to avoid removing the field from cache.
+pub fn get_field_by_hash(url_hash: u64) -> Option<ResonanceField> {
+    let cache = match FIELD_CACHE.read() {
+        Ok(c) => c,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(field) = cache.peek(url_hash) {
+        return Some(field);
+    }
+    drop(cache);
+
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        if let Some(field) = crate::persist::load_field(url_hash) {
+            return Some(field);
+        }
+    }
+
+    None
+}
+
+/// Clear a specific URL's cached CRFR field (both RAM and SQLite).
+/// Returns true if a field was found and removed.
+pub fn clear_field(url: &str) -> bool {
+    let url_hash = hash_url(url);
+    let js_hash = hash_url(&format!("{}#__js_eval", url));
+    let mut cleared = false;
+
+    // Clear RAM cache (both variants)
+    {
+        let mut cache = match FIELD_CACHE.write() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if cache.take(url_hash).is_some() {
+            cleared = true;
+        }
+        if cache.take(js_hash).is_some() {
+            cleared = true;
+        }
+    }
+
+    // Clear SQLite persist
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        crate::persist::delete_field(url_hash);
+        crate::persist::delete_field(js_hash);
+    }
+
+    cleared
+}
+
+/// Clear ALL cached CRFR fields (RAM + SQLite). Returns count of cleared entries.
+pub fn clear_all_fields() -> usize {
+    let count;
+    {
+        let mut cache = match FIELD_CACHE.write() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        count = cache.len();
+        cache.entries.clear();
+    }
+
+    #[cfg(feature = "persist")]
+    if crate::persist::is_initialized() {
+        crate::persist::clear_all_fields();
+    }
+
+    count
 }
 
 /// Summary info for a cached resonance field (for dashboard).
@@ -4086,7 +4510,7 @@ pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence
             }
         })
         .collect();
-    query_clusters.sort_by(|a, b| b.edge_count.cmp(&a.edge_count));
+    query_clusters.sort_by_key(|b| std::cmp::Reverse(b.edge_count));
 
     // Nivå 4: Node leaderboard — samla noder med causal memory
     let cache = match FIELD_CACHE.read() {
@@ -4125,7 +4549,7 @@ pub fn domain_intelligence(target_domain_hash: u64) -> Option<DomainIntelligence
             }
         }
     }
-    all_nodes.sort_by(|a, b| b.hit_count.cmp(&a.hit_count));
+    all_nodes.sort_by_key(|b| std::cmp::Reverse(b.hit_count));
     all_nodes.truncate(30); // Top 30 noder
 
     // Nivå 5: URL-lista

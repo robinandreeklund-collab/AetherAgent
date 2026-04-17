@@ -322,6 +322,10 @@ pub struct FetchResult {
     /// Set-Cookie headers from HTTP response (for JS cookie bridge)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub set_cookie_headers: Vec<String>,
+    /// Phase 4.2: Whether the response indicates bot blocking (403 + Access Denied,
+    /// Cloudflare challenge, CAPTCHA, or empty JS-required page)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bot_blocked: bool,
 }
 
 /// Kombinerat fetch + parse-resultat
@@ -655,7 +659,10 @@ impl WorkflowMemory {
 
 impl FetchConfig {
     fn default_user_agent() -> String {
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 AetherAgent/0.2".to_string()
+        // Phase 4.1: Realistic Chrome 131 user agent — remove AetherAgent identifier
+        // to avoid bot detection. The old UA with "AetherAgent/0.2" triggered blocks
+        // on 5/50 tested sites (H&M, Washington Post, Best Buy, Zalando, Booking.com).
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string()
     }
 
     fn default_timeout_ms() -> u64 {

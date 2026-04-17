@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Settings — Slaash Developer Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);--text:#f5f5f5;--muted:#888;--accent:#3b82f6;--green:#22c55e;--red:#ef4444;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;min-height:100vh}
+a{color:var(--muted);text-decoration:none}
+a:hover{color:var(--text)}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+nav{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid var(--border);backdrop-filter:blur(16px);background:rgba(10,10,10,0.85);position:sticky;top:0;z-index:10}
+.wordmark{font-size:1.25rem;font-weight:700;color:#fff}
+.wordmark .s{color:var(--accent);font-weight:800}
+.nav-links{display:flex;gap:2rem;font-size:.875rem;align-items:center}
+.nav-links a.active{color:#fff}
+main{max-width:720px;margin:0 auto;padding:3rem 2rem}
+h1{font-size:1.75rem;font-weight:700;margin-bottom:.5rem}
+.sub{color:var(--muted);font-size:.9rem;margin-bottom:2rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem}
+.card h2{font-size:1rem;font-weight:600;margin-bottom:.35rem}
+.card .desc{font-size:.8rem;color:var(--muted);margin-bottom:1.25rem}
+label{display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.35rem}
+input,select{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none;margin-bottom:1rem;transition:border-color .2s}
+input:focus,select:focus{border-color:var(--accent)}
+select{appearance:none;-webkit-appearance:none;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right .85rem center;background-size:10px;padding-right:2.2rem;cursor:pointer}
+select option{background:var(--surface);color:var(--text)}
+button{padding:.65rem 1.5rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:background .2s}
+button:hover{background:#2563eb}
+button:disabled{opacity:.5;cursor:not-allowed}
+.msg{font-size:.82rem;margin-top:.75rem;min-height:1.2rem}
+.msg.ok{color:var(--green)}
+.msg.err{color:var(--red)}
+.login-gate{max-width:420px;margin:4rem auto;text-align:center}
+.locale-hint{font-size:.72rem;color:var(--muted);margin-top:-.5rem;margin-bottom:1rem;line-height:1.4}
+@media(max-width:600px){main{padding:1.5rem 1rem}.nav-links{gap:1rem;font-size:.8rem}}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/" class="wordmark">sl<span class="s">/</span>sh</a>
+  <div class="nav-links">
+    <a href="/playground">Playground</a>
+    <a href="/keys">API Keys</a>
+    <a href="/usage">Usage</a>
+    <a href="/settings" class="active">Settings</a>
+  </div>
+</nav>
+
+<main>
+  <div id="login-gate" class="login-gate" style="display:none">
+    <h1>Settings</h1>
+    <p class="sub">Log in to manage your account.</p>
+    <a href="/keys"><button>Go to Login</button></a>
+  </div>
+
+  <div id="settings-panel" style="display:none">
+    <h1>Settings</h1>
+    <p class="sub">Manage your account and default preferences.</p>
+
+    <div class="card">
+      <h2>Profile</h2>
+      <div class="desc">Your display name and account email.</div>
+      <label>Name</label>
+      <input type="text" id="in-name" placeholder="Your name">
+      <label>Email</label>
+      <input type="email" id="in-email" placeholder="you@example.com">
+      <button onclick="saveProfile()">Save profile</button>
+      <div id="profile-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Default Locale / Region</h2>
+      <div class="desc">Many sites (Amazon, BBC, Google, e-commerce) serve different content per region. Set your default to simulate a user from that locale when fetching pages.</div>
+      <label>Region</label>
+      <select id="in-locale">
+        <option value="en-US">🇺🇸 United States (en-US)</option>
+        <option value="en-GB">🇬🇧 United Kingdom (en-GB)</option>
+        <option value="sv-SE">🇸🇪 Sweden (sv-SE)</option>
+        <option value="de-DE">🇩🇪 Germany (de-DE)</option>
+        <option value="fr-FR">🇫🇷 France (fr-FR)</option>
+        <option value="es-ES">🇪🇸 Spain (es-ES)</option>
+        <option value="it-IT">🇮🇹 Italy (it-IT)</option>
+        <option value="nl-NL">🇳🇱 Netherlands (nl-NL)</option>
+        <option value="ja-JP">🇯🇵 Japan (ja-JP)</option>
+        <option value="ko-KR">🇰🇷 Korea (ko-KR)</option>
+        <option value="zh-CN">🇨🇳 China (zh-CN)</option>
+        <option value="pt-BR">🇧🇷 Brazil (pt-BR)</option>
+        <option value="da-DK">🇩🇰 Denmark (da-DK)</option>
+        <option value="no-NO">🇳🇴 Norway (no-NO)</option>
+        <option value="fi-FI">🇫🇮 Finland (fi-FI)</option>
+      </select>
+      <div class="locale-hint">Sends <code style="font-family:var(--mono);font-size:.75rem;background:rgba(255,255,255,0.05);padding:.1rem .3rem;border-radius:3px">Accept-Language</code> header matching this locale at every fetch.</div>
+      <button onclick="saveLocale()">Save locale</button>
+      <div id="locale-msg" class="msg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Account</h2>
+      <div class="desc">Current signed-in user.</div>
+      <div style="font-size:.85rem;margin-bottom:1rem">
+        <span style="color:var(--muted)">Logged in as </span>
+        <strong id="current-email"></strong>
+      </div>
+      <button onclick="logout()" style="background:transparent;border:1px solid var(--border);color:var(--muted)">Log out</button>
+    </div>
+  </div>
+</main>
+
+<script>
+let currentUser = null;
+
+function getSession() {
+  try {
+    const raw = localStorage.getItem('slaash_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+
+function saveSession(u) {
+  currentUser = u;
+  localStorage.setItem('slaash_user', JSON.stringify(u));
+}
+
+function apiHeaders() {
+  const h = {'Content-Type':'application/json'};
+  const t = localStorage.getItem('slaash_session_token');
+  if (t) h['Authorization'] = 'Bearer ' + t;
+  return h;
+}
+
+function init() {
+  currentUser = getSession();
+  if (!currentUser) {
+    document.getElementById('login-gate').style.display = '';
+    return;
+  }
+  document.getElementById('settings-panel').style.display = '';
+  document.getElementById('in-name').value = currentUser.name || '';
+  document.getElementById('in-email').value = currentUser.email || '';
+  document.getElementById('in-locale').value = currentUser.locale || 'en-US';
+  document.getElementById('current-email').textContent = currentUser.email || '';
+}
+
+async function saveProfile() {
+  const name = document.getElementById('in-name').value.trim();
+  const email = document.getElementById('in-email').value.trim();
+  const msg = document.getElementById('profile-msg');
+  msg.className = 'msg';
+  msg.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/auth/profile', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify({ user_id: currentUser.id, name, email })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      saveSession(data.user);
+      msg.className = 'msg ok';
+      msg.textContent = 'Profile updated.';
+    } else {
+      msg.className = 'msg err';
+      msg.textContent = data.message || 'Save failed';
+    }
+  } catch(e) {
+    msg.className = 'msg err';
+    msg.textContent = e.message;
+  }
+}
+
+async function saveLocale() {
+  const locale = document.getElementById('in-locale').value;
+  const msg = document.getElementById('locale-msg');
+  msg.className = 'msg';
+  msg.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/auth/profile', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify({ user_id: currentUser.id, locale })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      saveSession(data.user);
+      msg.className = 'msg ok';
+      msg.textContent = 'Locale saved. New fetches will use ' + locale + '.';
+    } else {
+      msg.className = 'msg err';
+      msg.textContent = data.message || 'Save failed';
+    }
+  } catch(e) {
+    msg.className = 'msg err';
+    msg.textContent = e.message;
+  }
+}
+
+function logout() {
+  localStorage.removeItem('slaash_user');
+  localStorage.removeItem('slaash_session_token');
+  window.location = '/';
+}
+
+init();
+</script>
+<script src="/components.js"></script>
+</body>
+</html>

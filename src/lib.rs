@@ -5,6 +5,7 @@ pub mod adaptive;
 /// Publik WASM-API som exponeras till Python, Node.js och edge-runtimes.
 pub mod arena_dom;
 pub mod arena_dom_sink;
+pub mod auth;
 pub mod bot_detect;
 pub(crate) mod causal;
 pub(crate) mod collab;
@@ -470,15 +471,186 @@ fn count_content_chars(nodes: &[types::SemanticNode]) -> usize {
 }
 
 /// Truncate label to max_len characters, respecting UTF-8 boundaries.
+/// TOON: Token-Oriented Object Notation
+/// Minimal LLM token format. ~60% fewer tokens than Markdown, ~85% fewer than JSON.
+///
+/// Format:
+///   ~node_count|total_dom|time_ms     (header)
+///   #Page Title                       (title)
+///   ROLE_CODE NODE_ID|label|relevance[|url]  (per node)
+///
+/// Role codes: H=heading L=link T=text P=price B=button G=generic
+///             I=listitem C=cell M=main X=img D=data
+fn format_toon(
+    matched: &[(&types::SemanticNode, &resonance::ResonanceResult)],
+    title: &str,
+    total_dom: usize,
+    time_ms: u64,
+    base_url: &str,
+) -> String {
+    let mut out = String::with_capacity(matched.len() * 60 + 64);
+    out.push_str(&format!("~{}|{}|{}ms\n", matched.len(), total_dom, time_ms));
+    if !title.is_empty() {
+        out.push_str(&format!("#{}\n", clean_label(title)));
+    }
+    for (node, res) in matched {
+        let rc = match node.role.as_str() {
+            "heading" => 'H',
+            "link" => 'L',
+            "text" => 'T',
+            "price" => 'P',
+            "button" | "cta" => 'B',
+            "listitem" => 'I',
+            "cell" => 'C',
+            "main" => 'M',
+            "img" => 'X',
+            "data" => 'D',
+            _ => 'G',
+        };
+        let label = clean_label(&node.label);
+        let boost = if res.causal_boost > 0.01 {
+            format!("*{:.1}", res.causal_boost)
+        } else {
+            String::new()
+        };
+        let val_part = node
+            .value
+            .as_ref()
+            .map(|v| {
+                let rv = resolve_url(v, base_url);
+                if rv.len() > 80 {
+                    let mut e = 80;
+                    while e > 0 && !rv.is_char_boundary(e) {
+                        e -= 1;
+                    }
+                    format!("|{}..", &rv[..e])
+                } else {
+                    format!("|{}", rv)
+                }
+            })
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "{}{}{}|{}|{:.2}{}\n",
+            rc, node.id, boost, label, res.amplitude, val_part
+        ));
+    }
+    out
+}
+
+/// BUG-L4 fix: Resolve relative URLs to absolute using the page's base URL.
+fn resolve_url(href: &str, base_url: &str) -> String {
+    // Already absolute
+    if href.starts_with("http://") || href.starts_with("https://") {
+        return href.to_string();
+    }
+    // Fragment-only or empty
+    if href.starts_with('#') || href.is_empty() {
+        return href.to_string();
+    }
+    // Protocol-relative
+    if href.starts_with("//") {
+        return format!("https:{href}");
+    }
+    // Extract origin from base_url (e.g., "https://www.svt.se" from "https://www.svt.se/nyheter")
+    let origin = if let Some(pos) = base_url
+        .find("://")
+        .and_then(|s| base_url[s + 3..].find('/').map(|p| s + 3 + p))
+    {
+        &base_url[..pos]
+    } else {
+        base_url.trim_end_matches('/')
+    };
+    if href.starts_with('/') {
+        format!("{origin}{href}")
+    } else {
+        // Relative path — append to base directory
+        let base_dir = if let Some(pos) = base_url.rfind('/') {
+            if base_url[..pos].contains("://") && !base_url[pos + 1..].is_empty() {
+                &base_url[..=pos]
+            } else {
+                base_url
+            }
+        } else {
+            base_url
+        };
+        format!("{base_dir}/{href}")
+    }
+}
+
+/// BUG-6 fix: Decode HTML entities and strip residual tags from labels.
+/// Called before truncation so output is always clean text.
+fn clean_label(label: &str) -> String {
+    // Strip HTML tags (e.g., <p>, <a href="...">, </p>)
+    let mut out = String::with_capacity(label.len());
+    let mut in_tag = false;
+    for ch in label.chars() {
+        if ch == '<' {
+            in_tag = true;
+        } else if ch == '>' && in_tag {
+            in_tag = false;
+        } else if !in_tag {
+            out.push(ch);
+        }
+    }
+
+    // Decode common HTML entities
+    out = out
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&#x2F;", "/")
+        .replace("&nbsp;", " ");
+
+    // Phase 2.4: Strip common boilerplate prefixes
+    let boilerplate_prefixes = [
+        "Subscribers only ",
+        "ANZEIGE ",
+        "Advertisement ",
+        "Sponsored ",
+        "SPONSORED ",
+        "Promoted ",
+        "Partner Content ",
+    ];
+    for prefix in &boilerplate_prefixes {
+        if out.starts_with(prefix) {
+            out = out[prefix.len()..].to_string();
+        }
+    }
+
+    // Collapse multiple whitespace into single space
+    let mut prev_space = false;
+    out = out
+        .chars()
+        .filter(|&c| {
+            if c.is_whitespace() {
+                if prev_space {
+                    return false;
+                }
+                prev_space = true;
+            } else {
+                prev_space = false;
+            }
+            true
+        })
+        .collect();
+
+    out.trim().to_string()
+}
+
 fn truncate_label(label: &str, max_len: usize) -> String {
-    if label.len() <= max_len {
-        return label.to_string();
+    let cleaned = clean_label(label);
+    if cleaned.len() <= max_len {
+        return cleaned;
     }
     let mut end = max_len;
-    while end > 0 && !label.is_char_boundary(end) {
+    while end > 0 && !cleaned.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}…", &label[..end])
+    format!("{}…", &cleaned[..end])
 }
 
 /// Post-processing filter for CRFR output.
@@ -493,7 +665,7 @@ fn crfr_post_filter<'a>(
             let label = &node.label;
             let lower = label.to_lowercase();
 
-            // 1. OG/meta tags — maskindata, inte content
+            // 1. OG/meta tags + internal metadata — maskindata, inte content
             if let Some(ref name) = node.name {
                 let nl = name.to_lowercase();
                 if nl.starts_with("opengraph.")
@@ -501,8 +673,31 @@ fn crfr_post_filter<'a>(
                     || nl.starts_with("twitter.")
                     || nl.starts_with("fb:")
                     || nl.starts_with("article:")
+                    // BUG-4 fix: filter internal page metadata that ranks as content
+                    || nl.starts_with("bootstrapdata.")
+                    || nl.starts_with("initialtempodata.")
+                    || nl.starts_with("pagecontentqueryssr")
+                    || nl.starts_with("meta.viewport")
+                    || nl.starts_with("meta.robots")
+                    || nl.starts_with("statuscode")
                 {
                     return false;
+                }
+            }
+
+            // BUG-4 fix: filter nodes with role "data" that are JSON-LD schema
+            // or internal config — these are machine-readable, not content
+            if node.role == "data" {
+                if let Some(ref name) = node.name {
+                    let nl = name.to_lowercase();
+                    if nl.starts_with("jsonld.")
+                        || nl.contains("potentialaction")
+                        || nl.contains("@type")
+                        || nl.contains("@context")
+                        || nl.starts_with("meta.")
+                    {
+                        return false;
+                    }
                 }
             }
 
@@ -566,12 +761,46 @@ fn crfr_post_filter<'a>(
                 return false;
             }
 
-            // 8. Wikipedia: category/maintenance metadata
+            // 8. Wikipedia: category/maintenance metadata + navigation
             if lower.starts_with("articles with short description")
                 || lower.starts_with("short description is different")
                 || lower.starts_with("category:articles with")
             {
                 return false;
+            }
+
+            // BUG-8 fix: Wikipedia "Help:Category" and similar navigation
+            if let Some(ref v) = node.value {
+                if v.starts_with("/wiki/Help:") || v.starts_with("/wiki/Category:") {
+                    return false;
+                }
+            }
+
+            // BUG-9 fix: Language picker links — these are navigation, not content.
+            // Detect: role=link + short label (2-20 chars) + value contains language path
+            if node.role == "link" && label.len() <= 30 {
+                if let Some(ref v) = node.value {
+                    let vl = v.to_lowercase();
+                    // EU-style language links: /index_bg, /index_fr, etc.
+                    if vl.contains("/index_") && vl.len() < 80 {
+                        return false;
+                    }
+                    // Common language path patterns: /en/, /fr/, /de/, /sv/, etc.
+                    let lang_patterns = [
+                        "/en/", "/fr/", "/de/", "/sv/", "/es/", "/pt/", "/nl/", "/it/", "/pl/",
+                        "/hu/", "/bg/", "/cs/", "/da/", "/fi/", "/el/", "/ro/", "/sk/", "/sl/",
+                        "/hr/", "/lt/", "/lv/", "/et/", "/mt/", "/ga/",
+                    ];
+                    // Only filter if label looks like a language name (one or two words)
+                    let word_count = label.split_whitespace().count();
+                    if word_count <= 2
+                        && lang_patterns.iter().any(|p| vl.contains(p))
+                        && !vl.contains("/news/")
+                        && !vl.contains("/article")
+                    {
+                        return false;
+                    }
+                }
             }
 
             true
@@ -996,12 +1225,90 @@ pub fn parse_crfr_broad(
 
 // Build semantic tree for CRFR (with optional JS eval).
 // Returns tree with pending_fetch_urls for async XHR resolution.
+//
+// Phase 1.3: Auto-escalation — if static parse returns < 5 content nodes
+// AND the page has SPA/JS markers, automatically retry with JS eval.
+// This eliminates 30% empty results without requiring run_js=true.
 pub fn build_tree_for_crfr(html: &str, goal: &str, url: &str, run_js: bool) -> SemanticTree {
     if run_js {
-        run_lifecycle_parse(html, goal, url)
-    } else {
-        build_tree(html, goal, url)
+        return run_lifecycle_parse(html, goal, url);
     }
+
+    let tree = build_tree(html, goal, url);
+
+    // Phase 1.3: Check if static parse got enough content
+    let all_nodes = collect_all_nodes(&tree.nodes);
+    let content_nodes = all_nodes
+        .iter()
+        .filter(|n| {
+            matches!(
+                n.role.as_str(),
+                "text"
+                    | "heading"
+                    | "paragraph"
+                    | "link"
+                    | "button"
+                    | "listitem"
+                    | "cell"
+                    | "price"
+            ) && n.label.len() >= 20
+        })
+        .count();
+
+    // If we got enough content, return static tree
+    if content_nodes >= 5 {
+        return tree;
+    }
+
+    // Check if page has JS/SPA markers that suggest content is JS-rendered
+    // Skip auto-escalation on very large pages (>2MB) to avoid OOM/stack overflow
+    if html.len() > 2_000_000 {
+        return tree;
+    }
+    let html_lower = html.to_lowercase();
+    let has_js_markers = html_lower.contains("<script")
+        && (html_lower.contains("document.get")
+            || html_lower.contains("document.query")
+            || html_lower.contains("innerhtml")
+            || html_lower.contains("textcontent")
+            || html_lower.contains("createelement")
+            || html_lower.contains("appendchild")
+            || html_lower.contains("react")
+            || html_lower.contains("__next")
+            || html_lower.contains("__nuxt")
+            || html_lower.contains("vue")
+            || html_lower.contains("angular")
+            || html_lower.contains("svelte"));
+
+    if has_js_markers {
+        // Auto-escalate to JS eval
+        #[cfg(feature = "js-eval")]
+        {
+            let js_tree = run_lifecycle_parse(html, goal, url);
+            let js_content = collect_all_nodes(&js_tree.nodes)
+                .iter()
+                .filter(|n| {
+                    matches!(
+                        n.role.as_str(),
+                        "text"
+                            | "heading"
+                            | "paragraph"
+                            | "link"
+                            | "button"
+                            | "listitem"
+                            | "cell"
+                            | "price"
+                    ) && n.label.len() >= 20
+                })
+                .count();
+            // Use JS tree if it has more content
+            if js_content > content_nodes {
+                return js_tree;
+            }
+        }
+    }
+
+    tree
 }
 
 /// Build semantic tree for CRFR with pre-populated fetch responses.
@@ -1034,9 +1341,10 @@ pub fn build_tree_with_cookies(
     )
 }
 
-/// BUG-6: Detect bot-blocking/WAF pages (Amazon CloudFront, Cloudflare, etc.)
+/// Detect bot-blocking/WAF pages (Cloudflare, Amazon CloudFront, Akamai, etc.)
+/// Phase 4.2: Extended with Cloudflare challenge detection and Access Denied patterns.
 fn is_bot_blocked(title: &str, total_nodes: usize) -> bool {
-    if total_nodes > 15 {
+    if total_nodes > 20 {
         return false;
     }
     let t = title.to_lowercase();
@@ -1049,6 +1357,15 @@ fn is_bot_blocked(title: &str, total_nodes: usize) -> bool {
         "sorry, you have been blocked",
         "pardon our interruption",
         "access to this page has been denied",
+        // Phase 4.2: Cloudflare challenge
+        "just a moment",
+        "checking your browser",
+        "attention required",
+        "please wait",
+        // Phase 4.2: Access Denied
+        "access denied",
+        "please enable js",
+        "please verify",
     ];
     bot_patterns.iter().any(|p| t.contains(p))
         || (total_nodes <= 5 && (t.contains("page not found") || t.is_empty()))
@@ -1254,8 +1571,11 @@ pub fn parse_crfr_from_tree_broad(
     let total_ms = now_ms().saturating_sub(start);
     let is_md =
         output_format.eq_ignore_ascii_case("markdown") || output_format.eq_ignore_ascii_case("md");
+    let is_toon = output_format.eq_ignore_ascii_case("toon");
 
-    if is_md {
+    if is_toon {
+        format_toon(&matched, &tree.title, total_dom_nodes, total_ms, url)
+    } else if is_md {
         let mut md = String::with_capacity(matched.len() * 120);
         if !tree.title.is_empty() {
             md.push_str(&format!("# {}\n\n", tree.title));
@@ -1297,7 +1617,7 @@ pub fn parse_crfr_from_tree_broad(
                     "html_id": node.html_id,
                     "name": node.name,
                     "action": node.action,
-                    "value": node.value,
+                    "value": node.value.as_ref().map(|v| resolve_url(v, url)),
                     "trust": node.trust,
                 })
             })
@@ -1382,12 +1702,26 @@ pub fn parse_crfr_from_tree_js(
     output_format: &str,
     js_eval_ran: bool,
 ) -> String {
+    parse_crfr_from_tree_js_user(tree, goal, url, top_n, output_format, js_eval_ran, 0)
+}
+
+/// CRFR with per-user causal weights merged in.
+pub fn parse_crfr_from_tree_js_user(
+    tree: &SemanticTree,
+    goal: &str,
+    url: &str,
+    top_n: u32,
+    output_format: &str,
+    js_eval_ran: bool,
+    user_id: i64,
+) -> String {
     let start = now_ms();
     let total_dom_nodes = collect_all_nodes(&tree.nodes).len();
 
     let field_start = now_ms();
     let (mut field, cache_hit) =
-        resonance::get_or_build_field_with_variant(&tree.nodes, url, js_eval_ran);
+        resonance::get_or_build_field_for_user(&tree.nodes, url, js_eval_ran, user_id);
+    let is_user_query = user_id > 0;
     let field_ms = now_ms().saturating_sub(field_start);
 
     let prop_start = now_ms();
@@ -1419,13 +1753,18 @@ pub fn parse_crfr_from_tree_js(
     let chars_in: u64 = node_map.values().map(|n| n.label.len() as u64).sum();
     let chars_out: u64 = matched.iter().map(|(n, _)| n.label.len() as u64).sum();
     field.record_token_savings(chars_in, chars_out);
-    resonance::save_field(&field);
+    if !is_user_query {
+        resonance::save_field(&field);
+    }
 
     let total_ms = now_ms().saturating_sub(start);
     let is_md =
         output_format.eq_ignore_ascii_case("markdown") || output_format.eq_ignore_ascii_case("md");
+    let is_toon = output_format.eq_ignore_ascii_case("toon");
 
-    if is_md {
+    if is_toon {
+        format_toon(&matched, &tree.title, total_dom_nodes, total_ms, url)
+    } else if is_md {
         let mut md = String::with_capacity(matched.len() * 120);
         if !tree.title.is_empty() {
             md.push_str(&format!("# {}\n\n", tree.title));
@@ -1467,11 +1806,58 @@ pub fn parse_crfr_from_tree_js(
                     "html_id": node.html_id,
                     "name": node.name,
                     "action": node.action,
-                    "value": node.value,
+                    "value": node.value.as_ref().map(|v| resolve_url(v, url)),
                     "trust": node.trust,
                 })
             })
             .collect();
+
+        // Phase 1.4: Empty result safety net — when CRFR returns nothing,
+        // provide title + meta description as fallback so agents always get data.
+        let top_nodes = if top_nodes.is_empty() && !tree.title.is_empty() {
+            let mut fallback = Vec::new();
+            // Add title as first fallback node
+            fallback.push(serde_json::json!({
+                "id": 0,
+                "role": "heading",
+                "label": clean_label(&tree.title),
+                "relevance": 0.5,
+                "confidence": 0.3,
+                "resonance_type": "Fallback",
+                "causal_boost": 0.0,
+                "html_id": null,
+                "name": "page_title",
+                "action": null,
+                "value": null,
+                "trust": "Untrusted",
+            }));
+            // Add meta description if available
+            let desc = node_map.values().find(|n| {
+                n.name
+                    .as_ref()
+                    .map(|name| name == "meta.description")
+                    .unwrap_or(false)
+            });
+            if let Some(desc_node) = desc {
+                fallback.push(serde_json::json!({
+                    "id": desc_node.id,
+                    "role": "text",
+                    "label": clean_label(&desc_node.label),
+                    "relevance": 0.4,
+                    "confidence": 0.25,
+                    "resonance_type": "Fallback",
+                    "causal_boost": 0.0,
+                    "html_id": null,
+                    "name": "meta.description",
+                    "action": null,
+                    "value": null,
+                    "trust": "Untrusted",
+                }));
+            }
+            fallback
+        } else {
+            top_nodes
+        };
 
         let (cache_entries, cache_capacity) = resonance::cache_stats();
 
@@ -1616,6 +2002,78 @@ pub fn crfr_feedback(url: &str, goal: &str, successful_node_ids_json: &str) -> S
     .to_string()
 }
 
+/// Per-user feedback: isolates causal memory per user_id.
+/// user_id=0 falls back to global feedback (backward compatible).
+pub fn crfr_feedback_user(
+    url: &str,
+    goal: &str,
+    successful_node_ids_json: &str,
+    user_id: i64,
+) -> String {
+    // user_id=0 is rejected — users must never train global weights
+    if user_id <= 0 {
+        return r#"{"status":"error","message":"user_id required. Anonymous feedback disabled."}"#
+            .to_string();
+    }
+    let ids: Vec<u32> = serde_json::from_str(successful_node_ids_json).unwrap_or_default();
+    if ids.is_empty() {
+        return r#"{"status":"no_ids"}"#.to_string();
+    }
+
+    // Find global field to get node labels for the boosted nodes
+    // Try multiple URL variants (with/without trailing slash, www)
+    let url_variants = {
+        let mut v = vec![url.to_string()];
+        // Add/remove trailing slash
+        if url.ends_with('/') {
+            v.push(url.trim_end_matches('/').to_string());
+        } else {
+            v.push(format!("{}/", url));
+        }
+        v
+    };
+    let field = url_variants.iter().find_map(|u| {
+        resonance::get_field_for_feedback(u, true)
+            .or_else(|| resonance::get_field_for_feedback(u, false))
+    });
+    let field = match field {
+        Some(f) => f,
+        None => {
+            eprintln!(
+                "[FEEDBACK_USER] NO FIELD FOUND — global cache empty for url={}",
+                url
+            );
+            return r#"{"status":"no_field","message":"No cached field. Run parse_crfr first."}"#
+                .to_string();
+        }
+    };
+
+    // Collect labels for the feedback nodes
+    let goal_hv = scoring::hdc::Hypervector::from_text_ngrams(goal);
+    let mut node_labels: Vec<(u32, &str)> = Vec::new();
+    for &nid in &ids {
+        if let Some(label) = field.node_labels_ref().get(&nid) {
+            node_labels.push((nid, label));
+        }
+    }
+
+    if node_labels.is_empty() {
+        return r#"{"status":"error","message":"No matching node labels found for given IDs"}"#
+            .to_string();
+    }
+
+    // Store user boost by label hash — simple, direct, no transfer needed
+    resonance::record_user_boost(url, user_id, &node_labels, &goal_hv);
+
+    serde_json::json!({
+        "status": "ok",
+        "nodes_updated": ids.len(),
+        "user_id": user_id,
+        "isolated": true,
+    })
+    .to_string()
+}
+
 /// Implicit feedback: infer useful nodes from LLM response text.
 /// Closes the learning loop without explicit node ID tracking.
 #[wasm_bindgen]
@@ -1632,6 +2090,30 @@ pub fn crfr_implicit_feedback(url: &str, goal: &str, response_text: &str) -> Str
     field.implicit_feedback(goal, response_text);
     resonance::save_field(&field);
     serde_json::json!({"status": "ok", "url_hash": field.url_hash}).to_string()
+}
+
+/// Clear a specific URL's cached CRFR field (RAM + SQLite).
+/// Use when a cached field is corrupted or you want to force a fresh parse.
+#[wasm_bindgen]
+pub fn crfr_clear(url: &str) -> String {
+    let cleared = resonance::clear_field(url);
+    serde_json::json!({
+        "status": if cleared { "cleared" } else { "not_found" },
+        "url": url,
+    })
+    .to_string()
+}
+
+/// Clear ALL cached CRFR fields. Returns count of entries removed.
+/// Use with caution — all causal learning is lost.
+#[wasm_bindgen]
+pub fn crfr_clear_all() -> String {
+    let count = resonance::clear_all_fields();
+    serde_json::json!({
+        "status": "cleared",
+        "entries_removed": count,
+    })
+    .to_string()
 }
 
 /// Run multiple goal variants through CRFR and merge results.

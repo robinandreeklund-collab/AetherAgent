@@ -147,6 +147,15 @@ struct CrfrFeedbackParams {
     goal: String,
     /// Array of node IDs that contained the correct answer
     successful_node_ids: Vec<u32>,
+    /// User ID for isolated feedback (required — no anonymous global training)
+    #[serde(default)]
+    user_id: i64,
+}
+
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+struct CrfrClearParams {
+    /// URL to clear cached CRFR field for. Pass "all" to clear all cached fields.
+    url: String,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -724,7 +733,20 @@ impl AetherMcpServer {
     fn crfr_feedback(&self, Parameters(params): Parameters<CrfrFeedbackParams>) -> String {
         let ids_json =
             serde_json::to_string(&params.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
-        aether_agent::crfr_feedback(&params.url, &params.goal, &ids_json)
+        // Always per-user — never train global weights from user input
+        aether_agent::crfr_feedback_user(&params.url, &params.goal, &ids_json, params.user_id)
+    }
+
+    #[tool(
+        name = "crfr_clear",
+        description = "Clear a URL's cached CRFR field (causal memory). Use when:\n- A cached field is corrupted (causing errors)\n- You want to force a completely fresh parse\n- You want to reset learned feedback for a URL\n\nPass url='all' to clear ALL cached fields (use with caution — all causal learning is lost)."
+    )]
+    fn crfr_clear(&self, Parameters(params): Parameters<CrfrClearParams>) -> String {
+        if params.url == "all" {
+            aether_agent::crfr_clear_all()
+        } else {
+            aether_agent::crfr_clear(&params.url)
+        }
     }
 
     #[tool(
@@ -1614,14 +1636,110 @@ async fn handle_parse_crfr(
 
         aether_agent::parse_crfr_from_tree_js(&tree, goal, &current_url, top_n, output_format, true)
     } else {
-        aether_agent::parse_crfr(
-            &current_html,
-            goal,
-            &current_url,
-            top_n,
-            false,
-            output_format,
-        )
+        // Phase 3.3: XHR → CRFR pipeline — detect XHR URLs and auto-fetch if
+        // the page content is thin (likely SPA that loads data via AJAX).
+        //
+        // Wrap synchronous parse in spawn_blocking + catch_unwind to prevent
+        // panics (from large/malformed pages) from crashing the server task.
+        let parse_html = current_html.clone();
+        let parse_goal = goal.to_string();
+        let parse_url = current_url.clone();
+        let parse_top_n = top_n;
+        let parse_fmt = output_format.to_string();
+
+        let parse_result = tokio::task::spawn_blocking(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let tree =
+                    aether_agent::build_tree_for_crfr(&parse_html, &parse_goal, &parse_url, false);
+                let result_str = aether_agent::parse_crfr_from_tree_js(
+                    &tree,
+                    &parse_goal,
+                    &parse_url,
+                    parse_top_n,
+                    &parse_fmt,
+                    false,
+                );
+                (result_str, tree.pending_fetch_urls)
+            }))
+        })
+        .await;
+
+        let (result_str, pending_urls) = match parse_result {
+            Ok(Ok((r, urls))) => (r, urls),
+            Ok(Err(_panic)) => {
+                let err = serde_json::json!({
+                    "error": format!("parse panicked for {} (page may be too large)", current_url),
+                    "url": current_url,
+                    "html_size": current_html.len(),
+                    "suggested_action": "retry_with_smaller_page",
+                });
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    err.to_string(),
+                )]);
+            }
+            Err(_join_err) => {
+                let err = serde_json::json!({
+                    "error": "parse task failed",
+                    "url": current_url,
+                });
+                return rmcp::model::CallToolResult::error(vec![rmcp::model::Content::text(
+                    err.to_string(),
+                )]);
+            }
+        };
+
+        // Check if results are thin and XHR URLs exist
+        let is_thin = if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result_str) {
+            let node_count = parsed
+                .get("node_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            node_count < 3
+        } else {
+            false
+        };
+
+        if is_thin && !pending_urls.is_empty() {
+            // Auto-fetch top 3 XHR URLs and re-parse with their data
+            let mut api_responses = std::collections::HashMap::new();
+            let config = aether_agent::types::FetchConfig::default();
+            for xhr_url in pending_urls.iter().take(3) {
+                if aether_agent::fetch::validate_url(xhr_url).is_err() {
+                    continue;
+                }
+                if let Ok(resp) = aether_agent::fetch::fetch_page(xhr_url, &config).await {
+                    api_responses.insert(
+                        xhr_url.clone(),
+                        aether_agent::dom_bridge::FetchResponse {
+                            status: resp.status_code,
+                            content_type: resp.content_type.clone(),
+                            body: resp.body,
+                            headers: std::collections::HashMap::new(),
+                        },
+                    );
+                }
+            }
+            if !api_responses.is_empty() {
+                let enriched_tree = aether_agent::build_tree_for_crfr_with_fetch(
+                    &current_html,
+                    goal,
+                    &current_url,
+                    api_responses,
+                );
+                aether_agent::parse_crfr_from_tree_js(
+                    &enriched_tree,
+                    goal,
+                    &current_url,
+                    top_n,
+                    output_format,
+                    true,
+                )
+            } else {
+                result_str
+            }
+        } else {
+            result_str
+        }
     };
 
     // ── Link-following: om relevanta länkar hittades, hämta och merga ──────
@@ -1758,6 +1876,7 @@ async fn follow_relevant_links(
         if let Ok(lp) = serde_json::from_str::<serde_json::Value>(&link_result) {
             if let Some(ln) = lp.get("nodes").and_then(|n| n.as_array()) {
                 let mut content: Vec<serde_json::Value> = Vec::new();
+                let mut successful_ids: Vec<u32> = Vec::new();
                 for node in ln.iter().take(2) {
                     let nl = node.get("label").and_then(|v| v.as_str()).unwrap_or("");
                     let nr = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
@@ -1781,6 +1900,10 @@ async fn follow_relevant_links(
                     {
                         continue;
                     }
+                    // Phase 3.1: Collect successful node IDs for auto-feedback
+                    if let Some(id) = node.get("id").and_then(|v| v.as_u64()) {
+                        successful_ids.push(id as u32);
+                    }
                     let mut n = node.clone();
                     if let Some(obj) = n.as_object_mut() {
                         obj.insert("source".to_string(), serde_json::json!("followed_link"));
@@ -1789,6 +1912,9 @@ async fn follow_relevant_links(
                     content.push(n);
                 }
                 if !content.is_empty() {
+                    // Auto-feedback disabled — global weights must not be
+                    // trained by user activity. Per-user feedback only via
+                    // explicit crfr_feedback calls with user_id.
                     replacements.insert(*idx, content);
                     followed_urls.push(format!("{}: {}", label, fetch_url));
                 }
@@ -1815,6 +1941,15 @@ async fn follow_relevant_links(
             new_nodes.push(node.clone());
         }
     }
+
+    // Phase 3.2: Cross-page relevance normalization — re-sort all nodes by
+    // relevance so that high-quality content from followed links can outrank
+    // lower-quality content from the original page.
+    new_nodes.sort_by(|a, b| {
+        let ra = a.get("relevance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let rb = b.get("relevance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut merged = parsed.clone();
     if let Some(obj) = merged.as_object_mut() {
@@ -2769,9 +2904,23 @@ impl ServerHandler for AetherMcpServer {
                 Ok(result)
             }
             "parse_crfr" => {
-                let args = request.arguments.as_ref();
-                let result = handle_parse_crfr(args).await;
-                Ok(result)
+                let args = request.arguments.as_ref().cloned();
+                // Wrap in AssertUnwindSafe + catch_unwind via spawn to prevent
+                // panics from crashing the server. CNN (3MB+), Spiegel (2MB+)
+                // can cause stack overflow in parser.
+                let handle = tokio::spawn(async move { handle_parse_crfr(args.as_ref()).await });
+                match handle.await {
+                    Ok(result) => Ok(result),
+                    Err(e) => {
+                        let err_msg = format!("parse_crfr panicked: {e}");
+                        eprintln!("[MCP] {}", err_msg);
+                        Ok(rmcp::model::CallToolResult::error(vec![
+                            rmcp::model::Content::text(
+                                serde_json::json!({"error": err_msg}).to_string(),
+                            ),
+                        ]))
+                    }
+                }
             }
             "fetch_parse" => {
                 let args = request.arguments.as_ref();
@@ -3074,6 +3223,62 @@ fn dispatch_tool_sync(_server: &AetherMcpServer, name: &str, args: &serde_json::
             let height = u32_or("height", 800);
             aether_agent::render_with_js(s("html"), s("js_code"), s("base_url"), width, height)
         }
+        // parse_crfr: synkron med html, async med url
+        "parse_crfr" => {
+            let html = s("html");
+            if html.is_empty() {
+                // Needs async fetch — delegate to async dispatcher
+                String::new()
+            } else {
+                let broad = s("broad_mode");
+                if broad.is_empty() {
+                    aether_agent::parse_crfr(
+                        html,
+                        s("goal"),
+                        s("url"),
+                        u32_or("top_n", 20),
+                        obj.and_then(|o| o.get("run_js"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        s("output_format"),
+                    )
+                } else {
+                    aether_agent::parse_crfr_broad(
+                        html,
+                        s("goal"),
+                        s("url"),
+                        u32_or("top_n", 20),
+                        obj.and_then(|o| o.get("run_js"))
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        s("output_format"),
+                        broad,
+                    )
+                }
+            }
+        }
+        "parse_crfr_multi" => {
+            let html = s("html");
+            if html.is_empty() {
+                String::new()
+            } else {
+                let goals_json = json_str("goals");
+                aether_agent::parse_crfr_multi(html, &goals_json, s("url"), u32_or("top_n", 20))
+            }
+        }
+        "crfr_feedback" => {
+            let ids_json = json_str("successful_node_ids");
+            let user_id = args["user_id"].as_i64().unwrap_or(0);
+            aether_agent::crfr_feedback_user(s("url"), s("goal"), &ids_json, user_id)
+        }
+        "crfr_clear" => {
+            let url = s("url");
+            if url == "all" {
+                aether_agent::crfr_clear_all()
+            } else {
+                aether_agent::crfr_clear(&url)
+            }
+        }
         // Async-verktyg hanteras inte här — returnera tom markör
         "fetch_parse" | "fetch_click" | "fetch_extract" | "fetch_stream_parse" | "fetch_search"
         | "fetch_vision" | "vision_parse" | "parse_screenshot" => String::new(),
@@ -3117,6 +3322,16 @@ async fn dispatch_tool_async(
         "vision_parse" | "parse_screenshot" => {
             let result = handle_vision_tool(name, obj, server.vision_model_bytes.as_deref());
             extract_text_from_call_result(&result)
+        }
+        "parse_crfr" => {
+            let args_owned = obj.cloned();
+            let handle = tokio::spawn(async move { handle_parse_crfr(args_owned.as_ref()).await });
+            match handle.await {
+                Ok(result) => extract_text_from_call_result(&result),
+                Err(e) => {
+                    serde_json::json!({"error": format!("parse_crfr panicked: {e}")}).to_string()
+                }
+            }
         }
         _ => format!(r#"{{"error":"Unknown async tool: {}"}}"#, name),
     }
@@ -3268,8 +3483,19 @@ async fn handle_mcp_ws(mut socket: axum::extract::ws::WebSocket, server: Arc<Aet
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+// html5ever + ArenaDom recursive parsing requires deep stack for
+// heavily nested HTML (CNN 400+ divs, Spiegel 300+ sections).
+// Default tokio worker stack is 2MB which overflows. Set to 8MB.
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .thread_stack_size(8 * 1024 * 1024) // 8MB stack per worker
+        .enable_all()
+        .build()?;
+    runtime.block_on(async_main())
+}
+
+async fn async_main() -> Result<(), Box<dyn std::error::Error>> {
     // Tolka kommandoradsargument: --ws / --websocket aktiverar WebSocket-läge
     let args: Vec<String> = std::env::args().collect();
     let use_ws = args.iter().any(|a| a == "--ws" || a == "--websocket")
@@ -3297,7 +3523,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("        discover_webmcp, ground_semantic_tree, match_bbox_iou,");
     eprintln!("        create_collab_store, register_collab_agent, publish_collab_delta, fetch_collab_deltas,");
     eprintln!("        detect_xhr_urls, parse_screenshot, vision_parse, fetch_vision,");
-    eprintln!("        tiered_screenshot, tier_stats, search, fetch_search, render_with_js");
+    eprintln!("        tiered_screenshot, tier_stats, search, fetch_search, render_with_js,");
+    eprintln!("        crfr_clear, crfr_feedback, crfr_save, crfr_load, crfr_transfer");
 
     if use_ws {
         use axum::{extract::WebSocketUpgrade, routing::get, Router};

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Usage Dashboard — Slaash Developer Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);--text:#f5f5f5;--muted:#888;--accent:#3b82f6;--green:#22c55e;--red:#ef4444;--amber:#f59e0b;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;min-height:100vh}
+a{color:var(--muted);text-decoration:none}
+a:hover{color:var(--text)}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.5rem;text-align:center}
+.stat-card .num{font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+.stat-card .label{font-size:.78rem;color:var(--muted);margin-top:.25rem}
+select option{background:var(--surface);color:var(--text)}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+
+/* Responsive */
+@media(max-width:768px){
+  nav{padding:0 .75rem !important}
+  nav>div{gap:1rem !important;font-size:.8rem !important}
+  main{padding:1.5rem 1rem !important}
+  h1{font-size:1.35rem !important}
+  .stat-grid{grid-template-columns:repeat(2,1fr) !important;gap:.6rem !important}
+  .stat-card{padding:1rem}
+  .stat-card .num{font-size:1.35rem}
+  .stat-card .label{font-size:.7rem}
+  .dash-header{flex-direction:column !important;align-items:flex-start !important;gap:.75rem !important}
+  .dash-controls{width:100%;justify-content:space-between !important}
+  .endpoint-label{min-width:80px !important;font-size:.68rem !important}
+  .recent-row{flex-wrap:wrap !important;gap:.25rem .5rem !important;padding:.5rem .5rem !important}
+  .recent-row .endpoint{margin:0 !important;font-size:.72rem !important}
+  .recent-row .time-col{min-width:auto !important}
+  .recent-row .tok-col{min-width:auto !important}
+  input[type="email"],input[type="password"]{max-width:100% !important}
+}
+@media(max-width:420px){
+  nav>div a:not([style*="color:#fff"]){display:none}
+  .stat-grid{grid-template-columns:1fr 1fr !important}
+  .stat-card:last-child{grid-column:1 / -1}
+  .stat-card .num{font-size:1.15rem}
+}
+</style>
+</head>
+<body>
+<nav style="height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid var(--border);backdrop-filter:blur(16px);background:rgba(10,10,10,0.85)">
+  <a href="/" style="font-size:1.25rem;font-weight:700;color:#fff">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  <div style="display:flex;gap:2rem;font-size:.875rem">
+    <a href="/playground">Playground</a>
+    <a href="/keys">API Keys</a>
+    <a href="/usage" style="color:#fff">Usage</a>
+    <a href="/docs">Docs</a>
+  </div>
+</nav>
+
+<main style="max-width:900px;margin:0 auto;padding:3rem 2rem">
+  <div id="login-prompt">
+    <h1 style="font-size:1.75rem;font-weight:700;margin-bottom:.5rem">Usage Dashboard</h1>
+    <p style="color:var(--muted);margin-bottom:1.5rem">Log in to view your API usage.</p>
+    <div style="margin-bottom:1rem"><input type="email" id="usage-email" placeholder="Email" style="width:100%;max-width:300px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-size:.85rem;outline:none"></div>
+    <div style="margin-bottom:1rem"><input type="password" id="usage-password" placeholder="Password" style="width:100%;max-width:300px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-size:.85rem;outline:none"></div>
+    <button onclick="loginAndLoad()" style="padding:.7rem 1.5rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;background:var(--accent);color:#fff;cursor:pointer">Log In</button>
+    <div id="login-msg" style="margin-top:.75rem;font-size:.82rem"></div>
+  </div>
+
+  <div id="dashboard" style="display:none">
+    <div class="dash-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2rem">
+      <h1 style="font-size:1.75rem;font-weight:700">Usage Dashboard</h1>
+      <div class="dash-controls" style="display:flex;gap:.75rem;align-items:center">
+        <select id="period" onchange="loadUsage()" style="appearance:none;background:var(--surface) url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E&quot;) no-repeat right .7rem center;background-size:10px;padding:.5rem 2.2rem .5rem .85rem;border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:var(--text);font-size:.82rem;font-family:var(--font);cursor:pointer;outline:none">
+          <option value="1">Last hour</option>
+          <option value="24" selected>Last 24 hours</option>
+          <option value="168">Last 7 days</option>
+          <option value="720">Last 30 days</option>
+        </select>
+        <span id="dash-email" style="font-size:.78rem;color:var(--muted)"></span>
+      </div>
+    </div>
+
+    <!-- Stats cards -->
+    <div class="stat-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-bottom:2rem">
+      <div class="stat-card"><div class="num" id="stat-total" style="color:var(--accent)">0</div><div class="label">Requests (period)</div></div>
+      <div class="stat-card"><div class="num" id="stat-remaining" style="color:var(--green)">-</div><div class="label">Remaining today</div></div>
+      <div class="stat-card"><div class="num" id="stat-tokens-in" style="color:var(--amber)">0</div><div class="label">Tokens in</div></div>
+      <div class="stat-card"><div class="num" id="stat-tokens-out" style="color:var(--green)">0</div><div class="label">Tokens out</div></div>
+      <div class="stat-card"><div class="num" id="stat-avg-time">0</div><div class="label">Avg response (ms)</div></div>
+    </div>
+
+    <!-- Endpoint breakdown -->
+    <h3 style="font-size:.95rem;font-weight:600;margin-bottom:.75rem">Requests by endpoint</h3>
+    <div id="endpoint-bars" style="margin-bottom:2rem"></div>
+
+    <!-- Recent requests -->
+    <h3 style="font-size:.95rem;font-weight:600;margin-bottom:.75rem">Recent requests</h3>
+    <div id="recent-list" style="max-height:400px;overflow-y:auto"></div>
+  </div>
+</main>
+
+<script>
+let usageUser = null;
+
+// Restore session
+try {
+  const saved = localStorage.getItem('slaash_user');
+  if (saved) {
+    usageUser = JSON.parse(saved);
+    document.getElementById('login-prompt').style.display = 'none';
+    document.getElementById('dashboard').style.display = '';
+    document.getElementById('dash-email').textContent = usageUser.email;
+    loadUsage();
+  }
+} catch(e) {}
+
+async function loginAndLoad() {
+  const email = document.getElementById('usage-email').value;
+  const password = document.getElementById('usage-password').value;
+  try {
+    const res = await fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const data = await res.json();
+    if (data.status === 'ok') {
+      usageUser = data.user;
+      localStorage.setItem('slaash_user', JSON.stringify(data.user));
+      if (data.session_token) localStorage.setItem('slaash_session_token', data.session_token);
+      document.getElementById('login-prompt').style.display = 'none';
+      document.getElementById('dashboard').style.display = '';
+      document.getElementById('dash-email').textContent = usageUser.email;
+      loadUsage();
+    } else {
+      document.getElementById('login-msg').innerHTML = '<span style="color:var(--red)">' + data.message + '</span>';
+    }
+  } catch(e) { document.getElementById('login-msg').innerHTML = '<span style="color:var(--red)">' + e.message + '</span>'; }
+}
+
+async function loadUsage() {
+  if (!usageUser) return;
+  const hours = parseInt(document.getElementById('period').value) || 24;
+  const res = await fetch('/api/auth/usage', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:usageUser.id,since_hours:hours})});
+  const data = await res.json();
+  const entries = data.entries || [];
+
+  // Fetch key data for remaining count
+  try {
+    const keysRes = await fetch('/api/auth/keys/list', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:usageUser.id})});
+    const keysData = await keysRes.json();
+    const todayTotal = (keysData.keys || []).reduce((s, k) => s + (k.requests_today || 0), 0);
+    const remaining = Math.max(0, 1000 - todayTotal);
+    document.getElementById('stat-remaining').textContent = remaining.toLocaleString();
+    const remEl = document.getElementById('stat-remaining');
+    if (remaining < 100) remEl.style.color = 'var(--red)';
+    else if (remaining < 300) remEl.style.color = 'var(--amber)';
+    else remEl.style.color = 'var(--green)';
+  } catch(e) {}
+
+  // Stats
+  document.getElementById('stat-total').textContent = entries.length.toLocaleString();
+  const tokIn = entries.reduce((s,e) => s + (e.tokens_in||0), 0);
+  const tokOut = entries.reduce((s,e) => s + (e.tokens_out||0), 0);
+  const avgTime = entries.length > 0 ? Math.round(entries.reduce((s,e) => s + (e.response_time_ms||0), 0) / entries.length) : 0;
+  document.getElementById('stat-tokens-in').textContent = tokIn.toLocaleString();
+  document.getElementById('stat-tokens-out').textContent = tokOut.toLocaleString();
+  document.getElementById('stat-avg-time').textContent = avgTime;
+
+  // Endpoint breakdown
+  const byEndpoint = {};
+  entries.forEach(e => { byEndpoint[e.endpoint] = (byEndpoint[e.endpoint]||0) + 1; });
+  const sorted = Object.entries(byEndpoint).sort((a,b) => b[1] - a[1]);
+  const maxCount = sorted.length > 0 ? sorted[0][1] : 1;
+  document.getElementById('endpoint-bars').innerHTML = sorted.map(([ep, count]) => {
+    const pct = (count / maxCount * 100).toFixed(0);
+    return '<div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.4rem">'
+      + '<span class="endpoint-label" style="min-width:120px;text-align:right;font-size:.75rem;color:var(--muted);font-family:var(--mono)">' + ep + '</span>'
+      + '<div style="flex:1;height:22px;background:rgba(255,255,255,0.03);border-radius:4px;overflow:hidden">'
+      + '<div style="width:' + pct + '%;height:100%;background:linear-gradient(90deg,var(--accent),#2563eb);border-radius:4px;display:flex;align-items:center;padding:0 .5rem;font-size:.68rem;font-weight:600;color:#fff">' + count + '</div>'
+      + '</div></div>';
+  }).join('') || '<div style="color:var(--muted);font-size:.85rem">No requests in this period.</div>';
+
+  // Recent list
+  document.getElementById('recent-list').innerHTML = entries.slice(0,50).map(e => {
+    const d = new Date(e.timestamp * 1000);
+    const time = d.toLocaleTimeString();
+    return '<div class="recent-row" style="display:flex;align-items:center;justify-content:space-between;padding:.45rem .75rem;border-bottom:1px solid rgba(255,255,255,0.03);font-size:.78rem">'
+      + '<span class="time-col" style="color:var(--muted);min-width:70px">' + time + '</span>'
+      + '<span class="endpoint" style="font-family:var(--mono);color:var(--text);flex:1;margin:0 1rem">' + e.endpoint + '</span>'
+      + '<span class="time-col" style="color:var(--muted);min-width:60px;text-align:right">' + (e.response_time_ms||0) + 'ms</span>'
+      + '<span class="tok-col" style="color:var(--green);min-width:80px;text-align:right;font-family:var(--mono)">' + (e.tokens_out||0) + ' tok</span>'
+      + '</div>';
+  }).join('') || '<div style="color:var(--muted);font-size:.85rem;padding:1rem">No requests yet.</div>';
+}
+</script>
+<script src="/components.js"></script>
+</body>
+</html>

@@ -20,10 +20,10 @@ const POOL_MAX_READERS: usize = 4;
 /// Connection pool: 1 writer + N readers for concurrent access.
 /// Writer is protected by Mutex (SQLite requires single-writer).
 /// Readers are pooled in a Mutex<Vec> — take/return pattern.
-struct ConnectionPool {
-    writer: Option<Connection>,
-    readers: Vec<Connection>,
-    db_path: String,
+pub struct ConnectionPool {
+    pub writer: Option<Connection>,
+    pub readers: Vec<Connection>,
+    pub db_path: String,
     /// OPT-D1: Round-robin counter for reader selection.
     /// Atomic so it can be incremented without mutable borrow.
     reader_idx: AtomicUsize,
@@ -41,7 +41,7 @@ impl ConnectionPool {
 
     /// OPT-D1: Round-robin reader selection. Distributes reads across all
     /// reader connections instead of always using readers[0].
-    fn next_reader(&self) -> Option<&Connection> {
+    pub fn next_reader(&self) -> Option<&Connection> {
         if self.readers.is_empty() {
             return self.writer.as_ref();
         }
@@ -136,6 +136,11 @@ pub fn init(db_path: &str) -> Result<(), String> {
 }
 
 /// Check if persistence is initialized.
+/// Get DB lock for external modules (auth.rs)
+pub fn get_db_lock() -> Option<std::sync::MutexGuard<'static, ConnectionPool>> {
+    DB.lock().ok()
+}
+
 pub fn is_initialized() -> bool {
     DB.lock().map(|pool| pool.writer.is_some()).unwrap_or(false)
 }
@@ -190,7 +195,10 @@ pub fn load_field(url_hash: u64) -> Option<ResonanceField> {
             .ok()?
     }; // Lock released here
 
-    serde_json::from_slice(&data).ok()
+    let mut field: ResonanceField = serde_json::from_slice(&data).ok()?;
+    // Regenerate text_hv (skipped in serialization to save ~50% memory)
+    field.regenerate_text_hvs();
+    Some(field)
 }
 
 /// Load all resonance fields (for startup warm-load).
@@ -204,15 +212,14 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
         None => return vec![],
     };
 
-    let mut stmt = match conn
-        .prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 256")
-    {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[PERSIST] load_all_fields prepare error: {e}");
-            return vec![];
-        }
-    };
+    let mut stmt =
+        match conn.prepare("SELECT data FROM resonance_fields ORDER BY updated_at DESC LIMIT 32") {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[PERSIST] load_all_fields prepare error: {e}");
+                return vec![];
+            }
+        };
 
     let rows = match stmt.query_map([], |row| {
         let data: Vec<u8> = row.get(0)?;
@@ -226,24 +233,56 @@ pub fn load_all_fields() -> Vec<ResonanceField> {
     let mut failed = 0;
     let result: Vec<ResonanceField> = rows
         .filter_map(|r| r.ok())
-        .filter_map(|data| match serde_json::from_slice(&data) {
-            Ok(field) => {
-                loaded += 1;
-                Some(field)
-            }
-            Err(e) => {
-                failed += 1;
-                if failed <= 3 {
-                    eprintln!("[PERSIST] load_all_fields deserialize error: {e}");
+        .filter_map(
+            |data| match serde_json::from_slice::<ResonanceField>(&data) {
+                Ok(mut field) => {
+                    field.regenerate_text_hvs();
+                    loaded += 1;
+                    Some(field)
                 }
-                None
-            }
-        })
+                Err(e) => {
+                    failed += 1;
+                    if failed <= 3 {
+                        eprintln!("[PERSIST] load_all_fields deserialize error: {e}");
+                    }
+                    None
+                }
+            },
+        )
         .collect();
     if failed > 0 {
         eprintln!("[PERSIST] load_all_fields: {loaded} loaded, {failed} failed deserialization");
     }
     result
+}
+
+/// Delete a specific field by URL hash.
+pub fn delete_field(url_hash: u64) {
+    let pool = match DB.lock() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let conn = match pool.writer.as_ref() {
+        Some(c) => c,
+        None => return,
+    };
+    let _ = conn.execute(
+        "DELETE FROM resonance_fields WHERE url_hash = ?1",
+        params![url_hash as i64],
+    );
+}
+
+/// Delete ALL stored fields.
+pub fn clear_all_fields() {
+    let pool = match DB.lock() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let conn = match pool.writer.as_ref() {
+        Some(c) => c,
+        None => return,
+    };
+    let _ = conn.execute("DELETE FROM resonance_fields", []);
 }
 
 /// Delete old fields (older than max_age_ms).
@@ -520,19 +559,17 @@ pub fn restore() {
         return;
     }
 
-    // Ladda domain profiles
+    // Ladda domain profiles (small: ~1KB each, safe to preload all)
     let profiles = load_all_domain_profiles();
     let profile_count = profiles.len();
     crate::resonance::import_domain_profiles(profiles);
 
-    // Ladda cachade resonance fields
-    let fields = load_all_fields();
-    let field_count = fields.len();
-    crate::resonance::import_cached_fields(fields);
-
+    // Resonance fields are NOT preloaded — lazy-load from SQLite on demand.
+    // This keeps RSS at ~30MB instead of ~300MB+ at startup.
+    // Fields are loaded in get_or_build_field_with_variant() when queried.
     eprintln!(
-        "[PERSIST] Restored: {} domain profiles, {} resonance fields",
-        profile_count, field_count
+        "[PERSIST] Restored: {} domain profiles (fields: lazy-load on demand)",
+        profile_count
     );
 }
 
@@ -616,6 +653,7 @@ mod tests {
             },
             concepts: std::collections::HashMap::new(),
             field_count: 3,
+            answer_zone: Default::default(),
         };
 
         save_domain_profile(12345, &profile);

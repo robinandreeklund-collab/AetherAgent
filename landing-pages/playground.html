@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>Slaash API Playground — Developer Tools</title>
+<meta name="description" content="Interactive API playground for Slaash. Try extract, search, crawl, and more — live, with code generation.">
+<link rel="canonical" href="https://www.slaash.ai/playground">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0a;--surface:#111;--surface2:#161616;--border:rgba(255,255,255,0.08);
+  --text:#f5f5f5;--muted:#888;--accent:#3b82f6;--accent-glow:rgba(59,130,246,0.15);
+  --green:#22c55e;--red:#ef4444;--amber:#f59e0b;
+  --font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace;
+  --sidebar-w:220px;
+}
+html{font-size:16px}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;min-height:100vh}
+a{color:var(--muted);text-decoration:none;transition:color .2s}
+a:hover{color:var(--text)}
+
+/* TOP NAV — matches landing page */
+.top-nav{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid var(--border);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.85)}
+.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}
+.top-nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}
+.top-nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease}
+.top-nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}
+.top-nav-links a:not(.btn-sm):hover{color:#fff}
+.top-nav-links a:not(.btn-sm):hover::after{width:100%}
+.top-nav-links a.active{color:#fff}
+.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--green);margin-right:5px}
+.btn-sm{padding:.4rem 1rem;border-radius:7px;font-size:.78rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s}
+.btn-sm:hover{background:#2563eb}
+
+/* LAYOUT */
+.app{display:flex;height:calc(100vh - 52px)}
+
+/* SIDEBAR */
+.sidebar{width:var(--sidebar-w);border-right:1px solid var(--border);background:var(--surface);padding:1rem 0;flex-shrink:0;overflow-y:auto}
+.sidebar-section{padding:0 .75rem;margin-bottom:1.25rem}
+.sidebar-label{font-size:.65rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:0 .5rem;margin-bottom:.4rem}
+.sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.45rem .75rem;border-radius:7px;font-size:.82rem;color:var(--muted);cursor:pointer;transition:all .15s}
+.sidebar-link:hover{background:rgba(255,255,255,0.04);color:var(--text)}
+.sidebar-link.active{background:var(--accent-glow);color:#fff;font-weight:500}
+.sidebar-icon{font-size:.9rem;width:1.2rem;text-align:center}
+
+/* MAIN AREA */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* TOOLBAR */
+.toolbar{display:flex;align-items:center;gap:1rem;padding:.6rem 1.25rem;border-bottom:1px solid var(--border);background:var(--surface2)}
+.toolbar h2{font-size:.95rem;font-weight:600;flex:1}
+.toolbar .api-ver{font-size:.7rem;color:var(--muted);font-family:var(--mono);background:rgba(255,255,255,0.05);padding:.2rem .5rem;border-radius:4px}
+
+/* TABS */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1.25rem}
+.tab{padding:.55rem 1.1rem;font-size:.8rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:#fff;border-bottom-color:var(--accent)}
+
+/* SPLIT PANELS */
+.split{display:flex;flex:1;overflow:hidden}
+.panel-left{flex:1;padding:1.25rem;overflow-y:auto;border-right:1px solid var(--border)}
+.panel-right{flex:1;display:flex;flex-direction:column;overflow:hidden}
+
+/* FORM */
+.field{margin-bottom:1rem}
+.field label{display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:.35rem}
+.field input,.field textarea,.field select{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none;transition:border-color .2s}
+.field input:focus,.field textarea:focus{border-color:var(--accent)}
+.field-row{display:flex;gap:.75rem}
+.field-row .field{flex:1}
+.btn-run{width:100%;padding:.7rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s;margin-top:.25rem}
+.btn-run:hover{background:#2563eb}
+.btn-run:disabled{opacity:.5;cursor:not-allowed}
+.advanced-toggle{font-size:.75rem;color:var(--accent);cursor:pointer;margin-bottom:.75rem;display:inline-block}
+.advanced-opts{display:none}
+.advanced-opts.visible{display:block}
+.examples{display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1rem}
+.example-chip{padding:.25rem .65rem;border-radius:14px;font-size:.7rem;font-weight:500;background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.15);color:#93b4f5;cursor:pointer;transition:all .15s}
+.example-chip:hover{background:rgba(59,130,246,0.18);border-color:rgba(59,130,246,0.3)}
+
+/* RESPONSE PANEL */
+.response-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1rem}
+.response-tab{padding:.45rem .9rem;font-size:.75rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.response-tab:hover{color:var(--text)}
+.response-tab.active{color:#fff;border-bottom-color:var(--green)}
+.response-body{flex:1;overflow-y:auto;padding:1rem;font-family:var(--mono);font-size:.78rem;white-space:pre-wrap;color:#c9d1d9}
+.response-meta{display:flex;gap:1rem;padding:.5rem 1rem;border-top:1px solid var(--border);font-size:.7rem;color:var(--muted);background:var(--surface2)}
+.response-meta .val{color:var(--green);font-weight:600}
+
+/* CODE PANEL */
+.code-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface2);padding:0 1rem}
+.code-tab{padding:.45rem .9rem;font-size:.72rem;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent}
+.code-tab:hover{color:var(--text)}
+.code-tab.active{color:#fff;border-bottom-color:var(--accent)}
+.code-body{flex:1;overflow-y:auto;padding:1rem;font-family:var(--mono);font-size:.75rem;white-space:pre-wrap;color:#c9d1d9;background:var(--bg)}
+
+/* LOADING */
+.loading-bar{height:2px;background:var(--accent);position:absolute;top:0;left:0;width:0;transition:width .3s;z-index:10}
+.loading-bar.active{animation:load-progress 8s ease-out forwards}
+@keyframes load-progress{0%{width:0}50%{width:60%}90%{width:85%}100%{width:92%}}
+
+/* RESPONSIVE */
+
+/* Tablet: ≤900px */
+@media(max-width:900px){
+  .sidebar{display:none}
+  .app{flex-direction:column}
+  .main{flex:1;min-height:0}
+  .split{flex-direction:column}
+  .panel-left{border-right:none;border-bottom:1px solid var(--border);max-height:50vh;overflow-y:auto}
+  .panel-right{min-height:40vh}
+  .top-nav-links .nav-hide-mobile{display:none}
+  .top-nav-links{gap:1rem}
+  .welcome-grid{grid-template-columns:repeat(2,1fr)}
+  .welcome-limits{flex-wrap:wrap;gap:.75rem 1.5rem;justify-content:center}
+}
+
+/* Phone: ≤600px */
+@media(max-width:600px){
+  html{font-size:15px}
+  .top-nav{padding:0 .75rem;height:48px}
+  .wordmark{font-size:1.1rem}
+  .top-nav-links{gap:.6rem;font-size:.8rem}
+  .top-nav-links .nav-hide-phone{display:none}
+  .btn-sm{padding:.35rem .7rem;font-size:.72rem}
+  .app{height:auto;min-height:calc(100vh - 48px);flex-direction:column}
+  .main{overflow:visible}
+  .toolbar{padding:.5rem .75rem}
+  .toolbar h2{font-size:.85rem}
+  .toolbar .api-ver{font-size:.65rem;padding:.15rem .35rem}
+  .split{flex-direction:column;overflow:visible}
+  .panel-left{max-height:none;overflow-y:visible;padding:.75rem;border-right:none;border-bottom:1px solid var(--border)}
+  .panel-right{min-height:50vh;overflow:visible}
+  .field label{font-size:.7rem}
+  .field input,.field textarea,.field select{font-size:.85rem;padding:.6rem .75rem;border-radius:6px}
+  .field-row{flex-direction:column;gap:.5rem}
+  .btn-run{padding:.75rem;font-size:.88rem;border-radius:8px}
+  .examples{gap:.3rem}
+  .example-chip{font-size:.68rem;padding:.25rem .55rem}
+  .response-tabs{padding:0 .5rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;flex-shrink:0}
+  .response-tabs::-webkit-scrollbar{display:none}
+  .response-tab{padding:.4rem .7rem;font-size:.72rem;white-space:nowrap;flex-shrink:0}
+  .response-body{padding:.75rem;font-size:.75rem}
+  .response-meta{flex-wrap:wrap;gap:.5rem .75rem;padding:.4rem .75rem;font-size:.68rem}
+  .code-tabs{padding:0 .5rem}
+  .code-tab{padding:.4rem .7rem;font-size:.7rem}
+  .code-body{padding:.75rem;font-size:.72rem}
+  /* Welcome */
+  .welcome{position:fixed;top:48px;left:0;right:0;bottom:0;padding:1.25rem;align-items:flex-start;padding-top:2rem}
+  .welcome-inner{max-width:100%}
+  .welcome-inner h1{font-size:1.6rem}
+  .welcome-inner .sub{font-size:.88rem;margin-bottom:1.25rem}
+  .welcome-grid{grid-template-columns:1fr;gap:.6rem;margin-bottom:1.25rem}
+  .welcome-card{padding:1rem}
+  .welcome-card h3{font-size:.82rem}
+  .welcome-card p{font-size:.72rem}
+  .welcome-limits{flex-direction:column;gap:.4rem;align-items:center;margin-bottom:1.25rem;font-size:.72rem}
+  .btn-start{padding:.75rem 2rem;font-size:.92rem}
+  .btn-outline{margin-left:0;margin-top:.5rem;display:inline-block}
+  /* Feedback */
+  #feedback-nodes{max-height:160px}
+  .advanced-opts .field-row{flex-direction:column;gap:.5rem}
+}
+
+/* Small phone: ≤380px */
+@media(max-width:380px){
+  html{font-size:14px}
+  .top-nav{padding:0 .5rem}
+  .welcome-inner h1{font-size:1.35rem}
+  .panel-left{padding:.5rem}
+}
+
+/* MOBILE TAB BAR — removed, replaced by drawer */
+
+/* MOBILE DRAWER */
+.drawer-toggle{display:none;background:none;border:none;color:var(--text);font-size:1.3rem;cursor:pointer;padding:.25rem;line-height:1}
+.drawer-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;opacity:0;transition:opacity .25s ease}
+.drawer-overlay.open{display:block;opacity:1}
+.drawer{position:fixed;top:0;left:-280px;width:280px;height:100%;background:var(--surface);z-index:210;overflow-y:auto;transition:left .3s cubic-bezier(0.4,0,0.2,1);border-right:1px solid var(--border)}
+.drawer.open{left:0}
+.drawer-header{display:flex;align-items:center;justify-content:space-between;padding:.75rem 1rem;border-bottom:1px solid var(--border)}
+.drawer-header .wordmark{font-size:1.1rem}
+.drawer-close{background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;padding:.25rem}
+.drawer .sidebar-section{padding:0 .75rem;margin-bottom:1.25rem}
+.drawer .sidebar-section:first-of-type{margin-top:.5rem}
+.drawer .sidebar-label{font-size:.65rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;padding:0 .5rem;margin-bottom:.4rem}
+.drawer .sidebar-link{display:flex;align-items:center;gap:.6rem;padding:.5rem .75rem;border-radius:7px;font-size:.85rem;color:var(--muted);cursor:pointer;transition:all .15s}
+.drawer .sidebar-link:hover{background:rgba(255,255,255,0.04);color:var(--text)}
+.drawer .sidebar-link.active{background:var(--accent-glow);color:#fff;font-weight:500}
+.drawer .sidebar-icon{font-size:.9rem;width:1.2rem;text-align:center}
+.drawer-divider{height:1px;background:var(--border);margin:.5rem .75rem}
+@media(max-width:900px){
+  .drawer-toggle{display:block}
+}
+
+/* CUSTOM SCROLLBARS — dark, minimal */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2)}
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.1) transparent}
+
+/* CUSTOM SELECT/DROPDOWN — modern dark */
+.field select{appearance:none;-webkit-appearance:none;background:var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right .85rem center;background-size:10px 6px;padding-right:2.2rem;cursor:pointer}
+.field select:focus{border-color:var(--accent);outline:none}
+.field select option{background:var(--surface);color:var(--text);padding:.5rem}
+
+/* WELCOME PANEL */
+.welcome{position:absolute;inset:0;z-index:50;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:2rem;overflow-y:auto}
+.welcome.hidden{display:none}
+.welcome-inner{max-width:680px;text-align:center}
+.welcome-inner h1{font-size:clamp(1.8rem,4vw,2.5rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:.75rem;background:linear-gradient(to bottom,#fff 40%,#888);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.welcome-inner .sub{color:var(--muted);font-size:1rem;margin-bottom:2rem;line-height:1.6}
+.welcome-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem;text-align:left}
+.welcome-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem;transition:all .2s}
+.welcome-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.welcome-card h3{font-size:.85rem;font-weight:600;margin-bottom:.3rem}
+.welcome-card p{font-size:.75rem;color:var(--muted);line-height:1.5}
+.welcome-card .icon{font-size:1.3rem;margin-bottom:.5rem}
+.welcome-limits{display:flex;gap:2rem;justify-content:center;margin-bottom:2rem;font-size:.78rem;color:var(--muted)}
+.welcome-limits .limit{display:flex;align-items:center;gap:.4rem}
+.welcome-limits .limit-val{color:var(--accent);font-weight:600;font-family:var(--mono)}
+.btn-start{padding:.85rem 2.5rem;border-radius:10px;font-size:1rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .2s}
+.btn-start:hover{background:#2563eb;transform:translateY(-2px)}
+.btn-outline{padding:.65rem 1.5rem;border-radius:8px;font-size:.85rem;font-weight:500;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all .2s;margin-left:.75rem}
+.btn-outline:hover{border-color:var(--accent);color:var(--text)}
+/* welcome-grid responsive handled by main breakpoints above */
+</style>
+</head>
+<body>
+
+<!-- TOP NAV -->
+<div class="top-nav">
+  <div style="display:flex;align-items:center;gap:.75rem">
+    <button class="drawer-toggle" onclick="toggleDrawer()" aria-label="Menu">&#9776;</button>
+    <a href="/" class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  </div>
+  <div class="top-nav-links">
+    <a href="/docs" class="nav-hide-phone">Docs</a>
+    <a href="/playground" class="active nav-hide-phone">Playground</a>
+    <a href="/keys" class="nav-hide-mobile">API Keys</a>
+    <span class="nav-hide-mobile" style="font-size:.75rem;color:var(--muted)"><span class="status-dot"></span>Operational</span>
+    <button class="btn-sm nav-hide-phone" onclick="window.location='/keys'">Get API Key</button>
+  </div>
+</div>
+
+<!-- MOBILE DRAWER -->
+<div class="drawer-overlay" id="drawer-overlay" onclick="toggleDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <span class="wordmark">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</span>
+    <button class="drawer-close" onclick="toggleDrawer()">&times;</button>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">Tools</div>
+    <div class="sidebar-link active" onclick="drawerSwitch('extract')"><span class="sidebar-icon" style="color:var(--accent)">/</span> Extract</div>
+    <div class="sidebar-link" onclick="drawerSwitch('search')"><span class="sidebar-icon" style="color:var(--accent)">?</span> Search</div>
+    <div class="sidebar-link" onclick="drawerSwitch('act')"><span class="sidebar-icon" style="color:#22c55e">&gt;</span> Act</div>
+    <div class="sidebar-link" onclick="drawerSwitch('crawl')"><span class="sidebar-icon" style="color:#8b5cf6">&raquo;</span> Crawl</div>
+    <div class="sidebar-link" onclick="drawerSwitch('stream')"><span class="sidebar-icon" style="color:#22c55e">&darr;</span> Stream</div>
+    <div class="sidebar-link" onclick="drawerSwitch('plan')"><span class="sidebar-icon" style="color:#f59e0b">&#x25A3;</span> Plan</div>
+    <div class="sidebar-link" onclick="drawerSwitch('diff')"><span class="sidebar-icon" style="color:#ef4444">&Delta;</span> Diff</div>
+    <div class="sidebar-link" onclick="drawerSwitch('render')"><span class="sidebar-icon" style="color:var(--muted)">&lt;/&gt;</span> Render</div>
+    <div class="sidebar-link" onclick="drawerSwitch('links')"><span class="sidebar-icon" style="color:var(--accent)">&harr;</span> Links</div>
+    <div class="sidebar-link" onclick="drawerSwitch('explore')"><span class="sidebar-icon" style="color:#f59e0b">~</span> Explore</div>
+    <div class="sidebar-link" onclick="drawerSwitch('learn')"><span class="sidebar-icon" style="color:#22c55e">+</span> Learn</div>
+    <div class="sidebar-link" onclick="drawerSwitch('inspect')"><span class="sidebar-icon" style="color:#ef4444">!</span> Inspect</div>
+  </div>
+  <div class="drawer-divider"></div>
+  <div class="sidebar-section">
+    <div class="sidebar-label">Account</div>
+    <div class="sidebar-link" onclick="window.location='/keys'"><span class="sidebar-icon" style="color:var(--muted)">/&middot;</span> API Keys</div>
+    <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon" style="color:var(--muted)">&equiv;</span> Usage</div>
+    <div class="sidebar-link" onclick="window.location='/settings'"><span class="sidebar-icon" style="color:var(--muted)">*</span> Settings</div>
+    <div class="sidebar-link" onclick="window.location='/docs'"><span class="sidebar-icon" style="color:var(--muted)">?</span> Docs</div>
+  </div>
+</div>
+
+<div class="app">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Playground</div>
+      <div class="sidebar-link active" onclick="switchTab('extract')"><span class="sidebar-icon" style="color:var(--accent)">/</span> Extract</div>
+      <div class="sidebar-link" onclick="switchTab('search')"><span class="sidebar-icon" style="color:var(--accent)">?</span> Search</div>
+      <div class="sidebar-link" onclick="switchTab('act')"><span class="sidebar-icon" style="color:#22c55e">&gt;</span> Act</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Advanced</div>
+      <div class="sidebar-link" onclick="switchTab('crawl')"><span class="sidebar-icon" style="color:#8b5cf6">&raquo;</span> Crawl</div>
+      <div class="sidebar-link" onclick="switchTab('stream')"><span class="sidebar-icon" style="color:#22c55e">&darr;</span> Stream</div>
+      <div class="sidebar-link" onclick="switchTab('plan')"><span class="sidebar-icon" style="color:#f59e0b">&#x25A3;</span> Plan</div>
+      <div class="sidebar-link" onclick="switchTab('diff')"><span class="sidebar-icon" style="color:#ef4444">&Delta;</span> Diff</div>
+      <div class="sidebar-link" onclick="switchTab('render')"><span class="sidebar-icon" style="color:var(--muted)">&lt;/&gt;</span> Render</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Discover</div>
+      <div class="sidebar-link" onclick="switchTab('links')"><span class="sidebar-icon" style="color:var(--accent)">&harr;</span> Links</div>
+      <div class="sidebar-link" onclick="switchTab('explore')"><span class="sidebar-icon" style="color:#f59e0b">~</span> Explore</div>
+      <div class="sidebar-link" onclick="switchTab('learn')"><span class="sidebar-icon" style="color:#22c55e">+</span> Learn</div>
+      <div class="sidebar-link" onclick="switchTab('inspect')"><span class="sidebar-icon" style="color:#ef4444">!</span> Inspect</div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Account</div>
+      <div class="sidebar-link" onclick="window.location='/keys'"><span class="sidebar-icon" style="color:var(--muted)">/&middot;</span> API Keys</div>
+      <div class="sidebar-link" onclick="window.location='/usage'"><span class="sidebar-icon" style="color:var(--muted)">&equiv;</span> Usage</div>
+      <div class="sidebar-link" onclick="window.location='/settings'"><span class="sidebar-icon" style="color:var(--muted)">*</span> Settings</div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main" style="position:relative">
+    <!-- WELCOME LANDING -->
+    <div class="welcome" id="welcome-panel">
+      <div class="welcome-inner">
+        <h1>Finally, less is actually more<span style="-webkit-text-fill-color:#3b82f6">/</span></h1>
+        <p class="sub">The perception layer for AI agents on the web.</p>
+
+        <div class="welcome-grid">
+          <div class="welcome-card">
+            <div class="icon" style="color:var(--accent)">/</div>
+            <h3>Extract</h3>
+            <p>URL + question = answer. 99% token reduction vs raw HTML.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon" style="color:var(--accent)">?</div>
+            <h3>Search</h3>
+            <p>Web search + deep parse. Structured results with snippets.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon" style="color:#8b5cf6">&raquo;</div>
+            <h3>Crawl</h3>
+            <p>Multi-page intelligent crawl. Thompson Sampling link selection.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon" style="color:#22c55e">&gt;</div>
+            <h3>Act</h3>
+            <p>Click buttons, fill forms, extract structured data.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon" style="color:#f59e0b">&#x25A3;</div>
+            <h3>Plan</h3>
+            <p>Decompose goals into step-by-step action plans.</p>
+          </div>
+          <div class="welcome-card">
+            <div class="icon" style="color:#22c55e">&darr;</div>
+            <h3>Stream</h3>
+            <p>Token-efficient streaming for massive pages. 95-99% savings.</p>
+          </div>
+        </div>
+
+        <div class="welcome-limits">
+          <div class="limit"><span class="limit-val">10</span> requests/min (anonymous)</div>
+          <div class="limit"><span class="limit-val">50</span> requests/day</div>
+          <div class="limit"><span class="limit-val">3</span> output formats (JSON, Markdown, TOON)</div>
+        </div>
+
+        <div>
+          <button class="btn-start" onclick="startPlayground()">Start building &#8594;</button>
+          <button class="btn-outline" onclick="window.location='/keys'">Get API Key</button>
+        </div>
+
+        <p style="font-size:.72rem;color:#555;margin-top:1.5rem">Sign up for an API key to unlock 1,000 req/day, all primitives, and a usage dashboard.</p>
+      </div>
+    </div>
+
+    <div class="loading-bar" id="loading-bar"></div>
+    <div class="toolbar">
+      <h2 id="toolbar-title">slaash.extract</h2>
+      <span class="api-ver">api.slaash.ai/v1</span>
+    </div>
+
+    <div class="split">
+      <!-- LEFT: Request Builder -->
+      <div class="panel-left" id="panel-left">
+        <!-- Extract form (default) -->
+        <div id="form-extract">
+          <div class="examples">
+            <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/COVID-19_vaccine','COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials')">Wikipedia: COVID-19 vaccine</span>
+            <span class="example-chip" onclick="fillExample('https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/','styrränta ränta procent Riksbanken penningpolitik reporänta 2026 interest rate')">Riksbanken: interest rate</span>
+            <span class="example-chip" onclick="fillExample('https://coinmarketcap.com/currencies/bitcoin/','bitcoin price USD current BTC value market cap 24h change crypto')">Bitcoin price</span>
+            <span class="example-chip" onclick="fillExample('https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array','branch prediction sorted array unsorted performance railroad junction misprediction flush pipeline penalty')">SO: sorted array</span>
+            <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/Gothenburg','population inhabitants Gothenburg Göteborg city urban area people')">Gothenburg population</span>
+            <span class="example-chip" onclick="fillExample('https://www.python.org/downloads/','latest Python version release download stable current 2026')">Python: latest version</span>
+            <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/Ibuprofen','ibuprofen medicine drug NSAID anti-inflammatory dosage side effects uses')">Wikipedia: Ibuprofen</span>
+            <span class="example-chip" onclick="fillExample('https://en.wikipedia.org/wiki/Artificial_Intelligence_Act','EU AI Act regulation artificial intelligence law European Union rules 2024')">EU AI Act</span>
+            <span class="example-chip" onclick="fillExample('https://www.npmjs.com/package/langchain','npm downloads weekly package registry stats version latest')">npm: langchain</span>
+            <span class="example-chip" onclick="fillExample('https://github.com/langchain-ai/langchain','stars forks contributors open issues license programming language repository description')">GitHub: langchain</span>
+            <span class="example-chip" onclick="fillExample('https://www.nasa.gov/mars/','NASA Mars mission latest news rover discovery finding surface science')">NASA: Mars mission</span>
+            <span class="example-chip" onclick="fillExample('https://docs.python.org/3/','Python documentation version release latest stable tutorial reference library')">Python docs</span>
+            <span class="example-chip" onclick="fillExample('https://openai.com/news/','OpenAI GPT model release announcement latest news product update API')">OpenAI: news</span>
+            <span class="example-chip" onclick="fillExample('https://arxiv.org/list/cs.AI/recent','arxiv paper AI machine learning latest submission abstract title authors')">arXiv: AI papers</span>
+            <span class="example-chip" onclick="fillExample('https://www.bbc.com/sport/football/premier-league/table','Premier League table standings points goals wins losses team position top')">BBC: Premier League</span>
+            <span class="example-chip" onclick="fillExample('https://climate.nasa.gov/vital-signs/global-temperature/','global temperature CO2 climate change sea level rise record anomaly celsius latest data')">NASA: climate data</span>
+            <span class="example-chip" onclick="fillExample('https://www.rust-lang.org/','Rust programming language crate version download release stable edition 2024')">Rust-lang.org</span>
+            <span class="example-chip" onclick="fillExample('https://www.xe.com/currencyconverter/convert/?Amount=1&From=USD&To=SEK','currency converter exchange rate USD SEK kronor dollar real-time')">XE: USD/SEK</span>
+            <span class="example-chip" onclick="fillExample('https://survey.stackoverflow.co/2024/','Stack Overflow survey developer programming language most popular used loved dreaded')">SO Survey 2024</span>
+            <span class="example-chip" onclick="fillExample('https://forecast.weather.gov/MapClick.php?CityName=New+York&state=NY','weather forecast temperature today tomorrow rain wind humidity')">Weather: NYC</span>
+          </div>
+          <div class="field">
+            <label>URL</label>
+            <input type="url" id="inp-url" placeholder="https://example.com" value="https://en.wikipedia.org/wiki/COVID-19_vaccine">
+          </div>
+          <div class="field">
+            <label>Goal</label>
+            <input type="text" id="inp-goal" placeholder="What are you looking for?" value="COVID-19 vaccine side effects efficacy safety mRNA Pfizer Moderna adverse reactions clinical trials">
+          </div>
+          <span class="advanced-toggle" onclick="this.nextElementSibling.classList.toggle('visible')">&#9660; Advanced options</span>
+          <div class="advanced-opts">
+            <div class="field-row">
+              <div class="field"><label>Top N</label><input type="number" id="inp-topn" value="20" min="1" max="50"></div>
+              <div class="field"><label>Format</label><select id="inp-format"><option value="json">JSON</option><option value="markdown">Markdown</option><option value="toon">TOON</option></select></div>
+              <div class="field"><label>Run JS</label><select id="inp-js"><option value="false">No</option><option value="true">Yes</option></select></div>
+            </div>
+            <div class="field-row" style="margin-top:.75rem">
+              <div class="field"><label>Follow links</label><select id="inp-follow"><option value="false">No</option><option value="true">Yes — follow relevant links</option></select></div>
+            </div>
+            <div style="font-size:.68rem;color:#555;margin-top:.35rem;line-height:1.4">Follow links: auto-follows top-ranked links, fetches their content, and merges results. Gives deeper answers when the page links to relevant sub-pages.</div>
+          </div>
+          <button class="btn-run" id="btn-run" onclick="runExtract()">Run slaash.extract</button>
+        </div>
+
+        <!-- Search form -->
+        <div id="form-search" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='latest AI news 2026'">AI news 2026</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='best Rust web frameworks comparison'">Rust frameworks</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='Sweden election results 2026'">Sweden election</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='climate change latest data 2026'">Climate data</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='SpaceX Starship launch schedule'">SpaceX launches</span>
+            <span class="example-chip" onclick="document.getElementById('inp-query').value='EU AI regulation compliance guide'">EU AI regulation</span>
+          </div>
+          <div class="field">
+            <label>Search Query</label>
+            <input type="text" id="inp-query" placeholder="What do you want to find?" value="latest AI news 2026">
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Max Results</label><input type="number" id="inp-maxres" value="5" min="1" max="10"></div>
+            <div class="field"><label>Deep Parse</label><select id="inp-deep"><option value="true">Yes</option><option value="false">No</option></select></div>
+          </div>
+          <button class="btn-run" onclick="runSearch()">Run slaash.search</button>
+        </div>
+
+        <!-- Act form -->
+        <div id="form-act" style="display:none">
+          <div class="field">
+            <label>URL</label>
+            <input type="url" id="inp-act-url" placeholder="https://shop.example.com">
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Action</label><select id="inp-action"><option value="extract">Extract data</option><option value="click">Click element</option><option value="fill">Fill form</option></select></div>
+            <div class="field"><label>Target</label><input type="text" id="inp-target" placeholder="price, title, Add to Cart..."></div>
+          </div>
+          <div class="field">
+            <label>Goal</label>
+            <input type="text" id="inp-act-goal" placeholder="What are you trying to do?">
+          </div>
+          <button class="btn-run" onclick="runAct()">Run slaash.act</button>
+        </div>
+
+        <!-- Crawl form -->
+        <div id="form-crawl" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="fillCrawl('https://docs.python.org/3/','async programming tutorial guide')">Python async guide</span>
+            <span class="example-chip" onclick="fillCrawl('https://doc.rust-lang.org/book/','ownership borrowing lifetimes')">Rust ownership</span>
+            <span class="example-chip" onclick="fillCrawl('https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide','JavaScript closures scope hoisting')">MDN: JS closures</span>
+            <span class="example-chip" onclick="fillCrawl('https://react.dev/learn','React hooks state useEffect components')">React: hooks guide</span>
+            <span class="example-chip" onclick="fillCrawl('https://www.svt.se','senaste nyheter Sverige politik ekonomi')">SVT: Swedish news</span>
+          </div>
+          <div class="field"><label>Start URL</label><input type="url" id="inp-crawl-url" placeholder="https://docs.example.com" value="https://docs.python.org/3/"></div>
+          <div class="field"><label>Goal</label><input type="text" id="inp-crawl-goal" placeholder="What information to gather?" value="async programming tutorial guide"></div>
+          <div class="field-row">
+            <div class="field"><label>Max pages</label><input type="number" id="inp-crawl-pages" value="5" min="1" max="20"></div>
+            <div class="field"><label>Max depth</label><input type="number" id="inp-crawl-depth" value="2" min="1" max="5"></div>
+            <div class="field"><label>Top links/page</label><input type="number" id="inp-crawl-topk" value="3" min="1" max="10"></div>
+          </div>
+          <button class="btn-run" onclick="runCrawl()">Run slaash.crawl</button>
+        </div>
+
+        <!-- Stream form -->
+        <div id="form-stream" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="fillStream('https://en.wikipedia.org/wiki/COVID-19_vaccine','vaccine side effects efficacy safety')">Wikipedia: COVID-19</span>
+            <span class="example-chip" onclick="fillStream('https://en.wikipedia.org/wiki/Gothenburg','population inhabitants area people')">Wikipedia: Gothenburg</span>
+            <span class="example-chip" onclick="fillStream('https://en.wikipedia.org/wiki/Artificial_Intelligence_Act','EU AI Act regulation rules requirements')">Wikipedia: EU AI Act</span>
+            <span class="example-chip" onclick="fillStream('https://www.riksbank.se/sv/penningpolitik/penningpolitisk-rapport/2026/penningpolitiskt-beslut-mars-2026/','styrränta ränta procent beslut')">Riksbanken: räntebeslutet</span>
+          </div>
+          <div class="field"><label>URL</label><input type="url" id="inp-stream-url" placeholder="https://example.com" value="https://en.wikipedia.org/wiki/COVID-19_vaccine"></div>
+          <div class="field"><label>Goal</label><input type="text" id="inp-stream-goal" placeholder="What to stream?" value="vaccine side effects efficacy safety"></div>
+          <div class="field-row">
+            <div class="field"><label>Max nodes</label><input type="number" id="inp-stream-max" value="30" min="5" max="100"></div>
+            <div class="field"><label>Min relevance</label><input type="number" id="inp-stream-rel" value="0.1" min="0" max="1" step="0.05"></div>
+          </div>
+          <button class="btn-run" onclick="runStream()">Run slaash.stream</button>
+        </div>
+
+        <!-- Plan form -->
+        <div id="form-plan" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Buy the cheapest flight from Stockholm to London'">Book flight</span>
+            <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Find and compare prices for iPhone 17 Pro across 3 stores'">Compare prices</span>
+            <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Research the top 5 AI startups in Europe and summarize their products'">Research AI startups</span>
+            <span class="example-chip" onclick="document.getElementById('inp-plan-goal').value='Find the best restaurants in Gothenburg with ratings above 4.5'">Find restaurants</span>
+          </div>
+          <div class="field"><label>Goal</label><input type="text" id="inp-plan-goal" placeholder="What do you want to accomplish?" value="Buy the cheapest flight from Stockholm to London"></div>
+          <div class="field"><label>Context URL (optional)</label><input type="url" id="inp-plan-url" placeholder="https://starting-page.com"></div>
+          <button class="btn-run" onclick="runPlan()">Run slaash.plan</button>
+        </div>
+
+        <!-- Diff form -->
+        <div id="form-diff" style="display:none">
+          <div class="field"><label>URL</label><input type="url" id="inp-diff-url" placeholder="https://example.com" value="https://news.ycombinator.com"></div>
+          <div class="field"><label>Compare URL (or leave empty to diff same page)</label><input type="url" id="inp-diff-url2" placeholder="https://..."></div>
+          <div class="field"><label>Goal (optional)</label><input type="text" id="inp-diff-goal" placeholder="Focus diff on what?"></div>
+          <button class="btn-run" onclick="runDiff()">Run slaash.diff</button>
+        </div>
+
+        <!-- Render form -->
+        <div id="form-render" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://www.nasa.gov'">NASA</span>
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://news.ycombinator.com'">Hacker News</span>
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://www.svt.se'">SVT Nyheter</span>
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://www.rust-lang.org'">Rust-lang.org</span>
+            <span class="example-chip" onclick="document.getElementById('inp-render-url').value='https://docs.python.org/3/'">Python docs</span>
+          </div>
+          <div class="field"><label>URL</label><input type="url" id="inp-render-url" placeholder="https://example.com" value="https://news.ycombinator.com"></div>
+          <div class="field-row">
+            <div class="field"><label>Width</label><input type="number" id="inp-render-w" value="1280" min="320" max="1920"></div>
+            <div class="field"><label>Height</label><input type="number" id="inp-render-h" value="800" min="200" max="1200"></div>
+          </div>
+          <button class="btn-run" onclick="runRender()">Run slaash.render</button>
+        </div>
+
+        <!-- Links form -->
+        <div id="form-links" style="display:none">
+          <div class="examples">
+            <span class="example-chip" onclick="fillLinks('https://docs.python.org/3/','python modules library')">Python docs links</span>
+            <span class="example-chip" onclick="fillLinks('https://news.ycombinator.com','tech stories programming')">HN links</span>
+            <span class="example-chip" onclick="fillLinks('https://developer.mozilla.org/en-US/','JavaScript CSS HTML API')">MDN links</span>
+            <span class="example-chip" onclick="fillLinks('https://www.svt.se','nyheter artiklar senaste')">SVT links</span>
+            <span class="example-chip" onclick="fillLinks('https://www.nasa.gov','missions space exploration')">NASA links</span>
+          </div>
+          <div class="field"><label>URL</label><input type="url" id="inp-links-url" placeholder="https://example.com" value="https://docs.python.org/3/"></div>
+          <div class="field"><label>Goal (optional filter)</label><input type="text" id="inp-links-goal" placeholder="Filter links by relevance to..."></div>
+          <div class="field"><label>Max links</label><input type="number" id="inp-links-max" value="20" min="5" max="100"></div>
+          <button class="btn-run" onclick="runLinks()">Run slaash.links</button>
+        </div>
+
+        <!-- Explore form -->
+        <div id="form-explore" style="display:none">
+          <div class="field"><label>URL</label><input type="url" id="inp-explore-url" placeholder="https://example.com" value="https://news.ycombinator.com"></div>
+          <button class="btn-run" onclick="runExplore()">Run slaash.explore</button>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:.5rem">Scans inline scripts for fetch()/XHR/WebMCP registrations. Discovers hidden API endpoints.</div>
+        </div>
+
+        <!-- Learn form -->
+        <div id="form-learn" style="display:none">
+          <div class="field"><label>URL</label><input type="url" id="inp-learn-url" placeholder="URL that was previously extracted"></div>
+          <div class="field"><label>Goal</label><input type="text" id="inp-learn-goal" placeholder="Goal used during extraction"></div>
+          <div class="field"><label>Node IDs (comma-separated)</label><input type="text" id="inp-learn-ids" placeholder="5, 12, 23"></div>
+          <button class="btn-run" onclick="runLearn()">Run slaash.learn</button>
+          <div style="font-size:.72rem;color:var(--muted);margin-top:.5rem">Tip: Use the Extract tab first, then note the node IDs of correct answers.</div>
+        </div>
+
+        <!-- Inspect form -->
+        <div id="form-inspect" style="display:none">
+          <div class="field"><label>URL or Text</label><input type="text" id="inp-inspect-input" placeholder="https://example.com or text to scan for injection"></div>
+          <div class="field"><label>Check</label><select id="inp-inspect-check"><option value="injection">Injection scan</option><option value="firewall">Firewall classify</option></select></div>
+          <button class="btn-run" onclick="runInspect()">Run slaash.inspect</button>
+        </div>
+
+        <!-- Feedback section — per-node selection -->
+        <div id="feedback-section" style="display:none;margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border)">
+          <div style="font-size:.8rem;font-weight:600;color:var(--text);margin-bottom:.15rem">Teach slaash.learn</div>
+          <div id="feedback-login-prompt" style="display:none;font-size:.82rem;color:var(--muted);margin-bottom:.75rem;padding:.75rem;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px">
+            <a href="/keys" style="color:var(--accent);font-weight:600">Sign in</a> to teach your own model. Anonymous feedback is disabled to protect global weights.
+          </div>
+          <div id="feedback-form">
+            <div style="font-size:.72rem;color:var(--muted);margin-bottom:.75rem">Select the nodes that contained the correct answer. This trains <strong style="color:var(--text)">your personal model</strong> — it won't affect other users.</div>
+            <div id="feedback-nodes" style="display:flex;flex-direction:column;gap:.35rem;max-height:200px;overflow-y:auto"></div>
+            <button class="btn-sm" style="margin-top:.75rem;background:var(--green)" onclick="sendFeedback()">Send feedback</button>
+          </div>
+          <div id="feedback-msg" style="font-size:.72rem;color:var(--muted);margin-top:.35rem"></div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Response + Markdown + Code -->
+      <div class="panel-right">
+        <div class="response-tabs">
+          <div class="response-tab active" onclick="showResponseTab('markdown')">Markdown</div>
+          <div class="response-tab" onclick="showResponseTab('toon')">TOON</div>
+          <div class="response-tab" onclick="showResponseTab('response')">JSON</div>
+          <div class="response-tab" onclick="showResponseTab('code')">Code</div>
+        </div>
+
+        <!-- Markdown view (default) -->
+        <div id="view-markdown" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+          <div class="response-body" id="markdown-body" style="font-family:var(--font);font-size:.85rem;line-height:1.7">
+            <span style="color:var(--muted)">Run a query to see results here</span>
+          </div>
+          <div class="response-meta" id="response-meta">
+            <span>Tokens: <span class="val" id="meta-tokens">-</span></span>
+            <span>Savings: <span class="val" id="meta-savings">-</span></span>
+            <span>Time: <span class="val" id="meta-time">-</span></span>
+            <span>Nodes: <span class="val" id="meta-nodes">-</span></span>
+          </div>
+        </div>
+
+        <!-- TOON view -->
+        <div id="view-toon" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+          <div class="response-body" id="toon-body" style="font-family:var(--mono);font-size:.8rem;line-height:1.5;color:#79c0ff">
+            <span style="color:var(--muted)">// TOON output — Token-Oriented Object Notation</span>
+          </div>
+        </div>
+
+        <!-- JSON view -->
+        <div id="view-response" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+          <div class="response-body" id="response-body">
+            <span style="color:var(--muted)">// JSON response</span>
+          </div>
+        </div>
+
+        <!-- Code view -->
+        <div id="view-code" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+          <div class="code-tabs">
+            <div class="code-tab active" onclick="showCodeLang('python')">Python</div>
+            <div class="code-tab" onclick="showCodeLang('javascript')">JavaScript</div>
+            <div class="code-tab" onclick="showCodeLang('curl')">cURL</div>
+          </div>
+          <div class="code-body" id="code-body">
+            <span style="color:var(--muted)"># Select a tab and run a query</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let currentTab = 'extract';
+let lastResult = null;
+let lastUrl = '';
+let lastGoal = '';
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('welcome-panel').classList.add('hidden');
+  document.querySelectorAll('.sidebar-link').forEach(l => l.classList.remove('active'));
+  const links = document.querySelectorAll('.sidebar-link');
+  links.forEach(l => { if(l.textContent.trim().toLowerCase().startsWith(tab)) l.classList.add('active'); });
+  // Sync drawer sidebar links
+  document.querySelectorAll('#drawer .sidebar-link').forEach(l => {
+    l.classList.toggle('active', l.textContent.trim().toLowerCase().includes(tab));
+  });
+  document.getElementById('toolbar-title').textContent = 'slaash.' + tab;
+  const allForms = ['form-extract','form-search','form-act','form-crawl','form-stream','form-plan','form-diff','form-render','form-links','form-explore','form-learn','form-inspect'];
+  allForms.forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
+  const formId = 'form-' + tab;
+  const formEl = document.getElementById(formId);
+  if (formEl) formEl.style.display = '';
+  else document.getElementById('form-extract').style.display = ''; // fallback
+  document.getElementById('feedback-section').style.display = 'none';
+  // Restore response tabs (render hides them)
+  document.querySelectorAll('.response-tab').forEach(t => t.style.display = '');
+  // Clear previous results
+  document.getElementById('response-body').innerHTML = '<span style="color:var(--muted)">// Run a query to see results</span>';
+  document.getElementById('markdown-body').innerHTML = '<span style="color:var(--muted)">Run a query to see results here</span>';
+  document.getElementById('toon-body').innerHTML = '<span style="color:var(--muted)">// TOON output</span>';
+  document.getElementById('meta-tokens').textContent = '-';
+  document.getElementById('meta-savings').textContent = '-';
+  document.getElementById('meta-time').textContent = '-';
+  document.getElementById('meta-nodes').textContent = '-';
+  document.getElementById('feedback-msg').textContent = '';
+  lastResult = null;
+  updateCodePreview();
+}
+
+function fillExample(url, goal) {
+  document.getElementById('inp-url').value = url;
+  document.getElementById('inp-goal').value = goal;
+  updateCodePreview();
+}
+
+function showResponseTab(view) {
+  document.querySelectorAll('.response-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('view-response').style.display = view === 'response' ? 'flex' : 'none';
+  document.getElementById('view-markdown').style.display = view === 'markdown' ? 'flex' : 'none';
+  document.getElementById('view-toon').style.display = view === 'toon' ? 'flex' : 'none';
+  document.getElementById('view-code').style.display = view === 'code' ? 'flex' : 'none';
+}
+
+function showCodeLang(lang) {
+  document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  updateCodePreview(lang);
+}
+
+function updateCodePreview(lang) {
+  lang = lang || 'python';
+  const url = document.getElementById('inp-url')?.value || '';
+  const goal = document.getElementById('inp-goal')?.value || '';
+  const topN = document.getElementById('inp-topn')?.value || '10';
+  let code = '';
+  if (lang === 'python') {
+    code = `from slaash import Slaash\n\ns = Slaash(api_key="sk-...")\n\nresult = s.extract(\n    url="${url}",\n    goal="${goal}",\n    top_n=${topN}\n)\n\nfor node in result.nodes:\n    print(f"[{node.role}] {node.label}")`;
+  } else if (lang === 'javascript') {
+    code = `import Slaash from 'slaash'\n\nconst s = new Slaash({ apiKey: 'sk-...' })\n\nconst result = await s.extract('${url}', {\n  goal: '${goal}',\n  topN: ${topN}\n})\n\nresult.nodes.forEach(n => console.log(\`[\${n.role}] \${n.label}\`))`;
+  } else {
+    code = `curl -X POST https://api.slaash.ai/v1/extract \\\n  -H "Authorization: Bearer sk-..." \\\n  -H "Content-Type: application/json" \\\n  -d '{\n    "url": "${url}",\n    "goal": "${goal}",\n    "options": { "top_n": ${topN} }\n  }'`;
+  }
+  document.getElementById('code-body').textContent = code;
+}
+
+function startLoading() {
+  const bar = document.getElementById('loading-bar');
+  bar.classList.remove('active');
+  void bar.offsetWidth;
+  bar.classList.add('active');
+  document.querySelectorAll('.btn-run').forEach(b => b.disabled = true);
+}
+
+function stopLoading() {
+  const bar = document.getElementById('loading-bar');
+  bar.style.width = '100%';
+  setTimeout(() => { bar.classList.remove('active'); bar.style.width = '0'; }, 300);
+  document.querySelectorAll('.btn-run').forEach(b => b.disabled = false);
+}
+
+async function runExtract() {
+  const url = document.getElementById('inp-url').value.trim();
+  const goal = document.getElementById('inp-goal').value.trim();
+  if (!url || !goal) return;
+  lastUrl = url; lastGoal = goal;
+  startLoading();
+  const t0 = performance.now();
+  try {
+    // Single request — generate Markdown and TOON client-side from JSON
+    const u = getPlaygroundUser();
+    const reqBody = {
+      url, goal,
+      top_n: parseInt(document.getElementById('inp-topn').value) || 20,
+      run_js: document.getElementById('inp-js').value === 'true',
+      follow_links: document.getElementById('inp-follow').value === 'true',
+      user_id: u ? u.id : 0,
+      locale: u && u.locale ? u.locale : undefined,
+      output_format: 'json'
+    };
+    const res = await fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(), body: JSON.stringify(reqBody) });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    lastResult = data;
+    // JSON view
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    // Markdown view (generated client-side)
+    const nodes = data.nodes || [];
+    let md = '';
+    nodes.forEach(n => {
+      const role = (n.role||'?').toUpperCase();
+      if (role === 'HEADING') md += '## ' + (n.label||'') + '\n\n';
+      else if (role === 'LINK') md += '[' + (n.label||'') + '](' + (n.action||'#') + ')\n\n';
+      else md += (n.label||'') + '\n\n';
+    });
+    if (!md) md = 'No results.';
+    document.getElementById('markdown-body').textContent = md;
+    // TOON view (generated client-side)
+    let toon = '';
+    nodes.forEach(n => {
+      const r = (n.role||'?').substring(0,3).toUpperCase();
+      const rel = (n.relevance||0).toFixed(2);
+      toon += r + '|' + (n.label||'').substring(0,200) + '|' + rel + '\n';
+    });
+    if (!toon) toon = '// No results';
+    document.getElementById('toon-body').textContent = toon;
+    document.getElementById('meta-tokens').textContent = (data.total_nodes || 0) + ' DOM \u2192 ' + (data.node_count || 0) + ' nodes';
+    const savings = data.total_nodes > 0 ? ((1 - (data.node_count || 0) / data.total_nodes) * 100).toFixed(1) + '%' : '-';
+    document.getElementById('meta-savings').textContent = savings;
+    document.getElementById('meta-time').textContent = elapsed + 'ms';
+    document.getElementById('meta-nodes').textContent = data.node_count || 0;
+    // Build per-node feedback checkboxes
+    const fbDiv = document.getElementById('feedback-nodes');
+    fbDiv.innerHTML = '';
+    if (data.nodes && data.nodes.length > 0) {
+      data.nodes.forEach((n, i) => {
+        const label = (n.label || '').substring(0, 80);
+        const rel = (n.relevance || 0).toFixed(2);
+        const boost = n.causal_boost > 0.01 ? ' *' + n.causal_boost.toFixed(2) : '';
+        const el = document.createElement('label');
+        el.style.cssText = 'display:flex;align-items:center;gap:.5rem;padding:.3rem .5rem;border-radius:6px;cursor:pointer;font-size:.78rem;color:var(--muted);transition:background .15s';
+        el.onmouseenter = () => el.style.background = 'rgba(255,255,255,0.03)';
+        el.onmouseleave = () => el.style.background = '';
+        el.innerHTML = '<input type="checkbox" value="' + n.id + '" style="accent-color:var(--green)">'
+          + '<span style="color:var(--accent);font-family:var(--mono);font-size:.65rem;min-width:1.5rem">#' + (i+1) + '</span>'
+          + '<span style="color:var(--green);font-family:var(--mono);font-size:.65rem;min-width:2.2rem">' + rel + boost + '</span>'
+          + '<span style="color:var(--text);font-weight:500">[' + (n.role||'?') + ']</span> '
+          + '<span>' + label + (label.length >= 80 ? '\u2026' : '') + '</span>';
+        fbDiv.appendChild(el);
+      });
+      document.getElementById('feedback-section').style.display = '';
+      // Show login prompt or feedback form based on session
+      const loggedIn = !!getPlaygroundUser();
+      document.getElementById('feedback-login-prompt').style.display = loggedIn ? 'none' : '';
+      document.getElementById('feedback-form').style.display = loggedIn ? '' : 'none';
+    }
+    updateCodePreview();
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+async function runSearch() {
+  const query = document.getElementById('inp-query').value.trim();
+  if (!query) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/fetch/search', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify({
+        query, goal: query,
+        top_n: parseInt(document.getElementById('inp-maxres').value) || 5,
+        deep: document.getElementById('inp-deep').value === 'true'
+      })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+async function runAct() {
+  startLoading();
+  try {
+    const res = await fetch('/api/fetch/act', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify({
+        url: document.getElementById('inp-act-url').value,
+        goal: document.getElementById('inp-act-goal').value,
+        action: document.getElementById('inp-action').value,
+        target: document.getElementById('inp-target').value
+      })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+function fillCrawl(url, goal) {
+  document.getElementById('inp-crawl-url').value = url;
+  document.getElementById('inp-crawl-goal').value = goal;
+}
+function fillStream(url, goal) {
+  document.getElementById('inp-stream-url').value = url;
+  document.getElementById('inp-stream-goal').value = goal;
+}
+
+async function runCrawl() {
+  const url = document.getElementById('inp-crawl-url').value.trim();
+  const goal = document.getElementById('inp-crawl-goal').value.trim();
+  if (!url || !goal) return;
+  startLoading();
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/api/adaptive-crawl', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify({
+        url, goal,
+        max_pages: parseInt(document.getElementById('inp-crawl-pages').value) || 5,
+        max_depth: parseInt(document.getElementById('inp-crawl-depth').value) || 2,
+        top_k_links: parseInt(document.getElementById('inp-crawl-topk').value) || 3,
+        top_n_per_page: 10,
+      })
+    });
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+
+    // Build readable markdown from crawl results
+    const pages = data.pages || [];
+    let md = '# Crawl: ' + url + '\n\n';
+    md += '**' + pages.length + ' pages** crawled | ';
+    md += (data.stop_reason || 'completed') + ' | ' + elapsed + 'ms\n\n';
+    let totalTokensIn = 0;
+    let totalTokensOut = 0;
+    pages.forEach((page, i) => {
+      md += '## ' + (i + 1) + '. ' + (page.url || '?') + '\n';
+      const nodes = page.nodes || page.top_nodes || [];
+      totalTokensIn += (page.total_dom_nodes || 0);
+      totalTokensOut += nodes.length;
+      nodes.forEach(n => {
+        md += '- [' + (n.role || '?') + '] ' + (n.label || '').slice(0, 200) + '\n';
+      });
+      if (page.marginal_gain !== undefined) {
+        md += '_gain: ' + page.marginal_gain.toFixed(3) + '_\n';
+      }
+      md += '\n';
+    });
+    document.getElementById('markdown-body').textContent = md;
+
+    // Metrics
+    const savings = totalTokensIn > 0 ? ((1 - totalTokensOut / totalTokensIn) * 100).toFixed(1) + '%' : '-';
+    document.getElementById('meta-nodes').textContent = pages.length + ' pages';
+    document.getElementById('meta-time').textContent = elapsed + 'ms';
+    document.getElementById('meta-tokens').textContent = totalTokensIn + ' DOM → ' + totalTokensOut + ' nodes';
+    document.getElementById('meta-savings').textContent = savings;
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function runStream() {
+  const url = document.getElementById('inp-stream-url').value.trim();
+  const goal = document.getElementById('inp-stream-goal').value.trim();
+  if (!url || !goal) return;
+  startLoading();
+  const t0 = performance.now();
+  const body = document.getElementById('response-body');
+  const mdBody = document.getElementById('markdown-body');
+  body.innerHTML = '';
+  mdBody.textContent = '';
+  // Show response tab for real-time display
+  document.querySelectorAll('.response-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector('.response-tab').classList.add('active');
+  document.getElementById('view-response').style.display = 'flex';
+  document.getElementById('view-markdown').style.display = 'none';
+  document.getElementById('view-toon').style.display = 'none';
+  document.getElementById('view-code').style.display = 'none';
+
+  const maxNodes = parseInt(document.getElementById('inp-stream-max').value) || 30;
+  const threshold = parseFloat(document.getElementById('inp-stream-rel').value) || 0.1;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host + '/ws/api');
+  let nodeCount = 0;
+  let totalDom = 0;
+  let savings = 0;
+  let allNodes = [];
+
+  ws.onopen = function() {
+    document.getElementById('meta-nodes').textContent = 'connecting...';
+    ws.send(JSON.stringify({
+      id: 'stream-1', method: 'fetch_stream_parse',
+      params: { url, goal, top_n: maxNodes, threshold, max_nodes: maxNodes }
+    }));
+  };
+
+  ws.onmessage = function(e) {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'progress') {
+      document.getElementById('meta-nodes').textContent = msg.stage === 'fetching' ? 'fetching...' : 'parsing...';
+    }
+    if (msg.type === 'stream_start') {
+      totalDom = msg.total_dom_nodes || 0;
+      savings = msg.token_savings_ratio || 0;
+      document.getElementById('meta-tokens').textContent = totalDom + ' DOM';
+    }
+    if (msg.type === 'stream_node') {
+      nodeCount++;
+      const n = msg.node || {};
+      allNodes.push(n);
+      const rel = (n.relevance || 0).toFixed(3);
+      const div = document.createElement('div');
+      div.style.cssText = 'padding:.4rem .6rem;margin:.2rem 0;border-left:3px solid var(--accent);border-radius:0 6px 6px 0;background:rgba(59,130,246,0.04);font-size:.8rem;opacity:0;transform:translateY(8px);transition:all .3s ease';
+      div.innerHTML = '<span style="color:var(--accent);font-family:var(--mono);font-size:.7rem">#' + nodeCount + ' [' + (n.role||'?') + '] rel:' + rel + '</span><br>' + escHtml((n.label||'').slice(0,300));
+      body.appendChild(div);
+      requestAnimationFrame(() => { div.style.opacity = '1'; div.style.transform = 'translateY(0)'; });
+      body.scrollTop = body.scrollHeight;
+      document.getElementById('meta-nodes').textContent = nodeCount + ' nodes';
+      document.getElementById('meta-savings').textContent = (savings * 100).toFixed(1) + '%';
+    }
+    if (msg.type === 'result' || msg.type === 'stream_complete') {
+      const elapsed = Math.round(performance.now() - t0);
+      document.getElementById('meta-time').textContent = elapsed + 'ms';
+      document.getElementById('meta-nodes').textContent = nodeCount + ' streamed';
+      document.getElementById('meta-savings').textContent = (savings * 100).toFixed(1) + '%';
+      // Fill markdown with final result
+      let md = '# Stream: ' + url + '\n\n';
+      allNodes.forEach((n, i) => { md += (i+1) + '. [' + (n.role||'?') + '] ' + (n.label||'').slice(0,200) + '\n'; });
+      mdBody.textContent = md;
+      lastResult = { nodes: allNodes, total_dom_nodes: totalDom, token_savings_ratio: savings };
+      stopLoading();
+      ws.close();
+    }
+    if (msg.type === 'error') {
+      body.textContent = '// Stream error: ' + (msg.message || 'unknown');
+      stopLoading();
+      ws.close();
+    }
+  };
+  ws.onerror = function() { body.textContent = '// WebSocket connection failed'; stopLoading(); };
+  ws.onclose = function() { stopLoading(); };
+}
+
+async function runPlan() {
+  const goal = document.getElementById('inp-plan-goal').value.trim();
+  if (!goal) return;
+  const url = document.getElementById('inp-plan-url').value.trim();
+  startLoading();
+  try {
+    const body = { goal };
+    if (url) body.url = url;
+    const res = await fetch('/api/compile', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    // Format plan as readable markdown
+    let md = '# Plan: ' + goal + '\n\n';
+    if (data.steps) {
+      data.steps.forEach((s, i) => { md += (i+1) + '. **' + (s.action||s.description||'Step') + '**\n'; });
+    } else if (data.plan) {
+      md = JSON.stringify(data.plan, null, 2);
+    }
+    document.getElementById('markdown-body').textContent = md;
+  } catch(err) {
+    document.getElementById('response-body').textContent = '// Error: ' + err.message;
+  } finally { stopLoading(); }
+}
+
+function fillLinks(url, goal) {
+  document.getElementById('inp-links-url').value = url;
+  document.getElementById('inp-links-goal').value = goal;
+}
+
+async function runDiff() {
+  const url = document.getElementById('inp-diff-url').value.trim();
+  if (!url) return;
+  const url2 = document.getElementById('inp-diff-url2').value.trim() || url;
+  const goal = document.getElementById('inp-diff-goal').value.trim() || 'changes';
+  startLoading();
+  const t0 = performance.now();
+  try {
+    // Fetch both pages and compare their CRFR results
+    const [r1, r2] = await Promise.all([
+      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(),
+        body: JSON.stringify({url, goal, top_n: 30, output_format:'json'}) }),
+      fetch('/api/parse-crfr', { method:'POST', headers:apiHeaders(),
+        body: JSON.stringify({url: url2, goal, top_n: 30, output_format:'json'}) }),
+    ]);
+    const d1 = await r1.json();
+    const d2 = await r2.json();
+    const elapsed = Math.round(performance.now() - t0);
+    const nodes1 = d1.nodes || [];
+    const nodes2 = d2.nodes || [];
+    const labels1 = new Set(nodes1.map(n => n.label));
+    const labels2 = new Set(nodes2.map(n => n.label));
+    const added = nodes2.filter(n => !labels1.has(n.label));
+    const removed = nodes1.filter(n => !labels2.has(n.label));
+    const kept = nodes1.filter(n => labels2.has(n.label));
+
+    // Build visual diff for markdown panel
+    let md = '# Diff: ' + url.split('/').slice(0,3).join('/') + '\n\n';
+    md += '**+' + added.length + ' added** | **-' + removed.length + ' removed** | **' + kept.length + ' unchanged** | ' + elapsed + 'ms\n\n';
+    if (added.length) { md += '## Added\n'; added.forEach(n => md += '+ [' + (n.role||'?') + '] ' + (n.label||'').slice(0,200) + '\n'); md += '\n'; }
+    if (removed.length) { md += '## Removed\n'; removed.forEach(n => md += '- [' + (n.role||'?') + '] ' + (n.label||'').slice(0,200) + '\n'); md += '\n'; }
+    if (kept.length) { md += '## Unchanged (' + kept.length + ')\n'; kept.slice(0,5).forEach(n => md += '  [' + (n.role||'?') + '] ' + (n.label||'').slice(0,150) + '\n'); }
+
+    document.getElementById('markdown-body').textContent = md;
+    document.getElementById('response-body').textContent = JSON.stringify({added: added.length, removed: removed.length, kept: kept.length, nodes_a: nodes1.length, nodes_b: nodes2.length, elapsed_ms: elapsed}, null, 2);
+    document.getElementById('meta-nodes').textContent = '+' + added.length + ' / -' + removed.length;
+    document.getElementById('meta-time').textContent = elapsed + 'ms';
+    lastResult = { added, removed, kept };
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runRender() {
+  const url = document.getElementById('inp-render-url').value.trim();
+  if (!url) return;
+  startLoading();
+  const t0 = performance.now();
+  const w = parseInt(document.getElementById('inp-render-w').value) || 1280;
+  const h = parseInt(document.getElementById('inp-render-h').value) || 800;
+  try {
+    const res = await fetch('/api/fetch/render', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify({ url, width: w, height: h })
+    });
+    if (!res.ok) throw new Error('Server returned ' + res.status);
+    const data = await res.json();
+    const elapsed = Math.round(performance.now() - t0);
+    if (data.error) throw new Error(data.error);
+    const b64 = data.png_base64;
+    if (!b64) throw new Error('No image returned');
+    const tier = data.tier_used || 'blitz';
+    const sizeKb = data.png_size_bytes ? (data.png_size_bytes/1024).toFixed(0)+'KB' : '?';
+
+    // Render: show image directly in response panel, hide other views
+    document.querySelectorAll('.response-tab').forEach(t => t.style.display = 'none');
+    document.getElementById('view-markdown').style.display = 'none';
+    document.getElementById('view-toon').style.display = 'none';
+    document.getElementById('view-code').style.display = 'none';
+    document.getElementById('view-response').style.display = 'flex';
+    document.getElementById('response-body').innerHTML =
+      '<div style="text-align:center;padding:1rem">' +
+      '<div style="border:1px solid var(--border);border-radius:12px;overflow:hidden;background:#fff;display:inline-block">' +
+      '<img src="data:image/png;base64,' + b64 + '" style="display:block;max-width:100%;max-height:600px;object-fit:contain">' +
+      '</div>' +
+      '<div style="margin-top:.75rem;font-size:.78rem;color:var(--muted)">' + tier + ' engine &middot; ' + w + '&times;' + h + ' &middot; ' + sizeKb + ' &middot; ' + elapsed + 'ms</div>' +
+      '</div>';
+    document.getElementById('meta-nodes').textContent = tier;
+    document.getElementById('meta-time').textContent = elapsed + 'ms';
+    document.getElementById('meta-savings').textContent = sizeKb;
+    lastResult = data;
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runLinks() {
+  const url = document.getElementById('inp-links-url').value.trim();
+  if (!url) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/fetch/extract-links', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify({ url, goal: document.getElementById('inp-links-goal').value, max_links: parseInt(document.getElementById('inp-links-max').value)||20 })
+    });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    let md = '# Links\n\n';
+    if (data.links) data.links.slice(0,20).forEach((l,i) => { md += (i+1) + '. [' + (l.anchor||l.url||'?') + '](' + (l.url||'') + ') — rel:' + (l.relevance||0).toFixed(2) + '\n'; });
+    document.getElementById('markdown-body').textContent = md;
+    document.getElementById('meta-nodes').textContent = (data.links||[]).length + ' links';
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runExplore() {
+  const url = document.getElementById('inp-explore-url').value.trim();
+  if (!url) return;
+  startLoading();
+  try {
+    const res = await fetch('/api/fetch/detect-xhr', { method:'POST', headers:apiHeaders(), body: JSON.stringify({ url }) });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    let md = '# Hidden API Endpoints\n\n';
+    if (Array.isArray(data)) data.forEach((x,i) => { md += (i+1) + '. ' + (x.method||'GET') + ' ' + (x.url||'?') + '\n'; });
+    document.getElementById('markdown-body').textContent = md;
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runLearn() {
+  const user = getPlaygroundUser();
+  if (!user) {
+    document.getElementById('response-body').textContent = '// Sign in at /keys first to use slaash.learn';
+    document.getElementById('markdown-body').textContent = 'Sign in required. Go to /keys to create an account.\n\nAnonymous feedback is disabled to protect global weights.';
+    return;
+  }
+  const url = document.getElementById('inp-learn-url').value.trim();
+  const goal = document.getElementById('inp-learn-goal').value.trim();
+  const idsStr = document.getElementById('inp-learn-ids').value.trim();
+  if (!url || !goal || !idsStr) return;
+  const ids = idsStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+  startLoading();
+  try {
+    const res = await fetch('/api/crfr-feedback', { method:'POST', headers:apiHeaders(), body: JSON.stringify({ url, goal, successful_node_ids: ids, user_id: user.id }) });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('markdown-body').textContent = data.status === 'ok' ? 'Feedback sent to your personal model! Nodes #' + ids.join(', #') + ' will rank higher.' : JSON.stringify(data);
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function runInspect() {
+  const input = document.getElementById('inp-inspect-input').value.trim();
+  if (!input) return;
+  const check = document.getElementById('inp-inspect-check').value;
+  startLoading();
+  try {
+    let endpoint, body;
+    if (check === 'injection') {
+      endpoint = '/api/check-injection';
+      body = JSON.stringify({ text: input });
+    } else {
+      endpoint = '/api/firewall-classify';
+      body = JSON.stringify({ url: input, goal: 'security check' });
+    }
+    const res = await fetch(endpoint, { method:'POST', headers:apiHeaders(), body });
+    const data = await res.json();
+    lastResult = data;
+    document.getElementById('response-body').textContent = JSON.stringify(data, null, 2);
+    document.getElementById('markdown-body').textContent = JSON.stringify(data, null, 2);
+  } catch(err) { document.getElementById('response-body').textContent = '// Error: ' + err.message; }
+  finally { stopLoading(); }
+}
+
+async function sendFeedback() {
+  if (!lastUrl) return;
+  const user = getPlaygroundUser();
+  if (!user) {
+    document.getElementById('feedback-msg').textContent = 'Sign in at /keys first to use feedback.';
+    return;
+  }
+  const checkboxes = document.querySelectorAll('#feedback-nodes input[type=checkbox]:checked');
+  const ids = Array.from(checkboxes).map(cb => parseInt(cb.value));
+  if (ids.length === 0) {
+    document.getElementById('feedback-msg').textContent = 'Select at least one node to send feedback.';
+    return;
+  }
+  try {
+    const res = await fetch('/api/crfr-feedback', {
+      method:'POST', headers:apiHeaders(),
+      body: JSON.stringify({ url: lastUrl, goal: lastGoal, successful_node_ids: ids, user_id: user.id })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      document.getElementById('feedback-msg').textContent =
+        'Sent! Nodes #' + ids.join(', #') + ' will rank higher in your personal model.';
+      document.getElementById('feedback-msg').style.color = 'var(--green)';
+    } else {
+      document.getElementById('feedback-msg').textContent = 'Feedback error: ' + (data.message || JSON.stringify(data));
+      document.getElementById('feedback-msg').style.color = 'var(--red)';
+    }
+  } catch(e) {
+    document.getElementById('feedback-msg').textContent = 'Feedback failed: ' + e.message;
+    document.getElementById('feedback-msg').style.color = 'var(--red)';
+  }
+}
+
+function startPlayground() {
+  document.getElementById('welcome-panel').classList.add('hidden');
+}
+
+function toggleDrawer() {
+  const drawer = document.getElementById('drawer');
+  const overlay = document.getElementById('drawer-overlay');
+  const isOpen = drawer.classList.contains('open');
+  drawer.classList.toggle('open');
+  overlay.classList.toggle('open');
+  document.body.style.overflow = isOpen ? '' : 'hidden';
+}
+
+function drawerSwitch(tab) {
+  // Update active state in drawer
+  document.querySelectorAll('#drawer .sidebar-link').forEach(l => l.classList.remove('active'));
+  document.querySelectorAll('#drawer .sidebar-link').forEach(l => {
+    if (l.textContent.trim().toLowerCase().includes(tab)) l.classList.add('active');
+  });
+  switchTab(tab);
+  toggleDrawer();
+}
+
+function getPlaygroundUser() {
+  try {
+    const saved = localStorage.getItem('slaash_user');
+    return saved ? JSON.parse(saved) : null;
+  } catch(e) { return null; }
+}
+
+// Common headers for all API calls — uses session token for auth + rate limits
+function apiHeaders() {
+  const h = {'Content-Type':'application/json'};
+  const token = localStorage.getItem('slaash_session_token');
+  if (token) {
+    h['Authorization'] = 'Bearer ' + token;
+  } else {
+    // Fallback: user ID for usage attribution (anonymous rate limits)
+    const u = getPlaygroundUser();
+    if (u && u.id) h['X-Slaash-User-Id'] = String(u.id);
+  }
+  return h;
+}
+
+// Init
+updateCodePreview();
+</script>
+<div data-component="footer"></div>
+<script src="/components.js"></script>
+</body>
+</html>

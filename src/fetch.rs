@@ -102,12 +102,21 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
     request = request.header("Accept-Language", "en-US,en;q=0.9,sv;q=0.8");
     // Accept-Encoding: hanteras automatiskt av reqwest (.gzip(true).brotli(true))
     // Ingen manuell header — reqwest sätter rätt encoding baserat på aktiverade features
+    // Phase 4.1: Full set of stealth headers matching real Chrome 131.
+    // These prevent TLS/header fingerprint-based bot detection.
     request = request.header("DNT", "1");
+    request = request.header(
+        "Sec-CH-UA",
+        r#""Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24""#,
+    );
+    request = request.header("Sec-CH-UA-Mobile", "?0");
+    request = request.header("Sec-CH-UA-Platform", "\"Linux\"");
     request = request.header("Sec-Fetch-Dest", "document");
     request = request.header("Sec-Fetch-Mode", "navigate");
     request = request.header("Sec-Fetch-Site", "none");
     request = request.header("Sec-Fetch-User", "?1");
     request = request.header("Upgrade-Insecure-Requests", "1");
+    request = request.header("Priority", "u=0, i");
     for (key, value) in &config.extra_headers {
         request = request.header(key.as_str(), value.as_str());
     }
@@ -196,6 +205,9 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
     let body_size_bytes = body.len();
     let fetch_time_ms = start.elapsed().as_millis() as u64;
 
+    // Phase 4.2: Detect bot blocking from response status + body patterns
+    let bot_blocked = is_bot_blocked_response(status_code, &body);
+
     Ok(FetchResult {
         final_url,
         status_code,
@@ -206,6 +218,7 @@ pub async fn fetch_page(url: &str, config: &FetchConfig) -> Result<FetchResult, 
         body_size_bytes,
         cross_domain_redirect,
         set_cookie_headers,
+        bot_blocked,
     })
 }
 
@@ -259,6 +272,58 @@ pub async fn check_robots_txt_google(url: &str, user_agent: &str) -> Result<(), 
         Ok(inner) => inner,
         Err(_timeout) => Ok(()),
     }
+}
+
+// ─── Phase 4.2: Bot-blocking detection ──────────────────────────────────────
+
+/// Detect if an HTTP response indicates bot blocking (WAF, CAPTCHA, etc.)
+/// Returns true if the response looks like a bot challenge rather than content.
+fn is_bot_blocked_response(status_code: u16, body: &str) -> bool {
+    // 403 + short body with known patterns
+    if status_code == 403 {
+        let lower = body.to_lowercase();
+        if body.len() < 5000
+            && (lower.contains("access denied")
+                || lower.contains("forbidden")
+                || lower.contains("not have permission")
+                || lower.contains("blocked")
+                || lower.contains("security check"))
+        {
+            return true;
+        }
+    }
+
+    // Cloudflare challenge (any status)
+    if body.contains("cf-browser-verification")
+        || body.contains("cf_chl_opt")
+        || body.contains("Checking your browser")
+        || body.contains("Just a moment...")
+        || body.contains("challenge-platform")
+    {
+        return true;
+    }
+
+    // CAPTCHA / robot check
+    let lower = body.to_lowercase();
+    if body.len() < 10000
+        && (lower.contains("captcha")
+            || lower.contains("robot check")
+            || lower.contains("are you a robot")
+            || lower.contains("please verify you are human")
+            || lower.contains("enable javascript and cookies"))
+    {
+        return true;
+    }
+
+    // Empty body with JS-only page (very small HTML with just a script redirect)
+    if body.len() < 500 && status_code == 200 {
+        let lower = body.to_lowercase();
+        if lower.contains("please enable js") || lower.contains("javascript is required") {
+            return true;
+        }
+    }
+
+    false
 }
 
 // ─── URL-validering (SSRF-skydd) ────────────────────────────────────────────

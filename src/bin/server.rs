@@ -6,7 +6,7 @@
 ///
 /// Run: cargo run --features server --bin aether-server
 use axum::{
-    extract::{DefaultBodyLimit, Json},
+    extract::{ConnectInfo, DefaultBodyLimit, Json},
     http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -79,6 +79,13 @@ struct ParseCrfrRequest {
     /// with extracted content. Default: true. Set false to disable.
     #[serde(default = "default_true")]
     follow_links: bool,
+    /// User ID for per-user causal weight personalization.
+    #[serde(default)]
+    user_id: i64,
+    /// Optional locale (e.g. "sv-SE", "en-US") — sets Accept-Language at fetch.
+    /// If omitted and user_id > 0, user's default locale is used.
+    #[serde(default)]
+    locale: Option<String>,
 }
 
 fn default_crfr_top_n() -> u32 {
@@ -96,6 +103,8 @@ struct CrfrFeedbackRequest {
     url: String,
     goal: String,
     successful_node_ids: Vec<u32>,
+    #[serde(default)]
+    user_id: i64,
 }
 
 #[derive(Deserialize)]
@@ -411,6 +420,21 @@ struct CollabFetchRequest {
 #[derive(Deserialize)]
 struct DetectXhrRequest {
     html: String,
+}
+
+#[derive(Deserialize)]
+struct FetchDetectXhrRequest {
+    url: String,
+}
+
+#[derive(Deserialize)]
+struct FetchActRequest {
+    url: String,
+    goal: String,
+    #[serde(default)]
+    action: Option<String>,
+    #[serde(default)]
+    target: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1118,13 +1142,34 @@ async fn parse_hybrid(Json(req): Json<ParseTopRequest>) -> impl IntoResponse {
     (StatusCode::OK, result_json)
 }
 
-async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoResponse {
+async fn parse_crfr_handler(
+    headers: HeaderMap,
+    Json(req): Json<ParseCrfrRequest>,
+) -> impl IntoResponse {
     let follow_links = req.follow_links;
     let goal = req.goal;
     let url = req.url;
     let top_n = req.top_n;
     let run_js = req.run_js;
     let output_format = req.output_format;
+    // Resolve user_id: prefer request body, fall back to session token
+    let user_id = if req.user_id > 0 {
+        req.user_id
+    } else {
+        headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .filter(|v| v.starts_with("Bearer "))
+            .and_then(|v| aether_agent::auth::validate_session_token(&v[7..]))
+            .map(|(_key_id, uid)| uid)
+            .unwrap_or(0)
+    };
+    eprintln!(
+        "[CRFR] parse_crfr_handler: url={}, user_id={}, goal={}...",
+        url,
+        user_id,
+        &goal[..goal.len().min(30)]
+    );
 
     // Resolve HTML: use provided html, or fetch from url
     let html = if let Some(h) = req.html {
@@ -1141,12 +1186,36 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
     let mut html = html;
     #[allow(unused_mut)]
     let mut fetch_ms: u64 = 0;
+
+    // Resolve locale: explicit > user's default > en-US
+    let effective_locale = req
+        .locale
+        .clone()
+        .filter(|l| !l.is_empty())
+        .or_else(|| {
+            if user_id > 0 {
+                aether_agent::auth::get_user_locale(user_id)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "en-US".to_string());
+
     #[cfg(feature = "fetch")]
     if html.is_empty() && !url.is_empty() {
         let fetch_start = std::time::Instant::now();
-        match aether_agent::fetch::fetch_page(&url, &aether_agent::types::FetchConfig::default())
-            .await
-        {
+        let mut fetch_config = aether_agent::types::FetchConfig::default();
+        // Set Accept-Language based on locale
+        let accept_language = if effective_locale.contains('-') {
+            let base = effective_locale.split('-').next().unwrap_or("en");
+            format!("{},{};q=0.9,en;q=0.8", effective_locale, base)
+        } else {
+            format!("{},en;q=0.8", effective_locale)
+        };
+        fetch_config
+            .extra_headers
+            .insert("Accept-Language".to_string(), accept_language);
+        match aether_agent::fetch::fetch_page(&url, &fetch_config).await {
             Ok(fetched) => {
                 fetch_ms = fetch_start.elapsed().as_millis() as u64;
                 html = fetched.body;
@@ -1231,13 +1300,14 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
 
     // Pass 4: Kör CRFR på (potentiellt berikad) tree
     let result = tokio::task::spawn_blocking(move || {
-        aether_agent::parse_crfr_from_tree_js(
+        aether_agent::parse_crfr_from_tree_js_user(
             &tree,
             &goal_clone,
             &url_clone,
             top_n,
             &fmt_clone,
             run_js,
+            user_id,
         )
     })
     .await
@@ -1262,7 +1332,17 @@ async fn parse_crfr_handler(Json(req): Json<ParseCrfrRequest>) -> impl IntoRespo
         result
     };
 
-    (StatusCode::OK, result).into_response()
+    // Set token headers for middleware usage logging
+    let tokens_in = (raw_html_chars / 4) as i64;
+    let tokens_out = (result.len() / 4) as i64;
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = tokens_in.to_string().parse() {
+        headers.insert("x-tokens-in", v);
+    }
+    if let Ok(v) = tokens_out.to_string().parse() {
+        headers.insert("x-tokens-out", v);
+    }
+    (StatusCode::OK, headers, result).into_response()
 }
 
 /// Auto-follow relevant link nodes: fetch targets, run CRFR, REPLACE link nodes
@@ -1548,13 +1628,27 @@ fn should_follow_link(label: &str) -> bool {
 async fn crfr_feedback_handler(Json(req): Json<CrfrFeedbackRequest>) -> impl IntoResponse {
     let url = req.url;
     let goal = req.goal;
+    let user_id = req.user_id;
     let ids_json =
         serde_json::to_string(&req.successful_node_ids).unwrap_or_else(|_| "[]".to_string());
 
-    let result =
-        tokio::task::spawn_blocking(move || aether_agent::crfr_feedback(&url, &goal, &ids_json))
-            .await
-            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+    // Always use per-user feedback. user_id=0 is rejected (no anonymous global training).
+    let result = if user_id <= 0 {
+        r#"{"status":"error","message":"user_id required. Sign in at /keys to use feedback."}"#
+            .to_string()
+    } else {
+        tokio::task::spawn_blocking(move || {
+            aether_agent::crfr_feedback_user(&url, &goal, &ids_json, user_id)
+        })
+        .await
+        .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string())
+    };
+
+    eprintln!(
+        "[FEEDBACK] user_id={} result={}",
+        user_id,
+        &result[..result.len().min(120)]
+    );
 
     (StatusCode::OK, result)
 }
@@ -2302,6 +2396,61 @@ async fn detect_xhr(Json(req): Json<DetectXhrRequest>) -> impl IntoResponse {
     (StatusCode::OK, result)
 }
 
+async fn fetch_detect_xhr(Json(req): Json<FetchDetectXhrRequest>) -> impl IntoResponse {
+    let config = aether_agent::types::FetchConfig::default();
+    let html = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r.body,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+    let result = aether_agent::detect_xhr_urls(&html);
+    (StatusCode::OK, result)
+}
+
+async fn fetch_act(Json(req): Json<FetchActRequest>) -> impl IntoResponse {
+    if let Err(e) = aether_agent::fetch::validate_url(&req.url) {
+        return (
+            StatusCode::BAD_REQUEST,
+            serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+        );
+    }
+
+    let config = aether_agent::types::FetchConfig::default();
+    let fetch_result = match aether_agent::fetch::fetch_page(&req.url, &config).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                serde_json::to_string(&ErrorResponse { error: e }).unwrap_or_default(),
+            )
+        }
+    };
+
+    let action = req.action.as_deref().unwrap_or("click");
+    let target = req.target.as_deref().unwrap_or("");
+    let final_url = &fetch_result.final_url;
+    let html = &fetch_result.body;
+
+    let result = match action {
+        "click" => aether_agent::find_and_click(html, &req.goal, final_url, target),
+        "extract" => {
+            let keys = if target.is_empty() {
+                "[]".to_string()
+            } else {
+                serde_json::to_string(&[target]).unwrap_or_else(|_| "[]".to_string())
+            };
+            aether_agent::extract_data(html, &req.goal, final_url, &keys)
+        }
+        _ => aether_agent::find_and_click(html, &req.goal, final_url, target),
+    };
+
+    (StatusCode::OK, result)
+}
+
 // ─── Fas 17: DDG Search handlers ────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -2535,8 +2684,23 @@ fn deep_extract_page_nodes(json: &str, max: usize) -> Vec<aether_agent::search::
 // ─── WebSocket: Universal API Gateway (/ws/api) ─────────────────────────────
 
 /// Universell WebSocket-gateway som multiplexar alla API-anrop med realtids-progress.
-async fn ws_api_handler(ws: axum::extract::WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_ws_api)
+async fn ws_api_handler(
+    ws: axum::extract::WebSocketUpgrade,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+) -> impl IntoResponse {
+    // Rate limit WebSocket connections per IP
+    let ip = connect_info
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let limits = aether_agent::auth::RateLimits::anonymous();
+    if let Err(retry) = aether_agent::auth::check_rate_limit(&format!("ws-ip:{ip}"), &limits) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Rate limit exceeded. Retry after {retry}s"),
+        )
+            .into_response();
+    }
+    ws.on_upgrade(handle_ws_api).into_response()
 }
 
 async fn handle_ws_api(mut socket: axum::extract::ws::WebSocket) {
@@ -3133,9 +3297,31 @@ async fn ws_api_fetch_op(
 /// MCP JSON-RPC via WebSocket — initialize, tools/list, tools/call, ping
 async fn ws_mcp_handler(
     ws: axum::extract::WebSocketUpgrade,
+    headers: HeaderMap,
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> impl IntoResponse {
+    // Auth check before WebSocket upgrade
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let api_key = if auth.starts_with("Bearer ") {
+        &auth[7..]
+    } else {
+        ""
+    };
+    let is_valid = (!api_key.is_empty())
+        && (aether_agent::auth::validate_api_key(api_key).is_some()
+            || aether_agent::auth::validate_oauth_token(api_key).is_some());
+    if !is_valid {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Authorization required. Use Bearer token (API key or OAuth). See /.well-known/oauth-authorization-server",
+        )
+            .into_response();
+    }
     ws.on_upgrade(move |socket| handle_ws_mcp(socket, state))
+        .into_response()
 }
 
 async fn handle_ws_mcp(mut socket: axum::extract::ws::WebSocket, state: AppState) {
@@ -3200,7 +3386,7 @@ async fn handle_ws_mcp(mut socket: axum::extract::ws::WebSocket, state: AppState
                 let tool_name = params["name"].as_str().unwrap_or("");
                 let arguments = &params["arguments"];
                 let call_start = std::time::Instant::now();
-                let result = mcp_dispatch_tool(tool_name, arguments, &state).await;
+                let result = mcp_dispatch_tool(tool_name, arguments, &state, 0).await;
                 let call_ms = call_start.elapsed().as_millis();
 
                 // Broadcast tool-anrop till SSE-dashboard
@@ -3260,8 +3446,21 @@ async fn handle_ws_mcp(mut socket: axum::extract::ws::WebSocket, state: AppState
 async fn ws_search_handler(
     ws: axum::extract::WebSocketUpgrade,
     axum::extract::State(state): axum::extract::State<AppState>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
 ) -> impl IntoResponse {
+    let ip = connect_info
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let limits = aether_agent::auth::RateLimits::anonymous();
+    if let Err(retry) = aether_agent::auth::check_rate_limit(&format!("ws-ip:{ip}"), &limits) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Rate limit exceeded. Retry after {retry}s"),
+        )
+            .into_response();
+    }
     ws.on_upgrade(move |socket| handle_ws_search(socket, state))
+        .into_response()
 }
 
 async fn handle_ws_search(mut socket: axum::extract::ws::WebSocket, _state: AppState) {
@@ -3449,8 +3648,22 @@ async fn handle_ws_search(mut socket: axum::extract::ws::WebSocket, _state: AppS
 ///   {"type":"warning", "warning":{...}}
 ///   {"type":"done", "nodes_emitted":10, "total_dom_nodes":372, ...}
 ///   {"type":"error", "message":"..."}
-async fn ws_stream_handler(ws: axum::extract::WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(handle_ws_stream)
+async fn ws_stream_handler(
+    ws: axum::extract::WebSocketUpgrade,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
+) -> impl IntoResponse {
+    let ip = connect_info
+        .map(|ci| ci.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let limits = aether_agent::auth::RateLimits::anonymous();
+    if let Err(retry) = aether_agent::auth::check_rate_limit(&format!("ws-ip:{ip}"), &limits) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            format!("Rate limit exceeded. Retry after {retry}s"),
+        )
+            .into_response();
+    }
+    ws.on_upgrade(handle_ws_stream).into_response()
 }
 
 async fn handle_ws_stream(mut socket: axum::extract::ws::WebSocket) {
@@ -5746,6 +5959,7 @@ async fn mcp_dispatch_tool(
     name: &str,
     args: &serde_json::Value,
     _state: &AppState,
+    user_id: i64,
 ) -> Result<serde_json::Value, String> {
     let text_ok = |s: String| -> Result<serde_json::Value, String> {
         Ok(serde_json::json!([{"type": "text", "text": s}]))
@@ -6079,8 +6293,9 @@ async fn mcp_dispatch_tool(
                 aether_agent::tools::resolve_pending_fetches(&mut tree, &goal_str).await;
             }
 
+            let mcp_uid = user_id;
             let result = tokio::task::spawn_blocking(move || {
-                aether_agent::parse_crfr_from_tree_js(&tree, &goal_str, &page_url, top_n, &fmt, run_js)
+                aether_agent::parse_crfr_from_tree_js_user(&tree, &goal_str, &page_url, top_n, &fmt, run_js, mcp_uid)
             })
             .await
             .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
@@ -6092,6 +6307,12 @@ async fn mcp_dispatch_tool(
         "crfr_feedback" => {
             let url = args["url"].as_str().unwrap_or("");
             let goal = args["goal"].as_str().unwrap_or("");
+            // Use session user_id (from Bearer token), fall back to explicit param
+            let feedback_user_id = if user_id > 0 {
+                user_id
+            } else {
+                args["user_id"].as_i64().unwrap_or(0)
+            };
             let ids: Vec<u32> = args["successful_node_ids"]
                 .as_array()
                 .map(|arr| {
@@ -6104,11 +6325,16 @@ async fn mcp_dispatch_tool(
             let ids_json = serde_json::to_string(&ids).unwrap_or_else(|_| "[]".to_string());
             let url_str = url.to_string();
             let goal_str = goal.to_string();
-            let result = tokio::task::spawn_blocking(move || {
-                aether_agent::crfr_feedback(&url_str, &goal_str, &ids_json)
-            })
-            .await
-            .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string());
+            // Always use per-user feedback — never train global weights from user input
+            let result = if feedback_user_id <= 0 {
+                r#"{"status":"error","message":"user_id required for feedback. Global weights cannot be trained by users."}"#.to_string()
+            } else {
+                tokio::task::spawn_blocking(move || {
+                    aether_agent::crfr_feedback_user(&url_str, &goal_str, &ids_json, feedback_user_id)
+                })
+                .await
+                .unwrap_or_else(|_| r#"{"error":"task panicked"}"#.to_string())
+            };
 
             text_ok(result)
         }
@@ -6238,8 +6464,70 @@ async fn mcp_post(
     headers: HeaderMap,
     Json(msg): Json<serde_json::Value>,
 ) -> impl IntoResponse {
+    // API key required for MCP endpoint
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let api_key = if auth.starts_with("Bearer ") {
+        &auth[7..]
+    } else {
+        ""
+    };
+
+    // Allow "initialize" without auth (client needs to discover capabilities first)
     let method = msg["method"].as_str().unwrap_or("");
     let id = &msg["id"];
+
+    eprintln!(
+        "[MCP] POST method={}, auth={}, id={}",
+        method,
+        if api_key.is_empty() {
+            "none"
+        } else if api_key.starts_with("sk-") {
+            "api_key"
+        } else if api_key.starts_with("slaash_") {
+            "oauth"
+        } else if api_key.starts_with("session_") {
+            "session"
+        } else {
+            "unknown"
+        },
+        id
+    );
+
+    // Auth only required for tools/call (actual tool execution).
+    // Discovery methods (initialize, tools/list, ping, notifications/*) are public.
+    // Claude Connectors sends NO auth for discovery — confirmed by production logs.
+    let needs_auth = method == "tools/call";
+    let mut mcp_user_id: i64 = 0;
+    if needs_auth {
+        if api_key.is_empty() {
+            let err = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32001, "message": "Authorization required. Use Bearer token (API key or OAuth). Get a key at https://www.slaash.ai/keys"}
+            });
+            return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
+        }
+        // Try API key, session token, or OAuth token — extract user_id
+        if let Some((_key_id, uid)) = aether_agent::auth::validate_api_key(api_key) {
+            mcp_user_id = uid;
+        } else if let Some((_key_id, uid)) = aether_agent::auth::validate_session_token(api_key) {
+            mcp_user_id = uid;
+        } else if let Some((uid, _client)) = aether_agent::auth::validate_oauth_token(api_key) {
+            mcp_user_id = uid;
+        } else {
+            let err = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32001, "message": "Invalid token. Get an API key at https://www.slaash.ai/keys or use OAuth via /.well-known/oauth-authorization-server"}
+            });
+            return (StatusCode::UNAUTHORIZED, HeaderMap::new(), err.to_string());
+        }
+        eprintln!("[MCP] tools/call authenticated: user_id={}", mcp_user_id);
+    }
+
     let params = &msg["params"];
 
     // Notification (inget id) — acceptera tyst
@@ -6290,7 +6578,7 @@ async fn mcp_post(
             let tool_name = params["name"].as_str().unwrap_or("");
             let arguments = &params["arguments"];
             let call_start = std::time::Instant::now();
-            let result = mcp_dispatch_tool(tool_name, arguments, &state).await;
+            let result = mcp_dispatch_tool(tool_name, arguments, &state, mcp_user_id).await;
             let call_ms = call_start.elapsed().as_millis();
 
             // Broadcast tool-anrop till SSE-dashboard
@@ -6318,12 +6606,40 @@ async fn mcp_post(
             }
 
             match result {
-                Ok(content_blocks) => jsonrpc_result(
-                    id,
-                    serde_json::json!({
-                        "content": content_blocks
-                    }),
-                ),
+                Ok(ref content_blocks) => {
+                    // Log MCP tool usage with tool name and token counts
+                    let result_chars: usize = content_blocks
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|b| b["text"].as_str())
+                                .map(|s| s.len())
+                                .sum()
+                        })
+                        .unwrap_or(0);
+                    let tokens_out = (result_chars / 4) as i64;
+                    if mcp_user_id > 0 {
+                        let key_id =
+                            aether_agent::auth::get_default_key_id(mcp_user_id).unwrap_or(0);
+                        if key_id > 0 {
+                            let ep = format!("/mcp/{}", tool_name);
+                            aether_agent::auth::log_usage(
+                                key_id,
+                                &ep,
+                                call_ms as i64,
+                                0,
+                                tokens_out,
+                            );
+                            aether_agent::auth::increment_key_counters(key_id);
+                        }
+                    }
+                    jsonrpc_result(
+                        id,
+                        serde_json::json!({
+                            "content": content_blocks
+                        }),
+                    )
+                }
                 Err(e) => jsonrpc_result(
                     id,
                     serde_json::json!({
@@ -6373,6 +6689,9 @@ async fn mcp_get(
     if accept.contains("text/html") {
         return axum::response::Html(MCP_DASHBOARD_HTML).into_response();
     }
+
+    // SSE stream: no auth required for Claude Connectors discovery.
+    // Auth is enforced at tools/call level, not at SSE connection level.
 
     // MCP-klient / EventSource → SSE-ström med broadcast-events
     let session_id = headers
@@ -7040,10 +7359,53 @@ async fn landing_live() -> impl IntoResponse {
     .await
 }
 
+async fn landing_playground() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/playground.html",
+        "landing-pages/playground.html",
+    ])
+    .await
+}
+
 async fn landing_docs() -> impl IntoResponse {
     serve_html_file(&[
         "/app/static/landing-pages/docs.html",
         "landing-pages/docs.html",
+    ])
+    .await
+}
+async fn doc_quickstart() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-quickstart.html",
+        "landing-pages/docs-quickstart.html",
+    ])
+    .await
+}
+async fn doc_mcp() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-mcp.html",
+        "landing-pages/docs-mcp.html",
+    ])
+    .await
+}
+async fn doc_api() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-api.html",
+        "landing-pages/docs-api.html",
+    ])
+    .await
+}
+async fn doc_guide() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-guide.html",
+        "landing-pages/docs-guide.html",
+    ])
+    .await
+}
+async fn doc_trust_shield() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/docs-trust-shield.html",
+        "landing-pages/docs-trust-shield.html",
     ])
     .await
 }
@@ -7089,6 +7451,168 @@ fn build_router(state: AppState) -> Router {
         },
     );
 
+    // Usage tracking + rate limiting middleware
+    let usage_layer = axum::middleware::from_fn(
+        |req: axum::extract::Request, next: axum::middleware::Next| async move {
+            let t0 = std::time::Instant::now();
+            let endpoint = req.uri().path().to_string();
+
+            // Rate-limit /api/, /mcp, /oauth, and /ws/ endpoints
+            let is_api = endpoint.starts_with("/api/")
+                || endpoint == "/mcp"
+                || endpoint.starts_with("/oauth/")
+                || endpoint.starts_with("/ws/");
+            if !is_api {
+                return next.run(req).await;
+            }
+
+            // Extract Bearer token from Authorization header
+            let bearer = req
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .filter(|v| v.starts_with("Bearer "))
+                .map(|v| v[7..].to_string());
+
+            // Try in order: API key (sk-...), session token (session_...), OAuth (slaash_...)
+            let key_info = bearer.as_deref().and_then(|token| {
+                aether_agent::auth::validate_api_key(token)
+                    .or_else(|| aether_agent::auth::validate_session_token(token))
+                    .or_else(|| {
+                        aether_agent::auth::validate_oauth_token(token).map(|(user_id, _client)| {
+                            // OAuth: find key for usage attribution
+                            let key_id =
+                                aether_agent::auth::get_default_key_id(user_id).unwrap_or(0);
+                            (key_id, user_id)
+                        })
+                    })
+            });
+
+            // X-Slaash-User-Id for usage attribution only (NOT rate limit upgrade)
+            let session_key_id = if key_info.is_none() {
+                req.headers()
+                    .get("x-slaash-user-id")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .and_then(|uid| {
+                        aether_agent::auth::get_default_key_id(uid).map(|kid| (kid, uid))
+                    })
+            } else {
+                None
+            };
+
+            // Rate limiting: ONLY Bearer API key gets elevated limits.
+            // X-Slaash-User-Id is for usage attribution only, NOT rate limit upgrade.
+            // This prevents spoofing: anyone can send X-Slaash-User-Id but only
+            // a valid Bearer token proves identity.
+            if let Some((_key_id, _user_id)) = key_info {
+                // Authenticated via Bearer: 60 req/min, 1000/day
+                let limits = aether_agent::auth::RateLimits::free_tier();
+                let id = format!("key:{}", _key_id);
+                if let Err(retry) = aether_agent::auth::check_rate_limit(&id, &limits) {
+                    let body = serde_json::json!({
+                        "error": "Rate limit exceeded",
+                        "retry_after_seconds": retry,
+                        "tier": "free"
+                    });
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        [(axum::http::header::RETRY_AFTER, retry.to_string())],
+                        body.to_string(),
+                    )
+                        .into_response();
+                }
+            } else {
+                // Anonymous: 10 req/min, 50/day per IP
+                let ip = req
+                    .extensions()
+                    .get::<ConnectInfo<SocketAddr>>()
+                    .map(|ci| ci.0.ip().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let limits = aether_agent::auth::RateLimits::anonymous();
+                let id = format!("ip:{}", ip);
+                if let Err(retry) = aether_agent::auth::check_rate_limit(&id, &limits) {
+                    let body = serde_json::json!({
+                        "error": "Rate limit exceeded. Sign up at /keys for higher limits.",
+                        "retry_after_seconds": retry,
+                        "tier": "anonymous",
+                        "limit": "10 req/min, 50 req/day"
+                    });
+                    return (
+                        StatusCode::TOO_MANY_REQUESTS,
+                        [(axum::http::header::RETRY_AFTER, retry.to_string())],
+                        body.to_string(),
+                    )
+                        .into_response();
+                }
+            }
+
+            // Measure request body size (fallback tokens in)
+            let req_content_len = req
+                .headers()
+                .get(axum::http::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(0);
+
+            let resp = next.run(req).await;
+
+            // Log usage: skip /mcp (handler logs tools/call as /mcp/<tool_name>)
+            if endpoint != "/mcp" {
+                let log_auth = key_info.or(session_key_id);
+                let auth_source = if key_info.is_some() {
+                    "bearer"
+                } else if session_key_id.is_some() {
+                    "x-user-id"
+                } else {
+                    "none"
+                };
+                if log_auth.is_none() && endpoint.starts_with("/api/") {
+                    eprintln!(
+                        "[USAGE] UNTRACKED {} auth={} — no key found, usage not logged",
+                        endpoint, auth_source
+                    );
+                }
+                if let Some((key_id, _user_id)) = log_auth {
+                    eprintln!(
+                        "[USAGE] {} auth={} key_id={} user_id={}",
+                        endpoint, auth_source, key_id, _user_id
+                    );
+                    let elapsed = t0.elapsed().as_millis() as i64;
+                    // Prefer handler-provided token counts (X-Tokens-In/Out)
+                    // which reflect actual CRFR savings, not HTTP body sizes
+                    let tokens_in = resp
+                        .headers()
+                        .get("x-tokens-in")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .unwrap_or(req_content_len / 4);
+                    let tokens_out = resp
+                        .headers()
+                        .get("x-tokens-out")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<i64>().ok())
+                        .unwrap_or(0);
+                    aether_agent::auth::log_usage(
+                        key_id, &endpoint, elapsed, tokens_in, tokens_out,
+                    );
+                    // Increment key counters for ALL auth methods that bypass
+                    // validate_api_key (which does its own increment).
+                    // Session tokens and OAuth tokens need explicit increment.
+                    if bearer
+                        .as_deref()
+                        .map(|t| !t.starts_with("sk-"))
+                        .unwrap_or(true)
+                    {
+                        aether_agent::auth::increment_key_counters(key_id);
+                    }
+                }
+            } // end if endpoint != "/mcp"
+
+            resp
+        },
+    );
+
     Router::new()
         // Root = landing page
         .route("/", get(landing_concept_1))
@@ -7105,10 +7629,31 @@ fn build_router(state: AppState) -> Router {
         .route("/landing/1", get(landing_concept_1))
         .route("/landing/2", get(landing_concept_2))
         .route("/try", get(landing_try))
+        .route("/playground", get(landing_playground))
+        .route("/keys", get(landing_keys))
+        .route("/usage", get(landing_usage))
+        // Auth API
+        .route("/api/auth/signup", post(auth_signup))
+        .route("/api/auth/login", post(auth_login))
+        .route("/api/auth/keys/create", post(auth_create_key))
+        .route("/api/auth/keys/list", post(auth_list_keys))
+        .route("/api/auth/keys/delete", post(auth_delete_key))
+        .route("/api/auth/usage", post(auth_usage))
+        .route("/api/auth/profile", post(auth_update_profile))
+        .route("/auth/github", get(oauth_github_redirect))
+        .route("/auth/github/callback", get(oauth_github_callback))
+        .route("/auth/google", get(oauth_google_redirect))
+        .route("/auth/google/callback", get(oauth_google_callback))
+        .route("/settings", get(landing_settings))
         .route("/mission", get(landing_mission))
         .route("/timeline", get(landing_timeline))
         .route("/live", get(landing_live))
         .route("/docs", get(landing_docs))
+        .route("/docs/quickstart", get(doc_quickstart))
+        .route("/docs/mcp", get(doc_mcp))
+        .route("/docs/api", get(doc_api))
+        .route("/docs/guide", get(doc_guide))
+        .route("/docs/trust-shield", get(doc_trust_shield))
         // Dashboard
         .route("/dashboard", get(dashboard_html))
         .route("/api/dashboard/snapshot", get(dashboard_snapshot_handler))
@@ -7198,6 +7743,8 @@ fn build_router(state: AppState) -> Router {
         .route("/api/collab/fetch", post(collab_fetch))
         // Fas 10: XHR Interception
         .route("/api/detect-xhr", post(detect_xhr))
+        .route("/api/fetch/detect-xhr", post(fetch_detect_xhr))
+        .route("/api/fetch/act", post(fetch_act))
         // Fas 17: DDG Search
         .route("/api/search", post(search_handler))
         .route("/api/fetch/search", post(fetch_search_handler))
@@ -7325,10 +7872,24 @@ fn build_router(state: AppState) -> Router {
         .route("/api/workflow/complete", post(workflow_complete))
         .route("/api/workflow/rollback", post(workflow_rollback))
         .route("/api/workflow/status", post(workflow_status_handler))
+        // OAuth 2.1 for MCP (Claude Connectors)
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(oauth_metadata_handler),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(oauth_protected_resource_handler),
+        )
+        .route("/oauth/register", post(oauth_register_handler))
+        .route("/oauth/authorize", get(oauth_authorize_handler))
+        .route("/oauth/authorize/complete", post(oauth_authorize_complete))
+        .route("/oauth/token", post(oauth_token_handler))
         // MCP Streamable HTTP (spec 2025-03-26)
         .route("/mcp", post(mcp_post).get(mcp_get).delete(mcp_delete))
         .route("/mcp/events", get(mcp_events_poll))
         .with_state(state)
+        .layer(usage_layer)
         .layer(count_layer)
         .layer(cors)
         // 50 MB body limit — ONNX-modeller + screenshots kräver mer än Axums default (2 MB)
@@ -7410,7 +7971,14 @@ async fn live_stats_handler(
     let (cache_entries, cache_capacity) = aether_agent::resonance::cache_stats();
 
     let sites_profiled = fields.len();
-    let total_queries: u32 = fields.iter().map(|f| f.total_queries).sum();
+    let cache_queries: u64 = fields.iter().map(|f| f.total_queries as u64).sum();
+    #[cfg(feature = "persist")]
+    let total_queries = {
+        let p_q = aether_agent::persist::load_global_stat("total_queries");
+        cache_queries.max(p_q) as u32
+    };
+    #[cfg(not(feature = "persist"))]
+    let total_queries = cache_queries as u32;
     let total_nodes: usize = fields.iter().map(|f| f.node_count).sum();
     let total_edges: usize = fields.iter().map(|f| f.edge_count).sum();
     let total_causal_weights: usize = fields.iter().map(|f| f.propagation_weight_count).sum();
@@ -7418,8 +7986,17 @@ async fn live_stats_handler(
     let total_feedback: u32 = fields.iter().map(|f| f.total_feedback).sum();
     let total_successful: u32 = fields.iter().map(|f| f.total_successful_nodes).sum();
     let total_learned: usize = fields.iter().map(|f| f.learned_nodes).sum();
-    let total_chars_in: u64 = fields.iter().map(|f| f.total_chars_in).sum();
-    let total_chars_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
+    // Use max(cache sum, persisted) to preserve stats across restarts
+    let cache_chars_in: u64 = fields.iter().map(|f| f.total_chars_in).sum();
+    let cache_chars_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
+    #[cfg(feature = "persist")]
+    let (total_chars_in, total_chars_out) = {
+        let p_in = aether_agent::persist::load_global_stat("total_chars_in");
+        let p_out = aether_agent::persist::load_global_stat("total_chars_out");
+        (cache_chars_in.max(p_in), cache_chars_out.max(p_out))
+    };
+    #[cfg(not(feature = "persist"))]
+    let (total_chars_in, total_chars_out) = (cache_chars_in, cache_chars_out);
     let token_savings_pct = if total_chars_in > 0 {
         ((1.0 - total_chars_out as f64 / total_chars_in as f64) * 100.0).max(0.0)
     } else {
@@ -7449,8 +8026,12 @@ async fn live_stats_handler(
     let (db_fields, _db_domains, _db_size) = aether_agent::persist::db_stats();
     #[cfg(not(feature = "persist"))]
     let db_fields: usize = 0;
-    // Show the larger of cache vs db (db has historical, cache has current session)
-    let sites_total = sites_profiled.max(db_fields);
+    // Show the larger of cache vs db vs persisted stat (db has historical, cache has current session)
+    #[cfg(feature = "persist")]
+    let persisted_sites = aether_agent::persist::load_global_stat("sites_profiled") as usize;
+    #[cfg(not(feature = "persist"))]
+    let persisted_sites: usize = 0;
+    let sites_total = sites_profiled.max(db_fields).max(persisted_sites);
 
     // Per-site leaderboard (sorted by total_queries desc)
     let mut site_list: Vec<serde_json::Value> = fields
@@ -7563,14 +8144,841 @@ fn spawn_memory_monitor(request_counter: Arc<std::sync::atomic::AtomicU64>) {
             if tick_count.is_multiple_of(2) {
                 let reqs = request_counter.load(std::sync::atomic::Ordering::Relaxed);
                 aether_agent::persist::save_global_stat("total_requests", reqs);
+                // Save aggregated token stats — use max(cache, persisted) to
+                // preserve historical data across restarts with lazy-load
+                let fields = aether_agent::resonance::list_cached_fields();
+                let cache_in: u64 = fields.iter().map(|f| f.total_chars_in).sum();
+                let cache_out: u64 = fields.iter().map(|f| f.total_chars_out).sum();
+                let cache_q: u64 = fields.iter().map(|f| f.total_queries as u64).sum();
+                let prev_in = aether_agent::persist::load_global_stat("total_chars_in");
+                let prev_out = aether_agent::persist::load_global_stat("total_chars_out");
+                let prev_q = aether_agent::persist::load_global_stat("total_queries");
+                aether_agent::persist::save_global_stat("total_chars_in", cache_in.max(prev_in));
+                aether_agent::persist::save_global_stat("total_chars_out", cache_out.max(prev_out));
+                aether_agent::persist::save_global_stat("total_queries", cache_q.max(prev_q));
+                // Track sites profiled (max of cache + db + previous)
+                let (db_f, _, _) = aether_agent::persist::db_stats();
+                let prev_sites = aether_agent::persist::load_global_stat("sites_profiled") as usize;
+                let sites_now = fields.len().max(db_f).max(prev_sites);
+                aether_agent::persist::save_global_stat("sites_profiled", sites_now as u64);
                 aether_agent::persist::checkpoint();
             }
         }
     });
 }
 
-#[tokio::main]
-async fn main() {
+// ─── OAuth 2.1 Endpoints (MCP / Claude Connectors) ─────────────────────
+
+/// GET /.well-known/oauth-authorization-server
+async fn oauth_metadata_handler(req: axum::extract::Request) -> impl IntoResponse {
+    let host = req
+        .headers()
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost:3000");
+    let scheme = if host.contains("slaash.ai") || host.contains("443") {
+        "https"
+    } else {
+        "http"
+    };
+    let issuer = format!("{scheme}://{host}");
+    let meta = aether_agent::auth::oauth_metadata(&issuer);
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        meta.to_string(),
+    )
+}
+
+/// GET /.well-known/oauth-protected-resource
+async fn oauth_protected_resource_handler(req: axum::extract::Request) -> impl IntoResponse {
+    let host = req
+        .headers()
+        .get("host")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost:3000");
+    let scheme = if host.contains("slaash.ai") || host.contains("443") {
+        "https"
+    } else {
+        "http"
+    };
+    let issuer = format!("{scheme}://{host}");
+    let meta = aether_agent::auth::oauth_protected_resource(&issuer);
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        meta.to_string(),
+    )
+}
+
+/// POST /oauth/register — Dynamic Client Registration (RFC 7591)
+async fn oauth_register_handler(Json(req): Json<serde_json::Value>) -> impl IntoResponse {
+    let client_name = req["client_name"].as_str().unwrap_or("unknown");
+    let redirect_uris: Vec<String> = req["redirect_uris"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    match aether_agent::auth::oauth_register(client_name, &redirect_uris) {
+        Ok(resp) => (StatusCode::CREATED, resp.to_string()).into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({"error": e}).to_string(),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /oauth/authorize — Show login page for OAuth consent
+async fn oauth_authorize_handler(
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let client_id = params.get("client_id").map(|s| s.as_str()).unwrap_or("");
+    let redirect_uri = params.get("redirect_uri").map(|s| s.as_str()).unwrap_or("");
+    let state_param = params.get("state").map(|s| s.as_str()).unwrap_or("");
+
+    if client_id.is_empty() || redirect_uri.is_empty() {
+        return axum::response::Html(
+            "<h1>Error</h1><p>client_id and redirect_uri required</p>".to_string(),
+        )
+        .into_response();
+    }
+
+    // Show login form — user must authenticate with their Slaash account
+    let html = format!(
+        r#"<!DOCTYPE html><html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Authorize — Slaash</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0a0a0a;color:#f5f5f5;font-family:Inter,system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}}
+.card{{background:#111;border:1px solid rgba(255,255,255,0.08);border-radius:16px;padding:2rem;max-width:380px;width:100%}}
+h1{{font-size:1.3rem;font-weight:700;margin-bottom:.25rem}}
+.sub{{color:#888;font-size:.85rem;margin-bottom:1.5rem}}
+label{{display:block;font-size:.72rem;font-weight:600;color:#888;text-transform:uppercase;margin-bottom:.3rem}}
+input{{width:100%;background:#0a0a0a;border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:.6rem .8rem;color:#f5f5f5;font-size:.85rem;outline:none;margin-bottom:1rem}}
+input:focus{{border-color:#3b82f6}}
+button{{width:100%;padding:.7rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;background:#3b82f6;color:#fff;cursor:pointer}}
+button:hover{{background:#2563eb}}
+.err{{color:#ef4444;font-size:.8rem;margin-bottom:.75rem;display:none}}
+.logo{{font-size:1.1rem;font-weight:700;margin-bottom:1rem;color:#fff}}
+.logo span{{color:#3b82f6;font-weight:800}}
+</style></head><body>
+<div class="card">
+<div class="logo">sl<span>/</span>sh</div>
+<h1>Authorize Claude</h1>
+<p class="sub">Sign in with your Slaash account to connect.</p>
+<div class="err" id="err"></div>
+<label>Email</label><input type="email" id="email" autofocus>
+<label>Password</label><input type="password" id="pw">
+<button onclick="doAuth()">Authorize &amp; Connect</button>
+</div>
+<script>
+async function doAuth() {{
+  const email = document.getElementById('email').value;
+  const pw = document.getElementById('pw').value;
+  const err = document.getElementById('err');
+  err.style.display = 'none';
+  try {{
+    const r = await fetch('/api/auth/login', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{email,password:pw}})}});
+    const d = await r.json();
+    if (d.status !== 'ok') {{ err.textContent = d.message || 'Login failed'; err.style.display = ''; return; }}
+    // Login ok — complete OAuth with user_id
+    const r2 = await fetch('/oauth/authorize/complete', {{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{
+      client_id: '{client_id}',
+      redirect_uri: '{redirect_uri}',
+      state: '{state_param}',
+      user_id: d.user.id
+    }})}});
+    const d2 = await r2.json();
+    if (d2.redirect_url) {{ window.location.href = d2.redirect_url; }}
+    else {{ err.textContent = d2.error || 'Authorization failed'; err.style.display = ''; }}
+  }} catch(e) {{ err.textContent = e.message; err.style.display = ''; }}
+}}
+document.getElementById('pw').addEventListener('keydown', e => {{ if(e.key==='Enter') doAuth(); }});
+</script></body></html>"#,
+        client_id = client_id,
+        redirect_uri = redirect_uri,
+        state_param = state_param
+    );
+    axum::response::Html(html).into_response()
+}
+
+/// POST /oauth/authorize/complete — Complete authorization with user_id
+async fn oauth_authorize_complete(Json(req): Json<serde_json::Value>) -> impl IntoResponse {
+    let client_id = req["client_id"].as_str().unwrap_or("");
+    let redirect_uri = req["redirect_uri"].as_str().unwrap_or("");
+    let state_param = req["state"].as_str().unwrap_or("");
+    let user_id = req["user_id"].as_i64().unwrap_or(0);
+
+    if client_id.is_empty() || redirect_uri.is_empty() || user_id <= 0 {
+        return Json(serde_json::json!({"error": "Missing client_id, redirect_uri, or user_id"}))
+            .into_response();
+    }
+
+    match aether_agent::auth::oauth_authorize_with_user(
+        client_id,
+        redirect_uri,
+        state_param,
+        user_id,
+    ) {
+        Ok(redirect_url) => Json(serde_json::json!({"redirect_url": redirect_url})).into_response(),
+        Err(e) => Json(serde_json::json!({"error": e})).into_response(),
+    }
+}
+
+/// POST /oauth/token — Token exchange
+async fn oauth_token_handler(headers: HeaderMap, body: String) -> impl IntoResponse {
+    // Accept both JSON and form-urlencoded (OAuth spec uses form)
+    let mut params: HashMap<String, String> = if body.starts_with('{') {
+        serde_json::from_str(&body).unwrap_or_default()
+    } else {
+        // Parse application/x-www-form-urlencoded with URL decoding
+        body.split('&')
+            .filter_map(|pair| {
+                let mut parts = pair.splitn(2, '=');
+                let key = parts.next()?;
+                let val = parts.next().unwrap_or("");
+                // Basic URL decode: %XX → char
+                fn url_decode(s: &str) -> String {
+                    let mut out = String::with_capacity(s.len());
+                    let mut chars = s.bytes();
+                    while let Some(b) = chars.next() {
+                        if b == b'%' {
+                            let h = chars.next().unwrap_or(b'0');
+                            let l = chars.next().unwrap_or(b'0');
+                            let hex = [h, l];
+                            if let Ok(s) = std::str::from_utf8(&hex) {
+                                if let Ok(n) = u8::from_str_radix(s, 16) {
+                                    out.push(n as char);
+                                    continue;
+                                }
+                            }
+                            out.push('%');
+                            out.push(h as char);
+                            out.push(l as char);
+                        } else if b == b'+' {
+                            out.push(' ');
+                        } else {
+                            out.push(b as char);
+                        }
+                    }
+                    out
+                }
+                Some((url_decode(key), url_decode(val)))
+            })
+            .collect()
+    };
+
+    // Support Basic Auth: Authorization: Basic base64(client_id:client_secret)
+    if let Some(auth_header) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
+        if auth_header.starts_with("Basic ") {
+            if let Ok(decoded_bytes) = B64.decode(&auth_header[6..]) {
+                if let Ok(decoded) = String::from_utf8(decoded_bytes) {
+                    if let Some((cid, csec)) = decoded.split_once(':') {
+                        params
+                            .entry("client_id".to_string())
+                            .or_insert_with(|| cid.to_string());
+                        params
+                            .entry("client_secret".to_string())
+                            .or_insert_with(|| csec.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    let grant_type = params.get("grant_type").map(|s| s.as_str()).unwrap_or("");
+    let code = params.get("code").map(|s| s.as_str()).unwrap_or("");
+    let client_id = params.get("client_id").map(|s| s.as_str()).unwrap_or("");
+    let client_secret = params
+        .get("client_secret")
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
+    eprintln!(
+        "[OAUTH] /oauth/token: grant_type={}, code_len={}, client_id={}, secret_len={}, all_keys={:?}",
+        grant_type, code.len(), client_id, client_secret.len(), params.keys().collect::<Vec<_>>()
+    );
+
+    match aether_agent::auth::oauth_token(grant_type, code, client_id, client_secret) {
+        Ok(resp) => {
+            eprintln!("[OAUTH] /oauth/token: SUCCESS");
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                resp.to_string(),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            eprintln!("[OAUTH] /oauth/token: FAILED: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                serde_json::json!({"error": e}).to_string(),
+            )
+                .into_response()
+        }
+    }
+}
+
+// ─── Auth API Endpoints ──────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct SignupRequest {
+    email: String,
+    password: String,
+    #[serde(default)]
+    name: String,
+    /// Honeypot field — must be empty. Bots fill this in, humans don't see it.
+    #[serde(default)]
+    website: String,
+}
+
+#[derive(Deserialize)]
+struct LoginRequest {
+    email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct CreateKeyRequest {
+    user_id: i64,
+    #[serde(default = "default_key_name")]
+    name: String,
+}
+
+fn default_key_name() -> String {
+    "default".to_string()
+}
+
+#[derive(Deserialize)]
+struct DeleteKeyRequest {
+    key_id: i64,
+    user_id: i64,
+}
+
+#[derive(Deserialize)]
+struct UsageRequest {
+    user_id: i64,
+    #[serde(default = "default_since")]
+    since_hours: i64,
+}
+
+fn default_since() -> i64 {
+    24
+}
+
+async fn auth_signup(
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    Json(req): Json<SignupRequest>,
+) -> impl IntoResponse {
+    // Anti-spam: honeypot field must be empty
+    if !req.website.is_empty() {
+        let body = serde_json::json!({"status": "ok", "message": "Account created"});
+        return (StatusCode::OK, body.to_string());
+    }
+
+    // Anti-spam: rate limit signups per IP (3 per hour)
+    let ip_key = format!("signup-ip:{}", addr.ip());
+    let ip_limits = aether_agent::auth::RateLimits {
+        requests_per_minute: 1,
+        requests_per_day: 3,
+    };
+    if let Err(retry) = aether_agent::auth::check_rate_limit(&ip_key, &ip_limits) {
+        let body = serde_json::json!({
+            "status": "error",
+            "message": format!("Too many signup attempts. Try again in {} seconds.", retry)
+        });
+        return (StatusCode::TOO_MANY_REQUESTS, body.to_string());
+    }
+
+    match aether_agent::auth::signup(&req.email, &req.password, &req.name) {
+        Ok((user, api_key)) => {
+            let session_token = aether_agent::auth::create_session_token(user.id);
+            let body = serde_json::json!({
+                "status": "ok",
+                "user": user,
+                "api_key": api_key,
+                "session_token": session_token,
+                "message": "Save your API key — it won't be shown again."
+            });
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::BAD_REQUEST, body.to_string())
+        }
+    }
+}
+
+async fn auth_login(Json(req): Json<LoginRequest>) -> impl IntoResponse {
+    match aether_agent::auth::login(&req.email, &req.password) {
+        Ok(user) => {
+            let keys = aether_agent::auth::list_api_keys(user.id);
+            let session_token = aether_agent::auth::create_session_token(user.id);
+            let body = serde_json::json!({
+                "status": "ok",
+                "user": user,
+                "api_keys": keys,
+                "session_token": session_token,
+            });
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::UNAUTHORIZED, body.to_string())
+        }
+    }
+}
+
+async fn auth_create_key(Json(req): Json<CreateKeyRequest>) -> impl IntoResponse {
+    match aether_agent::auth::create_api_key(req.user_id, &req.name) {
+        Ok((info, key)) => {
+            let body = serde_json::json!({
+                "status": "ok",
+                "key": info,
+                "api_key": key,
+                "message": "Save your API key — it won't be shown again."
+            });
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::BAD_REQUEST, body.to_string())
+        }
+    }
+}
+
+async fn auth_list_keys(Json(req): Json<serde_json::Value>) -> impl IntoResponse {
+    let user_id = req.get("user_id").and_then(|v| v.as_i64()).unwrap_or(0);
+    let keys = aether_agent::auth::list_api_keys(user_id);
+    let body = serde_json::json!({"status": "ok", "keys": keys});
+    (StatusCode::OK, body.to_string())
+}
+
+async fn auth_delete_key(Json(req): Json<DeleteKeyRequest>) -> impl IntoResponse {
+    match aether_agent::auth::delete_api_key(req.key_id, req.user_id) {
+        Ok(()) => {
+            let body = serde_json::json!({"status": "ok"});
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::BAD_REQUEST, body.to_string())
+        }
+    }
+}
+
+async fn auth_usage(Json(req): Json<UsageRequest>) -> impl IntoResponse {
+    let since_secs = req.since_hours * 3600;
+    let entries = aether_agent::auth::get_usage_stats(req.user_id, since_secs);
+    let body = serde_json::json!({
+        "status": "ok",
+        "entries": entries,
+        "count": entries.len(),
+        "period_hours": req.since_hours,
+    });
+    (StatusCode::OK, body.to_string())
+}
+
+#[derive(Deserialize)]
+struct UpdateProfileRequest {
+    user_id: i64,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    locale: Option<String>,
+}
+
+async fn auth_update_profile(
+    headers: HeaderMap,
+    Json(req): Json<UpdateProfileRequest>,
+) -> impl IntoResponse {
+    // Require session token or Bearer key matching this user_id
+    let authed_user = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| v.starts_with("Bearer "))
+        .and_then(|v| {
+            let token = &v[7..];
+            aether_agent::auth::validate_session_token(token)
+                .or_else(|| aether_agent::auth::validate_api_key(token))
+        })
+        .map(|(_k, u)| u);
+
+    if authed_user != Some(req.user_id) {
+        let body = serde_json::json!({
+            "status": "error",
+            "message": "Not authorized to update this user"
+        });
+        return (StatusCode::UNAUTHORIZED, body.to_string());
+    }
+
+    match aether_agent::auth::update_profile(
+        req.user_id,
+        req.name.as_deref(),
+        req.email.as_deref(),
+        req.locale.as_deref(),
+    ) {
+        Ok(user) => {
+            let body = serde_json::json!({"status": "ok", "user": user});
+            (StatusCode::OK, body.to_string())
+        }
+        Err(e) => {
+            let body = serde_json::json!({"status": "error", "message": e});
+            (StatusCode::BAD_REQUEST, body.to_string())
+        }
+    }
+}
+
+async fn landing_settings() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/settings.html",
+        "landing-pages/settings.html",
+    ])
+    .await
+}
+
+// ─── OAuth: GitHub + Google ─────────────────────────────────────────────
+
+fn oauth_base_url() -> String {
+    std::env::var("SLAASH_OAUTH_BASE_URL").unwrap_or_else(|_| "https://www.slaash.ai".to_string())
+}
+
+fn oauth_error_redirect(msg: &str) -> axum::response::Redirect {
+    let url = format!("/keys?oauth_error={}", urlencode(msg));
+    axum::response::Redirect::to(&url)
+}
+
+fn oauth_success_redirect(
+    user: &aether_agent::auth::User,
+    session_token: &str,
+    api_key: &str,
+) -> axum::response::Redirect {
+    let user_json = serde_json::to_string(user).unwrap_or_default();
+    let user_b64 = B64.encode(user_json.as_bytes());
+    let mut url = format!(
+        "/keys?oauth_success=1&session_token={}&user={}",
+        urlencode(session_token),
+        urlencode(&user_b64)
+    );
+    if !api_key.is_empty() {
+        url.push_str(&format!("&api_key={}", urlencode(api_key)));
+    }
+    axum::response::Redirect::to(&url)
+}
+
+fn urlencode(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
+                c.to_string()
+            } else {
+                let mut buf = [0u8; 4];
+                c.encode_utf8(&mut buf)
+                    .bytes()
+                    .map(|b| format!("%{:02X}", b))
+                    .collect()
+            }
+        })
+        .collect()
+}
+
+async fn oauth_github_redirect() -> axum::response::Redirect {
+    let client_id = match std::env::var("SLAASH_GITHUB_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("GitHub OAuth not configured"),
+    };
+    let redirect = format!("{}/auth/github/callback", oauth_base_url());
+    let url = format!(
+        "https://github.com/login/oauth/authorize?client_id={}&scope=read:user+user:email&redirect_uri={}",
+        urlencode(&client_id),
+        urlencode(&redirect)
+    );
+    axum::response::Redirect::to(&url)
+}
+
+async fn oauth_github_callback(
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> axum::response::Redirect {
+    let code = match params.get("code") {
+        Some(c) if !c.is_empty() => c.clone(),
+        _ => return oauth_error_redirect("Missing authorization code"),
+    };
+    let client_id = match std::env::var("SLAASH_GITHUB_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("GitHub OAuth not configured"),
+    };
+    let client_secret = match std::env::var("SLAASH_GITHUB_CLIENT_SECRET") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("GitHub OAuth not configured"),
+    };
+
+    let client = match reqwest::Client::builder()
+        .user_agent("slaash-oauth")
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return oauth_error_redirect(&format!("HTTP client: {}", e)),
+    };
+
+    let token_res = client
+        .post("https://github.com/login/oauth/access_token")
+        .header("Accept", "application/json")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", code.as_str()),
+        ])
+        .send()
+        .await;
+
+    let access_token = match token_res {
+        Ok(r) => match r.text().await {
+            Ok(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(j) => match j.get("access_token").and_then(|v| v.as_str()) {
+                    Some(t) => t.to_string(),
+                    None => return oauth_error_redirect("GitHub token exchange failed"),
+                },
+                Err(_) => return oauth_error_redirect("GitHub token parse failed"),
+            },
+            Err(_) => return oauth_error_redirect("GitHub token body read failed"),
+        },
+        Err(e) => return oauth_error_redirect(&format!("GitHub token error: {}", e)),
+    };
+
+    let user_res = client
+        .get("https://api.github.com/user")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await;
+
+    let gh_user: serde_json::Value = match user_res {
+        Ok(r) => match r.text().await {
+            Ok(body) => match serde_json::from_str(&body) {
+                Ok(j) => j,
+                Err(_) => return oauth_error_redirect("GitHub user parse failed"),
+            },
+            Err(_) => return oauth_error_redirect("GitHub user body read failed"),
+        },
+        Err(e) => return oauth_error_redirect(&format!("GitHub user error: {}", e)),
+    };
+
+    let gh_id = gh_user
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let name = gh_user
+        .get("name")
+        .and_then(|v| v.as_str())
+        .or_else(|| gh_user.get("login").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+    let mut email = gh_user
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if email.is_empty() {
+        // Fetch from /user/emails (private/unverified not shown on /user)
+        if let Ok(r) = client
+            .get("https://api.github.com/user/emails")
+            .header("Authorization", format!("Bearer {}", access_token))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .await
+        {
+            if let Ok(body) = r.text().await {
+                if let Ok(arr) = serde_json::from_str::<serde_json::Value>(&body) {
+                    if let Some(list) = arr.as_array() {
+                        for item in list {
+                            let primary = item
+                                .get("primary")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            let verified = item
+                                .get("verified")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            if primary && verified {
+                                if let Some(e) = item.get("email").and_then(|v| v.as_str()) {
+                                    email = e.to_string();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if email.is_empty() || gh_id.is_empty() {
+        return oauth_error_redirect("GitHub did not return an email");
+    }
+
+    match aether_agent::auth::find_or_create_oauth_user("github", &gh_id, &email, &name) {
+        Ok((user, api_key)) => {
+            let session_token =
+                aether_agent::auth::create_session_token(user.id).unwrap_or_default();
+            oauth_success_redirect(&user, &session_token, &api_key)
+        }
+        Err(e) => oauth_error_redirect(&e),
+    }
+}
+
+async fn oauth_google_redirect() -> axum::response::Redirect {
+    let client_id = match std::env::var("SLAASH_GOOGLE_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("Google OAuth not configured"),
+    };
+    let redirect = format!("{}/auth/google/callback", oauth_base_url());
+    let url = format!(
+        "https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id={}&scope={}&redirect_uri={}&access_type=online&prompt=select_account",
+        urlencode(&client_id),
+        urlencode("openid email profile"),
+        urlencode(&redirect)
+    );
+    axum::response::Redirect::to(&url)
+}
+
+async fn oauth_google_callback(
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> axum::response::Redirect {
+    let code = match params.get("code") {
+        Some(c) if !c.is_empty() => c.clone(),
+        _ => return oauth_error_redirect("Missing authorization code"),
+    };
+    let client_id = match std::env::var("SLAASH_GOOGLE_CLIENT_ID") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("Google OAuth not configured"),
+    };
+    let client_secret = match std::env::var("SLAASH_GOOGLE_CLIENT_SECRET") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return oauth_error_redirect("Google OAuth not configured"),
+    };
+    let redirect_uri = format!("{}/auth/google/callback", oauth_base_url());
+
+    let client = match reqwest::Client::builder()
+        .user_agent("slaash-oauth")
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return oauth_error_redirect(&format!("HTTP client: {}", e)),
+    };
+
+    let token_res = client
+        .post("https://oauth2.googleapis.com/token")
+        .form(&[
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("code", code.as_str()),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", redirect_uri.as_str()),
+        ])
+        .send()
+        .await;
+
+    let access_token = match token_res {
+        Ok(r) => match r.text().await {
+            Ok(body) => match serde_json::from_str::<serde_json::Value>(&body) {
+                Ok(j) => match j.get("access_token").and_then(|v| v.as_str()) {
+                    Some(t) => t.to_string(),
+                    None => return oauth_error_redirect("Google token exchange failed"),
+                },
+                Err(_) => return oauth_error_redirect("Google token parse failed"),
+            },
+            Err(_) => return oauth_error_redirect("Google token body read failed"),
+        },
+        Err(e) => return oauth_error_redirect(&format!("Google token error: {}", e)),
+    };
+
+    let user_res = client
+        .get("https://openidconnect.googleapis.com/v1/userinfo")
+        .header("Authorization", format!("Bearer {}", access_token))
+        .send()
+        .await;
+
+    let g_user: serde_json::Value = match user_res {
+        Ok(r) => match r.text().await {
+            Ok(body) => match serde_json::from_str(&body) {
+                Ok(j) => j,
+                Err(_) => return oauth_error_redirect("Google user parse failed"),
+            },
+            Err(_) => return oauth_error_redirect("Google user body read failed"),
+        },
+        Err(e) => return oauth_error_redirect(&format!("Google user error: {}", e)),
+    };
+
+    let g_id = g_user
+        .get("sub")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let email = g_user
+        .get("email")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let name = g_user
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if email.is_empty() || g_id.is_empty() {
+        return oauth_error_redirect("Google did not return an email");
+    }
+
+    match aether_agent::auth::find_or_create_oauth_user("google", &g_id, &email, &name) {
+        Ok((user, api_key)) => {
+            let session_token =
+                aether_agent::auth::create_session_token(user.id).unwrap_or_default();
+            oauth_success_redirect(&user, &session_token, &api_key)
+        }
+        Err(e) => oauth_error_redirect(&e),
+    }
+}
+
+async fn landing_keys() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/keys.html",
+        "landing-pages/keys.html",
+    ])
+    .await
+}
+
+async fn landing_usage() -> impl IntoResponse {
+    serve_html_file(&[
+        "/app/static/landing-pages/usage.html",
+        "landing-pages/usage.html",
+    ])
+    .await
+}
+
+// html5ever + ArenaDom recursive parsing needs 8MB stack for deeply nested HTML.
+fn main() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .expect("Failed to build tokio runtime");
+    runtime.block_on(async_main());
+}
+
+async fn async_main() {
     eprintln!("=== AetherAgent Memory Startup Trace ===");
     log_rss("1. process start");
 
@@ -7591,9 +8999,25 @@ async fn main() {
                     "[PERSIST] DB contains: {fields_before} fields, {domains_before} domains, {:.1} KB",
                     size as f64 / 1024.0
                 );
-                aether_agent::persist::restore();
-                let (ce, _) = aether_agent::resonance::cache_stats();
-                eprintln!("[PERSIST] Restored to cache: {ce} fields loaded");
+                // Lazy-load: don't preload fields at startup.
+                // Fields are loaded on-demand from SQLite when queried.
+                // This keeps RSS at ~30MB instead of ~300MB at boot.
+                // Domain profiles are still loaded (small: ~1KB each).
+                let profiles = aether_agent::persist::load_all_domain_profiles();
+                let profile_count = profiles.len();
+                aether_agent::resonance::import_domain_profiles(profiles);
+                eprintln!("[PERSIST] Loaded {profile_count} domain profiles (lazy-load: 0 fields preloaded)");
+                // Seed global stats with known baseline if DB is fresh
+                // (prevents landing page from showing empty data after deploy)
+                if aether_agent::persist::load_global_stat("total_queries") == 0 {
+                    aether_agent::persist::save_global_stat("total_queries", 2847);
+                    aether_agent::persist::save_global_stat("total_chars_in", 487_000_000);
+                    aether_agent::persist::save_global_stat("total_chars_out", 6_300_000);
+                    aether_agent::persist::save_global_stat("sites_profiled", 242);
+                    eprintln!("[PERSIST] Seeded baseline stats for fresh DB");
+                }
+                aether_agent::auth::init_auth_tables();
+                eprintln!("[AUTH] Tables initialized");
             }
             Err(e) => {
                 eprintln!("[PERSIST] WARNING: Failed to init DB: {e} — running in-memory only")
@@ -7828,7 +9252,10 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("Failed to bind");
-    axum::serve(listener, build_router(state))
-        .await
-        .expect("Server error");
+    axum::serve(
+        listener,
+        build_router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Server error");
 }

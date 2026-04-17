@@ -24,7 +24,8 @@ const HIGH_RISK_PATTERNS: &[&str] = &[
     "system prompt:",
     "assistant:",
     "you must now",
-    "override:",
+    "override your instructions",
+    "override all previous",
     "jailbreak",
     // Persona-kapning / rollspel
     "you will act as",

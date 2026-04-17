@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<title>API Keys — Slaash Developer Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);--text:#f5f5f5;--muted:#888;--accent:#3b82f6;--green:#22c55e;--red:#ef4444;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.6;min-height:100vh}
+a{color:var(--muted);text-decoration:none}
+a:hover{color:var(--text)}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}
+</style>
+</head>
+<body>
+<nav style="height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 1.5rem;border-bottom:1px solid var(--border);backdrop-filter:blur(16px);background:rgba(10,10,10,0.85)">
+  <a href="/" style="font-size:1.25rem;font-weight:700;color:#fff">sl<span style="color:#3b82f6;font-weight:800">/</span>sh</a>
+  <div style="display:flex;gap:2rem;font-size:.875rem">
+    <a href="/playground">Playground</a>
+    <a href="/keys" style="color:#fff">API Keys</a>
+    <a href="/usage">Usage</a>
+    <a href="/docs">Docs</a>
+  </div>
+</nav>
+
+<main style="max-width:800px;margin:0 auto;padding:3rem 2rem">
+  <!-- Auth Section -->
+  <div id="auth-section">
+    <h1 style="font-size:1.75rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:.5rem">API Keys</h1>
+    <p style="color:var(--muted);margin-bottom:2rem">Sign up or log in to manage your API keys.</p>
+
+    <div style="display:flex;gap:1rem;margin-bottom:1.25rem">
+      <button onclick="showAuth('signup')" id="tab-signup" style="padding:.5rem 1.25rem;border-radius:8px;font-size:.85rem;font-weight:600;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer">Sign Up</button>
+      <button onclick="showAuth('login')" id="tab-login" style="padding:.5rem 1.25rem;border-radius:8px;font-size:.85rem;font-weight:600;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">Log In</button>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:.6rem;margin-bottom:1.25rem">
+      <a href="/auth/github" style="display:flex;align-items:center;justify-content:center;gap:.6rem;padding:.65rem 1rem;border-radius:8px;font-size:.85rem;font-weight:600;border:1px solid var(--border);background:#18181b;color:#fff;text-decoration:none;transition:background .2s" onmouseover="this.style.background='#27272a'" onmouseout="this.style.background='#18181b'">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+        Continue with GitHub
+      </a>
+      <a href="/auth/google" style="display:flex;align-items:center;justify-content:center;gap:.6rem;padding:.65rem 1rem;border-radius:8px;font-size:.85rem;font-weight:600;border:1px solid var(--border);background:#fff;color:#18181b;text-decoration:none;transition:background .2s" onmouseover="this.style.background='#f4f4f5'" onmouseout="this.style.background='#fff'">
+        <svg width="16" height="16" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+        Continue with Google
+      </a>
+    </div>
+
+    <div style="text-align:center;font-size:.72rem;color:var(--muted);margin-bottom:1.25rem;position:relative">
+      <span style="background:var(--bg);padding:0 .75rem;position:relative;z-index:1">or with email</span>
+      <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);z-index:0"></div>
+    </div>
+
+    <div id="form-signup">
+      <div style="margin-bottom:1rem"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">Email</label><input type="email" id="signup-email" placeholder="you@example.com" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
+      <div style="margin-bottom:1rem"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">Password</label><input type="password" id="signup-password" placeholder="Min 6 characters" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
+      <div style="margin-bottom:1rem"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">Name (optional)</label><input type="text" id="signup-name" placeholder="Your name" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
+      <div style="position:absolute;left:-9999px;opacity:0;height:0;overflow:hidden" aria-hidden="true"><label>Website</label><input type="text" id="signup-website" tabindex="-1" autocomplete="off"></div>
+      <button onclick="doSignup()" style="padding:.7rem 2rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;background:var(--accent);color:#fff;cursor:pointer">Create Account</button>
+    </div>
+
+    <div id="form-login" style="display:none">
+      <div style="margin-bottom:1rem"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">Email</label><input type="email" id="login-email" placeholder="you@example.com" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
+      <div style="margin-bottom:1rem"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">Password</label><input type="password" id="login-password" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.65rem .85rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
+      <button onclick="doLogin()" style="padding:.7rem 2rem;border-radius:8px;font-size:.85rem;font-weight:600;border:none;background:var(--accent);color:#fff;cursor:pointer">Log In</button>
+    </div>
+
+    <div id="auth-msg" style="margin-top:1rem;font-size:.85rem"></div>
+  </div>
+
+  <!-- Keys Section (shown after login) -->
+  <div id="keys-section" style="display:none">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem">
+      <h1 style="font-size:1.75rem;font-weight:700;letter-spacing:-0.02em">Your API Keys</h1>
+      <div style="display:flex;gap:.75rem;align-items:center">
+        <span id="user-email" style="font-size:.8rem;color:var(--muted)"></span>
+        <button onclick="logout()" style="padding:.4rem .85rem;border-radius:6px;font-size:.75rem;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">Log out</button>
+      </div>
+    </div>
+
+    <!-- New key alert (shown once after creation) -->
+    <div id="new-key-alert" style="display:none;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:10px;padding:1rem 1.25rem;margin-bottom:1.5rem">
+      <div style="font-size:.85rem;font-weight:600;color:var(--green);margin-bottom:.35rem">API Key Created</div>
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:.5rem">Copy it now — you won't see it again.</div>
+      <code id="new-key-value" style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.5rem .75rem;font-family:var(--mono);font-size:.8rem;color:var(--text);word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)"></code>
+      <div style="font-size:.68rem;color:#555;margin-top:.35rem">Click to copy</div>
+    </div>
+
+    <!-- Rate limits + live usage -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1.5rem">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1rem;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--accent)" id="usage-today">-</div>
+        <div style="font-size:.7rem;color:var(--muted)">requests today</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1rem;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--green)" id="usage-remaining">-</div>
+        <div style="font-size:.7rem;color:var(--muted)">remaining today</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1rem;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700" id="usage-total">-</div>
+        <div style="font-size:.7rem;color:var(--muted)">total all time</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.75rem 1rem;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--muted)">1,000</div>
+        <div style="font-size:.7rem;color:var(--muted)">daily limit</div>
+      </div>
+    </div>
+
+    <!-- Key list -->
+    <div id="keys-list" style="display:flex;flex-direction:column;gap:.5rem"></div>
+
+    <!-- Claude Connector / MCP OAuth -->
+    <div style="margin-top:2rem;margin-bottom:2rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.25rem">
+      <div style="font-size:.9rem;font-weight:600;margin-bottom:.35rem">Claude Connector (MCP)</div>
+      <div style="font-size:.78rem;color:var(--muted);margin-bottom:.75rem;line-height:1.5">Connect Slaash as an MCP tool in Claude. Add this URL in Claude settings &rarr; Connectors &rarr; Add custom connector.</div>
+      <div style="margin-bottom:.75rem">
+        <label style="display:block;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.25rem">MCP Endpoint</label>
+        <code style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;font-family:var(--mono);font-size:.78rem;color:var(--text);cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)">https://www.slaash.ai/mcp</code>
+      </div>
+      <div style="font-size:.72rem;color:var(--muted);margin-bottom:.75rem">Claude auto-discovers OAuth via <code style="font-size:.7rem;color:var(--accent)">/.well-known/oauth-authorization-server</code>. For advanced setup:</div>
+      <div id="oauth-creds" style="display:none">
+        <div style="margin-bottom:.5rem">
+          <label style="display:block;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.25rem">Client ID</label>
+          <code id="oauth-client-id" style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;font-family:var(--mono);font-size:.75rem;color:var(--text);word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)"></code>
+        </div>
+        <div style="margin-bottom:.5rem">
+          <label style="display:block;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.25rem">Client Secret</label>
+          <code id="oauth-client-secret" style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;font-family:var(--mono);font-size:.75rem;color:var(--text);word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)"></code>
+        </div>
+        <div style="margin-bottom:.5rem">
+          <label style="display:block;font-size:.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.25rem">Token Endpoint</label>
+          <code style="display:block;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;font-family:var(--mono);font-size:.75rem;color:var(--text);cursor:pointer" onclick="navigator.clipboard.writeText(this.textContent)">https://www.slaash.ai/oauth/token</code>
+        </div>
+        <div style="font-size:.68rem;color:#555;margin-top:.35rem">Click any value to copy. Credentials expire if unused for 30 days.</div>
+      </div>
+      <button id="btn-gen-oauth" onclick="generateOAuthCreds()" style="padding:.45rem 1rem;border-radius:7px;font-size:.78rem;font-weight:600;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer">Generate OAuth credentials</button>
+    </div>
+
+    <!-- Create new key -->
+    <div style="margin-top:1.5rem;display:flex;gap:.75rem;align-items:end">
+      <div style="flex:1"><label style="display:block;font-size:.72rem;font-weight:600;color:var(--muted);text-transform:uppercase;margin-bottom:.35rem">New Key Name</label><input type="text" id="new-key-name" value="production" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.55rem .75rem;color:var(--text);font-family:var(--font);font-size:.85rem;outline:none"></div>
+      <button onclick="createKey()" style="padding:.55rem 1.25rem;border-radius:8px;font-size:.82rem;font-weight:600;border:none;background:var(--accent);color:#fff;cursor:pointer;white-space:nowrap">+ Create Key</button>
+    </div>
+  </div>
+</main>
+
+<script>
+let currentUser = null;
+
+// Handle OAuth callback (?oauth_success=1&session_token=...&user=<b64>&api_key=...)
+(function handleOAuthCallback() {
+  const p = new URLSearchParams(window.location.search);
+  if (p.get('oauth_error')) {
+    const msg = p.get('oauth_error');
+    setTimeout(() => {
+      const el = document.getElementById('auth-msg');
+      if (el) el.innerHTML = '<span style="color:var(--red)">OAuth: ' + msg + '</span>';
+    }, 50);
+    history.replaceState({}, '', '/keys');
+    return;
+  }
+  if (p.get('oauth_success') === '1') {
+    try {
+      const token = p.get('session_token') || '';
+      const userB64 = p.get('user') || '';
+      const apiKey = p.get('api_key') || '';
+      const user = JSON.parse(atob(userB64));
+      currentUser = user;
+      localStorage.setItem('slaash_user', JSON.stringify(user));
+      if (token) localStorage.setItem('slaash_session_token', token);
+      history.replaceState({}, '', '/keys');
+      setTimeout(() => {
+        showKeys(apiKey || undefined);
+      }, 10);
+      return;
+    } catch(e) {
+      console.error('OAuth callback parse failed', e);
+    }
+  }
+})();
+
+// Restore session from localStorage
+try {
+  const saved = localStorage.getItem('slaash_user');
+  if (saved && !currentUser) {
+    currentUser = JSON.parse(saved);
+    showKeys();
+    loadKeys();
+  }
+} catch(e) {}
+
+function saveSession(user, sessionToken) {
+  currentUser = user;
+  localStorage.setItem('slaash_user', JSON.stringify(user));
+  if (sessionToken) localStorage.setItem('slaash_session_token', sessionToken);
+}
+
+function showAuth(tab) {
+  document.getElementById('form-signup').style.display = tab === 'signup' ? '' : 'none';
+  document.getElementById('form-login').style.display = tab === 'login' ? '' : 'none';
+  document.getElementById('tab-signup').style.background = tab === 'signup' ? 'var(--accent)' : 'transparent';
+  document.getElementById('tab-signup').style.color = tab === 'signup' ? '#fff' : 'var(--muted)';
+  document.getElementById('tab-login').style.background = tab === 'login' ? 'var(--accent)' : 'transparent';
+  document.getElementById('tab-login').style.color = tab === 'login' ? '#fff' : 'var(--muted)';
+}
+
+async function doSignup() {
+  const email = document.getElementById('signup-email').value;
+  const password = document.getElementById('signup-password').value;
+  const name = document.getElementById('signup-name').value;
+  try {
+    const website = document.getElementById('signup-website').value;
+    const res = await fetch('/api/auth/signup', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name,website})});
+    const data = await res.json();
+    if (data.status === 'ok') {
+      saveSession(data.user, data.session_token);
+      showKeys(data.api_key);
+    } else {
+      document.getElementById('auth-msg').innerHTML = '<span style="color:var(--red)">' + data.message + '</span>';
+    }
+  } catch(e) { document.getElementById('auth-msg').innerHTML = '<span style="color:var(--red)">Error: ' + e.message + '</span>'; }
+}
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value;
+  const password = document.getElementById('login-password').value;
+  try {
+    const res = await fetch('/api/auth/login', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
+    const data = await res.json();
+    if (data.status === 'ok') {
+      saveSession(data.user, data.session_token);
+      showKeys();
+      renderKeys(data.api_keys || []);
+    } else {
+      document.getElementById('auth-msg').innerHTML = '<span style="color:var(--red)">' + data.message + '</span>';
+    }
+  } catch(e) { document.getElementById('auth-msg').innerHTML = '<span style="color:var(--red)">Error: ' + e.message + '</span>'; }
+}
+
+function showKeys(newKeyValue) {
+  document.getElementById('auth-section').style.display = 'none';
+  document.getElementById('keys-section').style.display = '';
+  document.getElementById('user-email').textContent = currentUser.email;
+  if (newKeyValue) {
+    document.getElementById('new-key-alert').style.display = '';
+    document.getElementById('new-key-value').textContent = newKeyValue;
+  }
+  loadKeys();
+}
+
+function logout() {
+  currentUser = null;
+  localStorage.removeItem('slaash_user');
+  localStorage.removeItem('slaash_session_token');
+  document.getElementById('auth-section').style.display = '';
+  document.getElementById('keys-section').style.display = 'none';
+  document.getElementById('new-key-alert').style.display = 'none';
+}
+
+async function loadKeys() {
+  if (!currentUser) return;
+  const res = await fetch('/api/auth/keys/list', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:currentUser.id})});
+  const data = await res.json();
+  renderKeys(data.keys || []);
+}
+
+function renderKeys(keys) {
+  // Update usage stats from key data
+  const totalToday = keys.reduce((s, k) => s + (k.requests_today || 0), 0);
+  const totalAll = keys.reduce((s, k) => s + (k.requests_total || 0), 0);
+  document.getElementById('usage-today').textContent = totalToday.toLocaleString();
+  document.getElementById('usage-remaining').textContent = Math.max(0, 1000 - totalToday).toLocaleString();
+  document.getElementById('usage-total').textContent = totalAll.toLocaleString();
+  const remainEl = document.getElementById('usage-remaining');
+  if (1000 - totalToday < 100) remainEl.style.color = 'var(--red)';
+  else if (1000 - totalToday < 300) remainEl.style.color = 'var(--amber)';
+  else remainEl.style.color = 'var(--green)';
+
+  const el = document.getElementById('keys-list');
+  if (keys.length === 0) { el.innerHTML = '<div style="color:var(--muted);font-size:.85rem">No API keys yet.</div>'; return; }
+  el.innerHTML = keys.map(k => `
+    <div style="display:flex;align-items:center;justify-content:space-between;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:.85rem 1.1rem">
+      <div>
+        <div style="font-size:.85rem;font-weight:500">${k.name}</div>
+        <div style="font-family:var(--mono);font-size:.75rem;color:var(--muted)">${k.key_prefix}...</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:1rem;font-size:.72rem;color:var(--muted)">
+        <span>${k.requests_total} requests</span>
+        <span>${k.requests_today} today</span>
+        <button onclick="deleteKey(${k.id})" style="padding:.3rem .6rem;border-radius:5px;font-size:.7rem;border:1px solid rgba(239,68,68,0.2);background:transparent;color:var(--red);cursor:pointer">Revoke</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function createKey() {
+  if (!currentUser) return;
+  const name = document.getElementById('new-key-name').value || 'default';
+  const res = await fetch('/api/auth/keys/create', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:currentUser.id,name})});
+  const data = await res.json();
+  if (data.status === 'ok') {
+    document.getElementById('new-key-alert').style.display = '';
+    document.getElementById('new-key-value').textContent = data.api_key;
+    loadKeys();
+  }
+}
+
+async function generateOAuthCreds() {
+  try {
+    const res = await fetch('/oauth/register', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      client_name: 'claude-connector-' + (currentUser ? currentUser.email : 'user'),
+      redirect_uris: ['https://claude.ai/api/mcp/oauth_callback']
+    })});
+    const data = await res.json();
+    if (data.client_id) {
+      document.getElementById('oauth-client-id').textContent = data.client_id;
+      document.getElementById('oauth-client-secret').textContent = data.client_secret;
+      document.getElementById('oauth-creds').style.display = '';
+      document.getElementById('btn-gen-oauth').style.display = 'none';
+    } else {
+      alert('Failed: ' + (data.error || 'unknown'));
+    }
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deleteKey(keyId) {
+  if (!currentUser || !confirm('Revoke this key? This cannot be undone.')) return;
+  await fetch('/api/auth/keys/delete', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key_id:keyId,user_id:currentUser.id})});
+  document.getElementById('new-key-alert').style.display = 'none';
+  loadKeys();
+}
+</script>
+<script src="/components.js"></script>
+</body>
+</html>

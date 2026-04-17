@@ -1,0 +1,96 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="icon" type="image/svg+xml" href="/favicon.svg"><title>REST API Reference — Slaash Docs</title><meta name="description" content="Full REST API reference for all 12 Slaash primitives."><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"><style>*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}:root{--bg:#0a0a0a;--surface:#111;--border:rgba(255,255,255,0.08);--text:#f5f5f5;--muted:#888;--accent:#3b82f6;--green:#22c55e;--font:Inter,system-ui,sans-serif;--mono:'JetBrains Mono',monospace}html{scroll-behavior:smooth}body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.7}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:3px}nav{position:fixed;top:0;left:0;right:0;z-index:100;padding:1.1rem 2rem;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);background:rgba(10,10,10,0.5);border-bottom:1px solid transparent;transition:padding .4s ease,background .4s ease,border-color .4s ease}nav.scrolled{padding:.7rem 2rem;background:rgba(10,10,10,0.85);border-bottom-color:var(--border)}.wordmark{font-size:1.25rem;font-weight:700;letter-spacing:-0.02em;color:#fff}.wordmark .s{color:var(--accent);font-weight:800}.nav-links{display:flex;align-items:center;gap:2rem;font-size:.875rem}.nav-links a{color:var(--muted);font-weight:500;position:relative;transition:color .25s ease;text-decoration:none}.nav-links a:not(.btn-sm)::after{content:'';position:absolute;left:0;bottom:-3px;width:0;height:1.5px;background:var(--accent);border-radius:1px;transition:width .3s cubic-bezier(0.25,0.46,0.45,0.94)}.nav-links a:not(.btn-sm):hover{color:#fff}.nav-links a:not(.btn-sm):hover::after{width:100%}.nav-links a.active{color:#fff}.nav-links a.btn-sm{color:#fff}.btn-sm{padding:.5rem 1.25rem;border-radius:8px;font-size:.8rem;font-weight:600;border:none;cursor:pointer;background:var(--accent);color:#fff;transition:all .25s ease;text-decoration:none}.btn-sm:hover{background:#2563eb;color:#fff;transform:translateY(-1px)}.doc{max-width:900px;margin:0 auto;padding:6rem 2rem 4rem}.doc h1{font-size:clamp(2rem,4vw,2.75rem);font-weight:800;letter-spacing:-0.03em;margin-bottom:.5rem}.doc .sub{color:var(--muted);font-size:1rem;margin-bottom:2.5rem}.doc h2{font-size:1.5rem;font-weight:700;margin:2.5rem 0 .75rem;padding-top:1rem;border-top:1px solid var(--border)}.doc h3{font-size:.95rem;font-weight:600;margin:1.25rem 0 .5rem}.doc p{color:var(--muted);margin-bottom:1rem;font-size:.9rem}.doc strong{color:var(--text)}.doc code{font-family:var(--mono);font-size:.82rem;background:rgba(255,255,255,0.05);padding:.15rem .4rem;border-radius:4px}.doc pre{background:#0d1117;border:1px solid var(--border);border-radius:10px;padding:1.25rem;font-family:var(--mono);font-size:.78rem;line-height:1.6;overflow-x:auto;margin-bottom:1.5rem;color:#e6edf3}.method{display:inline-block;padding:.15rem .5rem;border-radius:4px;font-size:.7rem;font-weight:700;font-family:var(--mono);margin-right:.5rem;background:rgba(34,197,94,0.15);color:#86efac}.endpoint{font-family:var(--mono);font-size:.85rem;color:var(--text)}</style></head><body>
+<nav><a href="/" class="wordmark">sl<span class="s">/</span>sh</a><div class="nav-links"><a href="/mission">Mission</a><a href="/timeline">Timeline</a><a href="/playground">Playground</a><a href="/docs" class="active">Docs</a><a class="btn-sm" href="/playground">Try Playground</a></div></nav>
+<div class="doc">
+<p style="font-size:.8rem;color:var(--muted);margin-bottom:.5rem"><a href="/docs">&larr; Back to Docs</a></p>
+<h1>REST API Reference</h1>
+<p class="sub">Base URL: <code>https://api.slaash.ai/v1</code> &mdash; All endpoints require <code>Authorization: Bearer sk-...</code></p>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/extract</span></h2>
+<p>Core extraction. URL + goal &rarr; ranked semantic nodes.</p>
+<pre>{
+  "url": "https://example.com",          // required
+  "goal": "what is the price",            // required
+  "options": {
+    "top_n": 20,                          // max nodes (default: 20)
+    "format": "json",                     // "json", "markdown", "toon"
+    "run_js": false,                      // evaluate JavaScript
+    "follow_links": false                 // auto-follow relevant links
+  }
+}</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/learn</span></h2>
+<p>Feedback. Teach which nodes were correct.</p>
+<pre>{
+  "url": "https://example.com",           // must match a previous extract
+  "goal": "what is the price",
+  "node_ids": [5, 12, 23]                 // IDs from extract response
+}</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/search</span></h2>
+<p>Web search via DuckDuckGo + optional deep parse of results.</p>
+<pre>{
+  "query": "latest AI news 2026",
+  "options": { "deep": true, "max_results": 5 }
+}</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/crawl</span></h2>
+<p>Multi-page intelligent crawl with Thompson Sampling.</p>
+<pre>{
+  "url": "https://docs.python.org/3/",
+  "goal": "async programming tutorial",
+  "options": { "max_pages": 10, "max_depth": 3 }
+}</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/act</span></h2>
+<p>Interact with page elements.</p>
+<pre>{
+  "url": "https://shop.example.com",
+  "action": "extract",                    // "click", "fill", "extract"
+  "target": ["price", "title"],
+  "goal": "find product details"
+}</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/plan</span></h2>
+<p>Decompose a goal into ordered steps.</p>
+<pre>{ "goal": "Buy cheapest flight Stockholm to London" }</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/stream</span></h2>
+<p>Token-efficient streaming via WebSocket. 95-99% savings.</p>
+<pre>{ "url": "...", "goal": "...", "options": { "max_nodes": 50 } }</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/diff</span></h2>
+<p>Compare two page snapshots.</p>
+<pre>{ "url": "https://news.site.com", "url2": "https://news.site.com" }</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/render</span></h2>
+<p>Screenshot a page. Returns PNG base64.</p>
+<pre>{ "url": "...", "options": { "width": 1280, "height": 900 } }</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/links</span></h2>
+<p>Discover and rank links on a page.</p>
+<pre>{ "url": "...", "goal": "...", "options": { "max_links": 20 } }</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/explore</span></h2>
+<p>Find hidden API endpoints (XHR/fetch in scripts).</p>
+<pre>{ "url": "..." }</pre>
+
+<h2><span class="method">POST</span> <span class="endpoint">/v1/inspect</span></h2>
+<p>Security check. Injection scan or firewall classification.</p>
+<pre>{ "text": "ignore previous instructions..." }
+// or
+{ "url": "https://suspicious.site" }</pre>
+
+<h2>Response format</h2>
+<p>All responses follow this structure:</p>
+<pre>{
+  "nodes": [...],                         // ranked semantic nodes
+  "node_count": 8,
+  "total_nodes": 5420,                    // original DOM size
+  "parse_time_ms": 42,
+  "token_savings": "99.1%"
+}</pre>
+
+<h2>Error handling</h2>
+<p><code>401</code> — invalid or missing API key. <code>429</code> — rate limit exceeded (includes <code>retry_after</code>). <code>500</code> — server error.</p>
+</div>
+<div data-component="footer"></div><script src="/components.js"></script><script>window.addEventListener("scroll",()=>{const n=document.querySelector("nav");if(n)n.classList.toggle("scrolled",window.scrollY>10)});</script></body></html>
