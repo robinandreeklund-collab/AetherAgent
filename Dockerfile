@@ -4,7 +4,12 @@ FROM ubuntu:24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt-retries: härdar builds mot tillfälliga nätfel (Cloud Build / Render)
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::https::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries
+
+RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     curl ca-certificates \
     pkg-config libssl-dev python3 \
     # Blitz rendering deps: fontconfig for font discovery + mesa for wgpu software backend
@@ -70,7 +75,12 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt-retries: härdar builds mot tillfälliga nätfel (Cloud Build / Render)
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::https::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries
+
+RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     ca-certificates \
     python3-minimal \
     # Fonts for Blitz rendering (system fallback fonts)
