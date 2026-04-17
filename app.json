@@ -7,7 +7,7 @@
       "required": true
     },
     "CHROME_PATH": {
-      "value": "/usr/bin/chromium-browser",
+      "value": "/usr/bin/google-chrome",
       "required": true
     },
     "AETHER_MODEL_URL": {

@@ -85,18 +85,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libegl-mesa0 \
     libgbm1 \
     mesa-vulkan-drivers \
-    # curl for health checks
-    curl \
-    # Chromium for Tier 2 CDP rendering (headless Chrome screenshots)
-    chromium-browser \
+    # curl for health checks and adding Google apt key
+    curl gnupg \
     # ORT (ONNX Runtime) kräver libstdc++ vid runtime
     libstdc++6 \
     fontconfig \
+    && rm -rf /var/lib/apt/lists/*
+
+# Google Chrome stable för Tier 2 CDP rendering.
+# På Ubuntu 24.04 är `chromium-browser` bara en snap-stub som inte fungerar i
+# containrar, så vi installerar Chrome direkt från Googles officiella apt-repo.
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+      | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+      > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -fv
 
-# Chromium sökväg för headless_chrome crate
-ENV CHROME_PATH=/usr/bin/chromium-browser
+# Chrome sökväg för headless_chrome crate
+ENV CHROME_PATH=/usr/bin/google-chrome
 # Force wgpu to use software Vulkan (lavapipe) — no GPU needed
 # Lavapipe provides a full Vulkan 1.3 adapter via mesa
 ENV WGPU_BACKEND=vulkan
