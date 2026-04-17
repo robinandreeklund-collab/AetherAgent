@@ -1,0 +1,66 @@
+# Cloud Build pipeline: bygger Docker-image, pushar till Artifact Registry,
+# och deployar till Cloud Run. Kör med:
+#
+#   gcloud builds submit --config=cloudbuild.yaml --region=us-central1
+#
+# Första bygget tar ~15-25 min (all Rust-kompilering); efterföljande byggen
+# återanvänder Docker-layer-cachen och blir betydligt snabbare.
+
+timeout: 3600s
+
+options:
+  # 8 vCPU, 32 GB RAM — default (1 vCPU) orkar inte kompilera ~300 Rust-deps
+  # inom 1 h. Med E2_HIGHCPU_8 tar bygget ~15-25 min istället för 45-60+ min.
+  machineType: E2_HIGHCPU_8
+  # Större disk för target/-mappen (Rust-kompilering genererar mycket)
+  diskSizeGb: 100
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _REGION: us-central1
+  _REPO: cloud-run-source-deploy
+  _SERVICE: aetheragent
+  # GCS-bucket för Litestream SQLite-replikering. Lämna tomt för ingen persistens.
+  # Skapa bucket med: gcloud storage buckets create gs://<name> --location=${_REGION}
+  _LITESTREAM_BUCKET: ''
+
+steps:
+  # 1. Bygg Docker-image (Dockerfile i repo-roten)
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+      - --tag=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest
+      - .
+
+  # 2. Pusha imagen till Artifact Registry
+  - name: gcr.io/cloud-builders/docker
+    id: push
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}
+
+  # 3. Deploya till Cloud Run
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --memory=2Gi
+      - --cpu=2
+      - --port=10000
+      - --concurrency=40
+      - --max-instances=3
+      - --set-env-vars=RUST_LOG=info,CHROME_PATH=/usr/bin/google-chrome,LITESTREAM_BUCKET=${_LITESTREAM_BUCKET}
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${BUILD_ID}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:latest

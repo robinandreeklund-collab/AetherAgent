@@ -4,7 +4,18 @@ FROM ubuntu:24.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt-retries: härdar builds mot tillfälliga nätfel (Cloud Build / Render)
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::https::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries
+
+# Byt archive.ubuntu.com → mirrors.ubuntu.com (auto-väljer närmaste spegel).
+# Cloud Build us-central1 kan inte alltid nå archive.ubuntu.com direkt, så
+# mirror+-schemat ger apt en lista att prova i turordning.
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|mirror+http://mirrors.ubuntu.com/mirrors.txt|g' \
+    /etc/apt/sources.list.d/ubuntu.sources
+
+RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     curl ca-certificates \
     pkg-config libssl-dev python3 \
     # Blitz rendering deps: fontconfig for font discovery + mesa for wgpu software backend
@@ -70,7 +81,18 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# apt-retries: härdar builds mot tillfälliga nätfel (Cloud Build / Render)
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::https::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries
+
+# Byt archive.ubuntu.com → mirrors.ubuntu.com (auto-väljer närmaste spegel).
+# Cloud Build us-central1 kan inte alltid nå archive.ubuntu.com direkt, så
+# mirror+-schemat ger apt en lista att prova i turordning.
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|mirror+http://mirrors.ubuntu.com/mirrors.txt|g' \
+    /etc/apt/sources.list.d/ubuntu.sources
+
+RUN apt-get update && apt-get install -y --no-install-recommends --fix-missing \
     ca-certificates \
     python3-minimal \
     # Fonts for Blitz rendering (system fallback fonts)
@@ -85,18 +107,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libegl-mesa0 \
     libgbm1 \
     mesa-vulkan-drivers \
-    # curl for health checks
-    curl \
-    # Chromium for Tier 2 CDP rendering (headless Chrome screenshots)
-    chromium-browser \
+    # curl for health checks and adding Google apt key
+    curl gnupg \
     # ORT (ONNX Runtime) kräver libstdc++ vid runtime
     libstdc++6 \
     fontconfig \
+    && rm -rf /var/lib/apt/lists/*
+
+# Google Chrome stable för Tier 2 CDP rendering.
+# På Ubuntu 24.04 är `chromium-browser` bara en snap-stub som inte fungerar i
+# containrar, så vi installerar Chrome direkt från Googles officiella apt-repo.
+RUN curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+      | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+      > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends google-chrome-stable \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -fv
 
-# Chromium sökväg för headless_chrome crate
-ENV CHROME_PATH=/usr/bin/chromium-browser
+# Chrome sökväg för headless_chrome crate
+ENV CHROME_PATH=/usr/bin/google-chrome
 # Force wgpu to use software Vulkan (lavapipe) — no GPU needed
 # Lavapipe provides a full Vulkan 1.3 adapter via mesa
 ENV WGPU_BACKEND=vulkan
@@ -105,6 +136,20 @@ ENV VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json
 
 COPY --from=builder /app/target/server-release/aether-server /usr/local/bin/aether-server
 COPY --from=builder /app/target/server-release/aether-mcp /usr/local/bin/aether-mcp
+
+# ── Litestream för kontinuerlig SQLite-replikering till GCS ──────────────────
+# Cloud Run har ephemeral disk — containers kan dödas när som helst. Litestream
+# streamar varje WAL-write till en GCS-bucket så DB:n överlever restarts.
+# Sätt LITESTREAM_BUCKET env-var i Cloud Run för att aktivera; lämna tomt för
+# att köra utan persistens (t.ex. lokalt).
+ARG LITESTREAM_VERSION=0.3.13
+RUN curl -fsSL "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-amd64.tar.gz" \
+      | tar -xz -C /usr/local/bin litestream \
+    && chmod +x /usr/local/bin/litestream
+
+COPY litestream.yml /etc/litestream.yml
+COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 # ── Static HTML assets (served from disk at runtime) ─────────────────────────
 # Changes to these files do NOT trigger Rust recompilation — only this layer
@@ -130,4 +175,4 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
     CMD curl -f http://localhost:10000/health || exit 1
 
-CMD ["aether-server"]
+CMD ["/usr/local/bin/entrypoint.sh"]

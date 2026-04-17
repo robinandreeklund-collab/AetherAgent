@@ -20,6 +20,10 @@
   <a href="https://render.com/deploy?repo=https://github.com/robinandreeklund-collab/AetherAgent">
     <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render">
   </a>
+  &nbsp;
+  <a href="https://deploy.cloud.run/?git_repo=https://github.com/robinandreeklund-collab/AetherAgent">
+    <img src="https://deploy.cloud.run/button.svg" alt="Run on Google Cloud">
+  </a>
 </p>
 
 ---

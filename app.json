@@ -1,0 +1,36 @@
+{
+  "name": "AetherAgent",
+  "description": "LLM-native embeddable browser engine in Rust — semantic perception + prompt injection protection for AI agents.",
+  "env": {
+    "PORT": {
+      "value": "10000",
+      "required": true
+    },
+    "CHROME_PATH": {
+      "value": "/usr/bin/google-chrome",
+      "required": true
+    },
+    "AETHER_MODEL_URL": {
+      "description": "Public URL to the YOLOv8-nano ONNX model (e.g. a GitHub Release asset). Leave blank to disable vision features.",
+      "required": false
+    },
+    "RUST_LOG": {
+      "value": "info",
+      "required": true
+    }
+  },
+  "options": {
+    "allow-unauthenticated": true,
+    "memory": "2Gi",
+    "cpu": "2",
+    "port": 10000,
+    "http2": false,
+    "concurrency": 40,
+    "max-instances": 3
+  },
+  "hooks": {
+    "postcreate": {
+      "commands": []
+    }
+  }
+}

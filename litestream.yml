@@ -1,0 +1,13 @@
+dbs:
+  - path: /data/aether.db
+    replicas:
+      - type: gcs
+        bucket: ${LITESTREAM_BUCKET}
+        path: aether.db
+        # Sync-intervall: streamar WAL var 1 s till GCS.
+        # Vid container-death förlorar vi max 1 s data.
+        sync-interval: 1s
+        # Kvarhåll 24 h av snapshots — räcker för att rulla tillbaka vid felaktig deploy.
+        retention: 24h
+        # Ta nytt snapshot var 6:e h för snabbare restore.
+        snapshot-interval: 6h
